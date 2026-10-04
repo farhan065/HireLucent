@@ -40,8 +40,50 @@ services:
     networks:
       - hirelucent
 
+  chromadb:
+    image: chromadb/chroma:1.5.3
+    restart: unless-stopped
+    volumes:
+      - chroma_data:/data
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "cat < /dev/null > /dev/tcp/localhost/8000"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hirelucent
+
+  ollama:
+    image: ollama/ollama:0.35.1
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hirelucent
+
+  ollama-pull:
+    image: ollama/ollama:0.35.1
+    restart: "no"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "${EMBEDDING_MODEL}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - hirelucent
+
 volumes:
   postgres_data:
+  chroma_data:
+  ollama_data:
 
 networks:
   hirelucent:

@@ -37,3 +37,7 @@ The name reflects the platform's purpose of bringing clarity to candidate evalua
 | Reset (deletes all data) | `docker compose down -v` |
 
 The API is available at `http://localhost:8000` and its documentation at `http://localhost:8000/docs`.
+
+**First start:** the embedding model (`qwen3-embedding:0.6b`, about 640 MB) is
+downloaded automatically into a Docker volume. This needs an internet connection
+and can take a few minutes. Later starts reuse the downloaded model.
