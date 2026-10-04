@@ -23,7 +23,13 @@ class Settings(BaseSettings):
     app_name: str = "HireLucent API"
     app_version: str = "0.1.0"
     app_env: Literal["development", "test", "production"] = "development"
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    log_service_name: str = "backend"
+    log_dir: str = "logs"
+    log_file_name: str = "hirelucent.log"
+    log_file_max_bytes: int = 5_000_000
+    log_file_backup_count: int = 5
 
 
 @lru_cache
