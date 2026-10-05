@@ -36,12 +36,14 @@ The name reflects the platform's purpose of bringing clarity to candidate evalua
 | Stop (data is kept) | `docker compose down` |
 | Reset (deletes all data) | `docker compose down -v` |
 
-The API is available at `http://localhost:8000` and its documentation at `http://localhost:8000/docs`.
+| What | Address |
+|---|---|
+| Application | http://localhost:3000 |
+| API documentation | http://localhost:8000/docs |
 
 **First start:** the embedding model (`qwen3-embedding:0.6b`, about 640 MB) is
 downloaded automatically into a Docker volume. This needs an internet connection
 and can take a few minutes. Later starts reuse the downloaded model.
-
 
 **First interviewer account:** created automatically at startup from the
 `SEED_INTERVIEWER_*` values in `.env`.
@@ -51,3 +53,17 @@ and can take a few minutes. Later starts reuse the downloaded model.
 ```bash
 docker compose exec backend python -m scripts.seed --sample-data
 ```
+
+## Frontend
+
+The interface is built with **React**, **Vite** and **Tailwind CSS**.
+
+- **React** suits a screen-heavy application with live updates, such as chat,
+  progress indicators and the interview room, and has mature libraries for
+  video (LiveKit) that the interview stage needs.
+- **Vite** gives a fast development server and a small production build.
+- **Tailwind CSS** keeps the design consistent: the colours, fonts, radius and
+  shadows are defined once as design tokens and reused on every screen.
+
+In Docker, the built files are served by **nginx**, which also forwards `/api`
+requests to the backend, so the browser talks to a single address.
