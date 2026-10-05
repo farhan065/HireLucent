@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY alembic.ini .
 COPY alembic ./alembic
 COPY app ./app
+COPY scripts ./scripts
 
 RUN useradd --create-home appuser \
     && mkdir -p /app/logs \
@@ -19,5 +20,5 @@ USER appuser
 
 EXPOSE 8000
 
-# Apply database migrations, then start the API.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Apply migrations, create the first interviewer account, then start the API.
+CMD ["sh", "-c", "alembic upgrade head && python -m scripts.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

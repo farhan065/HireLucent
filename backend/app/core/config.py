@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     postgres_host: str = "postgres"
     postgres_port: int = 5432
 
+    seed_interviewer_email: str | None = None
+    seed_interviewer_password: str | None = None
+    seed_interviewer_name: str = "Interviewer"
+
     @property
     def database_url(self) -> URL:
         """Connection URL for PostgreSQL, built from the separate settings."""

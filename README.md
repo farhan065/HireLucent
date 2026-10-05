@@ -41,3 +41,13 @@ The API is available at `http://localhost:8000` and its documentation at `http:/
 **First start:** the embedding model (`qwen3-embedding:0.6b`, about 640 MB) is
 downloaded automatically into a Docker volume. This needs an internet connection
 and can take a few minutes. Later starts reuse the downloaded model.
+
+
+**First interviewer account:** created automatically at startup from the
+`SEED_INTERVIEWER_*` values in `.env`.
+
+**Sample job (optional):**
+
+```bash
+docker compose exec backend python -m scripts.seed --sample-data
+```
