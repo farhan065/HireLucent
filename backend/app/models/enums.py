@@ -1,0 +1,65 @@
+"""Allowed values for status and type columns."""
+
+from enum import StrEnum
+
+
+class UserRole(StrEnum):
+    INTERVIEWER = "interviewer"
+
+
+class JobStatus(StrEnum):
+    APPROVED = "approved"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+
+
+class CandidateSource(StrEnum):
+    EMAIL = "email"
+    FORM = "form"
+
+
+class CandidateStatus(StrEnum):
+    APPLIED = "applied"
+    SCREENING_FAILED = "screening_failed"
+    EXCLUDED = "excluded"
+    SCREENED = "screened"
+    SHORTLISTED = "shortlisted"
+    SELECTED = "selected"
+    INTERVIEW_SCHEDULED = "interview_scheduled"
+    ASSESSED = "assessed"
+
+
+class Decision(StrEnum):
+    HIRE = "hire"
+    HOLD = "hold"
+    REJECT = "reject"
+
+
+class SessionStatus(StrEnum):
+    SCHEDULED = "scheduled"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class Speaker(StrEnum):
+    INTERVIEWER = "interviewer"
+    CANDIDATE = "candidate"
+
+
+class AssessmentStatus(StrEnum):
+    ANALYSED = "analysed"
+    DRAFT = "draft"
+    APPROVED = "approved"
+
+
+class DocumentType(StrEnum):
+    JD_TEMPLATE = "jd_template"
+    REFERENCE = "reference"
+    QUESTIONS = "questions"
+
+
+class DocumentStatus(StrEnum):
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"

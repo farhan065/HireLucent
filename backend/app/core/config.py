@@ -4,6 +4,7 @@ from functools import lru_cache
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
@@ -30,6 +31,24 @@ class Settings(BaseSettings):
     log_file_name: str = "hirelucent.log"
     log_file_max_bytes: int = 5_000_000
     log_file_backup_count: int = 5
+
+    postgres_user: str
+    postgres_password: str
+    postgres_db: str
+    postgres_host: str = "postgres"
+    postgres_port: int = 5432
+
+    @property
+    def database_url(self) -> URL:
+        """Connection URL for PostgreSQL, built from the separate settings."""
+        return URL.create(
+            drivername="postgresql+psycopg",
+            username=self.postgres_user,
+            password=self.postgres_password,
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
+        )
 
 
 @lru_cache
