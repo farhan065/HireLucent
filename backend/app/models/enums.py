@@ -4,7 +4,10 @@ from enum import StrEnum
 
 
 class UserRole(StrEnum):
+    """The two roles. Only interviewers have a row in the users table."""
+
     INTERVIEWER = "interviewer"
+    CANDIDATE = "candidate"
 
 
 class JobStatus(StrEnum):
