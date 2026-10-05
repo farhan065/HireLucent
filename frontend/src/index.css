@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/figtree";
+
+/* HireLucent design tokens. Each one becomes a Tailwind class,
+   for example --color-brand gives bg-brand, text-brand and border-brand. */
+@theme {
+  --font-display: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-navy: #0b1f4b;
+  --color-brand: #1557e0;
+  --color-brand-dark: #0f45b8;
+  --color-royal: #0a3aa8;
+  --color-body: #51607a;
+  --color-mist: #f4f8ff;
+  --color-tint: #eaf1ff;
+  --color-lavender: #e9eeff;
+  --color-line: #dce5f5;
+
+  --color-success: #0b7a55;
+  --color-success-soft: #e6f6ef;
+  --color-warning: #8a5200;
+  --color-warning-soft: #fff4dc;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+
+  --radius-card: 1.375rem;
+  --shadow-card: 0 10px 30px rgb(11 31 75 / 0.06);
+  --shadow-button: 0 8px 18px rgb(21 87 224 / 0.24);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-white font-sans text-body antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display text-navy;
+  }
+
+  /* Visible keyboard focus on every interactive element. */
+  :focus-visible {
+    outline: 3px solid #a9c8ff;
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}
