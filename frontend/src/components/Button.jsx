@@ -11,8 +11,14 @@ const VARIANTS = {
 }
 
 // Renders a link when "to" is given, otherwise a button.
-export default function Button({ variant = 'primary', to, className = '', ...props }) {
+export default function Button({
+  variant = 'primary',
+  to,
+  type = 'button',
+  className = '',
+  ...props
+}) {
   const classes = `${BASE} ${VARIANTS[variant]} ${className}`
   if (to) return <Link to={to} className={classes} {...props} />
-  return <button type="button" className={classes} {...props} />
+  return <button type={type} className={classes} {...props} />
 }

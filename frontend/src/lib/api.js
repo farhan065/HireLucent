@@ -12,17 +12,25 @@ export class ApiError extends Error {
   }
 }
 
-let accessToken = null
+const TOKEN_KEY = 'hirelucent_access_token'
 
-// The token is kept in memory only, never in localStorage.
+// The token is kept in sessionStorage: it survives a page refresh and is
+// removed when the browser tab is closed.
+export function getAccessToken() {
+  return sessionStorage.getItem(TOKEN_KEY)
+}
+
 export function setAccessToken(token) {
-  accessToken = token
+  if (token) sessionStorage.setItem(TOKEN_KEY, token)
+  else sessionStorage.removeItem(TOKEN_KEY)
 }
 
 export async function apiRequest(path, { method = 'GET', body } = {}) {
   const headers = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
-  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+  
+  const token = getAccessToken()
+  if (token) headers.Authorization = `Bearer ${token}`
 
   let response
   try {

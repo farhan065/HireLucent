@@ -1,5 +1,6 @@
-import { BookOpen, LayoutDashboard } from 'lucide-react'
-import { NavLink, Outlet } from 'react-router'
+import { BookOpen, LayoutDashboard, LogOut } from 'lucide-react'
+import { NavLink, Outlet, useNavigate } from 'react-router'
+import { useAuth } from '../auth/AuthContext.js'
 import Logo from '../components/Logo.jsx'
 
 const NAV_ITEMS = [{ to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true }]
@@ -10,6 +11,34 @@ const UPCOMING_ITEMS = [{ label: 'Knowledge Base', icon: BookOpen }]
 function navClass({ isActive }) {
   const base = 'flex min-h-11 items-center gap-3 rounded-xl px-3.5 text-[15px] font-semibold'
   return isActive ? `${base} bg-tint text-brand-dark` : `${base} text-body hover:bg-mist`
+}
+
+// The signed-in interviewer and the sign-out button.
+function UserPanel() {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  function handleSignOut() {
+    navigate('/')
+    logout()
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-2xl bg-mist p-3 md:mt-auto">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-navy">{user.full_name}</p>
+        <p className="text-[13px] capitalize">{user.role}</p>
+      </div>
+      <button
+        type="button"
+        onClick={handleSignOut}
+        className="flex min-h-10 items-center gap-1.5 rounded-xl px-3 text-sm font-semibold text-brand hover:bg-tint"
+      >
+        <LogOut className="size-4" aria-hidden="true" />
+        Sign out
+      </button>
+    </div>
+  )
 }
 
 // The interviewer workspace: navigation on the left, the current page on the right.
@@ -38,6 +67,7 @@ export default function AppLayout() {
             </span>
           ))}
         </nav>
+        <UserPanel />
       </aside>
       <main className="flex-1 p-6 md:p-10">
         <Outlet />
