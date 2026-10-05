@@ -67,3 +67,14 @@ The interface is built with **React**, **Vite** and **Tailwind CSS**.
 
 In Docker, the built files are served by **nginx**, which also forwards `/api`
 requests to the backend, so the browser talks to a single address.
+
+## External services and data
+
+| Service | Used for | What is sent |
+|---|---|---|
+| Google Gemini API | Text generation and analysis | Prompts, which will include job descriptions, CV text and interview transcripts |
+| Ollama (local container) | Embeddings | Nothing leaves the machine |
+
+The provider and model are set in `.env` (`LLM_PROVIDER`, `LLM_MODEL`,
+`EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`). Prompts and model answers are never
+written to the logs.

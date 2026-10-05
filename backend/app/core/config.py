@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     postgres_host: str = "postgres"
     postgres_port: int = 5432
 
+    # AI models. The provider and model are chosen here, not in the code.
+    llm_provider: Literal["gemini", "openai"] = "gemini"
+    llm_model: str
+    embedding_provider: Literal["ollama", "openai"] = "ollama"
+    embedding_model: str
+    ollama_base_url: str = "http://ollama:11434"
+    gemini_api_key: str | None = None
+    openai_api_key: str | None = None
+    ai_timeout_seconds: int = 60
+    ai_max_attempts: int = 3
+
     jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60
 
