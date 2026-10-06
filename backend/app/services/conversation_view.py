@@ -4,6 +4,7 @@ The conversation is stored as a list of messages. This module reads that
 list and builds the timeline (bubbles, notes and cards) and the job brief.
 """
 
+import json
 from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
@@ -18,6 +19,7 @@ from app.schemas.chat import (
 )
 
 NEW_CONVERSATION_TITLE = "New job"
+SAVE_TOOL = "SaveJob"
 SAVED_PREFIX = "Job saved"
 REJECTED_PREFIX = "The interviewer did not approve"
 
@@ -87,6 +89,11 @@ def build_view(
 def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
     """Walk the messages in order and turn each into bubbles, notes or cards."""
     outcomes = _tool_outcomes(messages)
+    results = {
+        message.tool_call_id: message.text
+        for message in messages
+        if isinstance(message, ToolMessage)
+    }
     items: list[TimelineItem] = []
     version = 0
 
@@ -121,6 +128,9 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
                     TimelineItem(id=item_id, kind="assistant", text=message.text)
                 )
             for call in message.tool_calls:
+                if call["name"] != SAVE_TOOL:
+                    items.append(_search_note(call["id"], results.get(call["id"])))
+                    continue
                 status = outcomes.get(call["id"], "waiting")
                 if status != "invalid":
                     items.append(
@@ -134,6 +144,23 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
 
     _mark_description_status(items)
     return items
+
+
+def _search_note(item_id: str, result: str | None) -> TimelineItem:
+    """A short line saying what the Knowledge Base search found."""
+    if result is not None and not result.startswith("["):
+        return TimelineItem(
+            id=item_id, kind="note", text="The Knowledge Base search was not available."
+        )
+    try:
+        sources = [reference["source"] for reference in json.loads(result or "")]
+    except (ValueError, TypeError, KeyError):
+        sources = []
+    if sources:
+        text = "Checked your Knowledge Base. Using: " + ", ".join(sources)
+    else:
+        text = "Checked your Knowledge Base. No similar template found."
+    return TimelineItem(id=item_id, kind="note", text=text)
 
 
 def _description_item(item_id: str, draft: Any, version: int) -> TimelineItem:

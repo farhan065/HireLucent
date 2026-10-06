@@ -11,7 +11,14 @@ from app.graphs.recruiter import graph as recruiter
 from app.graphs.recruiter.drafts import latest_draft, parse_draft
 from app.graphs.recruiter.prompts import ERROR_REPLY
 from app.graphs.recruiter.tools import save_job
-from tests.helpers import BAD_ARGS, DRAFT_ONE, VALID_ARGS, graph_with_replies, save_call
+from tests.helpers import (
+    BAD_ARGS,
+    DRAFT_ONE,
+    VALID_ARGS,
+    graph_with_replies,
+    save_call,
+    search_call,
+)
 
 
 def _send(graph, config: dict, text: str) -> None:
@@ -178,3 +185,40 @@ def test_saving_needs_a_description() -> None:
 
     with pytest.raises(ConflictError):
         save_job(VALID_ARGS, state)
+
+
+def test_search_runs_without_approval_and_its_result_reaches_the_model(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def fake_call_tool(name: str, arguments: dict) -> list[dict]:
+        calls.append((name, arguments))
+        return [{"source": "backend.txt", "similarity": 0.8, "text": "Template text"}]
+
+    monkeypatch.setattr(recruiter.mcp_client, "call_tool", fake_call_tool)
+    graph = graph_with_replies(monkeypatch, [search_call(), AIMessage(DRAFT_ONE)])
+    config = thread_config("t8")
+
+    _send(graph, config, "I need a backend engineer")
+
+    state = graph.get_state(config)
+    assert state.next == ()
+    assert calls == [("search_jd_references", {"query": "backend engineer python"})]
+    assert "backend.txt" in state.values["messages"][-2].content
+    assert latest_draft(state.values["messages"]).title == "Backend Engineer"
+
+
+def test_the_assistant_continues_when_search_is_unavailable(monkeypatch) -> None:
+    def broken_call_tool(name: str, arguments: dict) -> list[dict]:
+        raise ConnectionError("server down")
+
+    monkeypatch.setattr(recruiter.mcp_client, "call_tool", broken_call_tool)
+    graph = graph_with_replies(monkeypatch, [search_call(), AIMessage(DRAFT_ONE)])
+    config = thread_config("t9")
+
+    _send(graph, config, "I need a backend engineer")
+
+    state = graph.get_state(config)
+    assert state.values["messages"][-2].content == recruiter.SEARCH_UNAVAILABLE
+    assert latest_draft(state.values["messages"]).title == "Backend Engineer"

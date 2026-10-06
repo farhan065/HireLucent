@@ -65,3 +65,11 @@ def graph_with_replies(monkeypatch, replies: list[AIMessage], saved: list | None
         recruiter.TOOL_HANDLERS, "SaveJob", fake_save_job([] if saved is None else saved)
     )
     return recruiter.build_recruiter_graph(InMemorySaver())
+
+
+def search_call(query: str = "backend engineer python", call_id: str = "search-1") -> AIMessage:
+    """A model reply that asks to search the job description references."""
+    return AIMessage(
+        content="",
+        tool_calls=[{"name": "search_jd_references", "args": {"query": query}, "id": call_id}],
+    )
