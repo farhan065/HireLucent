@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     chroma_port: int = 8000
     max_upload_mb: int = Field(default=10, ge=1)
 
+    # The RAG MCP server, which gives the assistant its search tools.
+    mcp_rag_url: str = "http://mcp-rag:8001/mcp"
+    mcp_rag_port: int = 8001
+    # How close a stored job description must be to count as a reference.
+    # Cosine distance: 0 is identical, 1 is unrelated.
+    jd_reference_max_distance: float = Field(default=0.6, ge=0, le=2)
+
     jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60
 
