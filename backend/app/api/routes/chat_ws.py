@@ -6,11 +6,12 @@ The browser sends JSON messages and receives JSON events:
         {"type": "auth", "token": "..."}                  first message
         {"type": "message", "thread_id": null, "text": "..."}
         {"type": "approval", "thread_id": "...", "approved": true}
+        {"type": "edit_description", "thread_id": "...", "title": "...", "text": "..."}
 
     server -> browser
         {"type": "ready"}                                 signed in
         {"type": "token", "text": "..."}                  a piece of the reply
-        {"type": "turn", "status": ..., "reply": ...}     the finished turn
+        {"type": "view", "items": [...], "brief": {...}}  the conversation now
         {"type": "error", "message": "..."}
 """
 
@@ -54,15 +55,21 @@ def _events(
     graph: CompiledStateGraph, user_id: int, message: SocketMessage
 ) -> Iterator[dict[str, Any]]:
     """Choose the chat service call that matches the browser's message."""
+    thread_id = message.thread_id or ""
     if message.type == "approval":
         return chat_service.stream_approval(
             graph,
             user_id,
-            message.thread_id or "",
+            thread_id,
             bool(message.approved),
             message.feedback,
             message.arguments,
         )
+    if message.type == "edit_description":
+        view = chat_service.edit_description(
+            graph, user_id, thread_id, message.title or "", message.text or ""
+        )
+        return iter([{"type": "view", **view.model_dump()}])
     return chat_service.stream_message(
         graph, user_id, message.thread_id, message.text or ""
     )
