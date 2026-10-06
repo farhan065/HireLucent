@@ -103,3 +103,33 @@
     animation: none;
   }
 }
+
+/* A brief light-blue outline on a part of the job brief that just changed. */
+@keyframes highlight {
+  from {
+    background-color: var(--color-tint);
+    box-shadow: 0 0 0 2px #a9c8ff;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@utility animate-highlight {
+  animation: highlight 2s ease-out both;
+}
+
+@utility animate-slide-in {
+  animation: slide-in 0.2s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-highlight,
+  .animate-slide-in {
+    animation: none;
+  }
+}

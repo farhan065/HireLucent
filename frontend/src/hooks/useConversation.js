@@ -7,7 +7,7 @@ const CONNECTION_LOST = 'Connection lost. Reconnecting…'
 // Everything the Hiring Assistant screen needs for one conversation:
 // the current view from the server, the reply being written, and the
 // actions the interviewer can take.
-export function useConversation(threadId, onStarted) {
+export function useConversation(threadId, onStarted, firstMessage) {
   const [view, setView] = useState(null)
   const [streamingText, setStreamingText] = useState('')
   const [pendingText, setPendingText] = useState('')
@@ -17,6 +17,9 @@ export function useConversation(threadId, onStarted) {
   const socketRef = useRef(null)
   const threadIdRef = useRef(threadId)
   const onStartedRef = useRef(onStarted)
+  // A message to send as soon as the connection is ready, used when a job is
+  // started from the dashboard.
+  const firstMessageRef = useRef(firstMessage)
 
   useEffect(() => {
     threadIdRef.current = threadId
@@ -45,7 +48,18 @@ export function useConversation(threadId, onStarted) {
       setIsBusy(false)
     }
 
-    socketRef.current = openChatSocket({ onEvent: handleEvent, onStatus: setStatus })
+    function handleStatus(newStatus) {
+      setStatus(newStatus)
+      const text = firstMessageRef.current
+      if (newStatus === 'connected' && text) {
+        firstMessageRef.current = null
+        socketRef.current.send({ type: 'message', thread_id: null, text })
+        setPendingText(text)
+        setIsBusy(true)
+      }
+    }
+
+    socketRef.current = openChatSocket({ onEvent: handleEvent, onStatus: handleStatus })
     return () => socketRef.current.close()
   }, [])
 
