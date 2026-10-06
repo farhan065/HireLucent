@@ -26,6 +26,17 @@ AI_UNAVAILABLE_MESSAGE = (
     "The AI service is not responding right now. Please try again in a moment."
 )
 RETRY_WAIT_SECONDS = 2
+# A rate limit resets within a minute, so a short wait would only fail again.
+RATE_LIMIT_WAIT_SECONDS = 20
+
+
+def is_rate_limit(exc: Exception) -> bool:
+    """True if the provider refused the call for sending too many requests."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(
+        marker in text
+        for marker in ("429", "resource_exhausted", "resourceexhausted", "ratelimit")
+    )
 
 
 def run_with_retries(operation: str, call: Callable[[], T]) -> T:
@@ -38,6 +49,7 @@ def run_with_retries(operation: str, call: Callable[[], T]) -> T:
         try:
             return call()
         except Exception as exc:
+            rate_limited = is_rate_limit(exc)
             log_event(
                 logger,
                 "ai_call_failed",
@@ -46,10 +58,13 @@ def run_with_retries(operation: str, call: Callable[[], T]) -> T:
                 attempt=attempt,
                 max_attempts=max_attempts,
                 error_type=type(exc).__name__,
+                rate_limited=rate_limited,
             )
             if attempt == max_attempts:
                 raise ServiceUnavailableError(AI_UNAVAILABLE_MESSAGE) from exc
-            time.sleep(RETRY_WAIT_SECONDS * attempt)
+            time.sleep(
+                RATE_LIMIT_WAIT_SECONDS if rate_limited else RETRY_WAIT_SECONDS * attempt
+            )
     raise ServiceUnavailableError(AI_UNAVAILABLE_MESSAGE)
 
 

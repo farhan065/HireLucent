@@ -4,7 +4,6 @@ from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
@@ -50,10 +49,13 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     ai_timeout_seconds: int = 60
     ai_max_attempts: int = 3
+    # The provider's limit for your model. Calls are paced to stay under it.
+    llm_requests_per_minute: int = Field(default=15, ge=1)
 
     jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60
 
+    # First interviewer account, created by the seed script if it is missing.
     seed_interviewer_email: str | None = None
     seed_interviewer_password: str | None = None
     seed_interviewer_name: str = "Interviewer"
@@ -76,6 +78,7 @@ class Settings(BaseSettings):
         return self.database_url.set(drivername="postgresql").render_as_string(
             hide_password=False
         )
+
 
 @lru_cache
 def get_settings() -> Settings:

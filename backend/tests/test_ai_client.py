@@ -4,6 +4,7 @@ import pytest
 from langchain_core.language_models import FakeListChatModel
 
 from app.ai import client
+from app.ai.models import build_rate_limiter
 from app.core.errors import ServiceUnavailableError
 
 
@@ -15,9 +16,11 @@ class FakeEmbeddingModel:
 
 
 @pytest.fixture(autouse=True)
-def no_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Skip the wait between retries so the tests run instantly."""
-    monkeypatch.setattr(client.time, "sleep", lambda seconds: None)
+def waits(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Skip the wait between retries, and record how long each would be."""
+    recorded: list[float] = []
+    monkeypatch.setattr(client.time, "sleep", recorded.append)
+    return recorded
 
 
 def test_returns_the_result_when_the_call_works() -> None:
@@ -68,3 +71,35 @@ def test_embed_texts_returns_one_vector_per_text(
 
     assert len(vectors) == 2
     assert len(vectors[0]) == 8
+
+
+def test_rate_limit_errors_are_recognised() -> None:
+    assert client.is_rate_limit(RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded"))
+    assert not client.is_rate_limit(ConnectionError("network unreachable"))
+
+
+def test_a_rate_limit_waits_longer_before_retrying(waits: list[float]) -> None:
+    def limited_call() -> str:
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    with pytest.raises(ServiceUnavailableError):
+        client.run_with_retries("test", limited_call)
+
+    assert waits == [client.RATE_LIMIT_WAIT_SECONDS, client.RATE_LIMIT_WAIT_SECONDS]
+
+
+def test_other_errors_wait_briefly_before_retrying(waits: list[float]) -> None:
+    def failing_call() -> str:
+        raise ConnectionError("network unreachable")
+
+    with pytest.raises(ServiceUnavailableError):
+        client.run_with_retries("test", failing_call)
+
+    assert waits == [2, 4]
+
+
+def test_calls_are_paced_to_the_per_minute_limit() -> None:
+    limiter = build_rate_limiter(requests_per_minute=15)
+
+    assert limiter.requests_per_second == 0.25
+    assert limiter.max_bucket_size == 1
