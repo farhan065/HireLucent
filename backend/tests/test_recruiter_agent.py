@@ -1,131 +1,97 @@
 """Tests for the Recruiter Agent graph, using a scripted fake model."""
 
 import pytest
-from langchain_core.language_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+from app.core.errors import ConflictError
 from app.graphs.base import thread_config
 from app.graphs.recruiter import graph as recruiter
+from app.graphs.recruiter.drafts import latest_draft, parse_draft
 from app.graphs.recruiter.prompts import ERROR_REPLY
-
-VALID_ARGS = {
-    "title": "Backend Engineer",
-    "jd_text": "We are hiring a Backend Engineer to build and maintain REST APIs.",
-    "requirements": {
-        "min_experience_years": 2,
-        "items": [
-            {
-                "id": "R1",
-                "text": "Python web development",
-                "category": "technical_skills",
-                "priority": "must_have",
-                "keywords": ["python", "django"],
-            }
-        ],
-    },
-    "scoring_weights": {"technical_skills": 0.5, "experience": 0.3, "qualifications": 0.2},
-}
-
-
-def _save_call(args: dict, call_id: str = "call-1") -> AIMessage:
-    return AIMessage(
-        content="", tool_calls=[{"name": "SaveJob", "args": args, "id": call_id}]
-    )
-
-
-@pytest.fixture()
-def saved_jobs(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
-    """Replace the real save tool with one that records what it was given."""
-    saved: list[dict] = []
-
-    def fake_save_job(arguments: dict, state: dict) -> tuple[str, dict]:
-        recruiter.TOOL_SCHEMAS[0].model_validate(arguments)
-        saved.append({"arguments": arguments, "user_id": state["user_id"]})
-        return "Job saved with job code HL-BE-01.", {"saved_job_id": 7}
-
-    monkeypatch.setitem(recruiter.TOOL_HANDLERS, "SaveJob", fake_save_job)
-    return saved
-
-
-def _graph_with_replies(monkeypatch: pytest.MonkeyPatch, replies: list[AIMessage]):
-    model = FakeMessagesListChatModel(responses=replies)
-    monkeypatch.setattr(recruiter, "get_agent_model", lambda: model)
-    return recruiter.build_recruiter_graph(InMemorySaver())
+from app.graphs.recruiter.tools import save_job
+from tests.helpers import BAD_ARGS, DRAFT_ONE, VALID_ARGS, graph_with_replies, save_call
 
 
 def _send(graph, config: dict, text: str) -> None:
     graph.invoke({"messages": [HumanMessage(text)], "user_id": 1}, config)
 
 
-def test_plain_answer_goes_straight_to_respond(monkeypatch, saved_jobs) -> None:
-    graph = _graph_with_replies(monkeypatch, [AIMessage("Here is a draft.")])
+def test_plain_answer_goes_straight_to_respond(monkeypatch) -> None:
+    saved: list[dict] = []
+    graph = graph_with_replies(monkeypatch, [AIMessage(DRAFT_ONE)], saved)
     config = thread_config("t1")
 
     _send(graph, config, "I need a backend engineer")
 
     state = graph.get_state(config)
     assert state.next == ()
-    assert state.values["messages"][-1].content == "Here is a draft."
-    assert saved_jobs == []
+    assert latest_draft(state.values["messages"]).title == "Backend Engineer"
+    assert saved == []
 
 
-def test_saving_waits_for_approval_then_runs(monkeypatch, saved_jobs) -> None:
-    graph = _graph_with_replies(
-        monkeypatch, [_save_call(VALID_ARGS), AIMessage("Saved as HL-BE-01.")]
+def test_saving_waits_for_approval_then_runs(monkeypatch) -> None:
+    saved: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch, [save_call(VALID_ARGS), AIMessage("Saved as HL-BE-01.")], saved
     )
     config = thread_config("t2")
 
     _send(graph, config, "I approve")
-    paused = graph.get_state(config)
-    assert paused.next == ("human_approval",)
-    assert saved_jobs == []
+    assert graph.get_state(config).next == ("human_approval",)
+    assert saved == []
 
     graph.invoke(Command(resume={"approved": True}), config)
     finished = graph.get_state(config)
     assert finished.next == ()
     assert finished.values["saved_job_id"] == 7
-    assert finished.values["messages"][-1].content == "Saved as HL-BE-01."
-    assert saved_jobs[0]["user_id"] == 1
+    assert saved[0]["user_id"] == 1
 
 
-def test_interviewer_edits_are_used_when_approving(monkeypatch, saved_jobs) -> None:
-    graph = _graph_with_replies(
-        monkeypatch, [_save_call(VALID_ARGS), AIMessage("Saved.")]
+def test_interviewer_edits_are_used_when_approving(monkeypatch) -> None:
+    saved: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch, [save_call(VALID_ARGS), AIMessage("Saved.")], saved
     )
     config = thread_config("t3")
-    edited = {**VALID_ARGS, "title": "Senior Backend Engineer"}
+    edited = {
+        **VALID_ARGS,
+        "scoring_weights": {
+            "technical_skills": 0.6,
+            "experience": 0.3,
+            "qualifications": 0.1,
+        },
+    }
 
     _send(graph, config, "I approve")
     graph.invoke(Command(resume={"approved": True, "arguments": edited}), config)
 
-    assert saved_jobs[0]["arguments"]["title"] == "Senior Backend Engineer"
+    assert saved[0]["arguments"]["scoring_weights"]["technical_skills"] == 0.6
 
 
-def test_rejection_returns_to_the_agent_without_saving(monkeypatch, saved_jobs) -> None:
-    graph = _graph_with_replies(
-        monkeypatch, [_save_call(VALID_ARGS), AIMessage("What should I change?")]
+def test_rejection_returns_to_the_agent_without_saving(monkeypatch) -> None:
+    saved: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch, [save_call(VALID_ARGS), AIMessage("What should I change?")], saved
     )
     config = thread_config("t4")
 
     _send(graph, config, "I approve")
-    graph.invoke(
-        Command(resume={"approved": False, "feedback": "Add Docker"}), config
-    )
+    graph.invoke(Command(resume={"approved": False, "feedback": "Add Docker"}), config)
 
     state = graph.get_state(config)
     assert state.next == ()
-    assert saved_jobs == []
+    assert saved == []
     assert "Add Docker" in state.values["messages"][-2].content
-    assert state.values["messages"][-1].content == "What should I change?"
 
 
-def test_invalid_details_are_sent_back_for_correction(monkeypatch, saved_jobs) -> None:
-    bad_args = {**VALID_ARGS, "scoring_weights": {"technical_skills": 0.9, "experience": 0.9, "qualifications": 0.9}}
-    graph = _graph_with_replies(
+def test_invalid_details_are_sent_back_for_correction(monkeypatch) -> None:
+    saved: list[dict] = []
+    graph = graph_with_replies(
         monkeypatch,
-        [_save_call(bad_args, "c1"), _save_call(VALID_ARGS, "c2"), AIMessage("Saved.")],
+        [save_call(BAD_ARGS, "c1"), save_call(VALID_ARGS, "c2"), AIMessage("Saved.")],
+        saved,
     )
     config = thread_config("t5")
 
@@ -136,14 +102,14 @@ def test_invalid_details_are_sent_back_for_correction(monkeypatch, saved_jobs) -
     graph.invoke(Command(resume={"approved": True}), config)
     state = graph.get_state(config)
     assert state.next == ()
-    assert len(saved_jobs) == 1
+    assert len(saved) == 1
     assert state.values["attempts"] == 1
 
 
-def test_repeated_failures_end_with_a_clear_message(monkeypatch, saved_jobs) -> None:
-    bad_args = {**VALID_ARGS, "title": "x"}
-    graph = _graph_with_replies(
-        monkeypatch, [_save_call(bad_args, f"c{i}") for i in range(3)]
+def test_repeated_failures_end_with_a_clear_message(monkeypatch) -> None:
+    saved: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch, [save_call(BAD_ARGS, f"c{i}") for i in range(3)], saved
     )
     config = thread_config("t6")
 
@@ -153,11 +119,11 @@ def test_repeated_failures_end_with_a_clear_message(monkeypatch, saved_jobs) -> 
 
     state = graph.get_state(config)
     assert state.next == ()
-    assert saved_jobs == []
+    assert saved == []
     assert state.values["messages"][-1].content == ERROR_REPLY
 
 
-def test_model_failure_gives_a_clear_message(monkeypatch, saved_jobs) -> None:
+def test_model_failure_gives_a_clear_message(monkeypatch) -> None:
     def broken_model():
         raise ConnectionError("no network")
 
@@ -169,3 +135,29 @@ def test_model_failure_gives_a_clear_message(monkeypatch, saved_jobs) -> None:
     _send(graph, config, "Hello")
 
     assert graph.get_state(config).values["messages"][-1].content == ERROR_REPLY
+
+
+def test_draft_is_found_after_an_introduction() -> None:
+    draft = parse_draft("Here is a draft.\n# Backend Engineer\n\n## About\nBuild APIs.")
+
+    assert draft.preamble == "Here is a draft."
+    assert draft.title == "Backend Engineer"
+    assert draft.body == "## About\nBuild APIs."
+
+
+def test_a_plain_reply_is_not_a_draft() -> None:
+    assert parse_draft("Which seniority level do you need?") is None
+
+
+def test_a_conversation_cannot_save_a_second_job() -> None:
+    state = {"saved_job_id": 7, "user_id": 1, "messages": [AIMessage(DRAFT_ONE)]}
+
+    with pytest.raises(ConflictError):
+        save_job(VALID_ARGS, state)
+
+
+def test_saving_needs_a_description() -> None:
+    state = {"user_id": 1, "messages": [HumanMessage("I approve")]}
+
+    with pytest.raises(ConflictError):
+        save_job(VALID_ARGS, state)

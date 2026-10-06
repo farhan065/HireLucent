@@ -1,78 +1,167 @@
-"""Tests for the chat service, using a scripted fake model."""
+"""Tests for the chat service and the conversation view."""
 
 import pytest
-from langchain_core.language_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
-from langgraph.checkpoint.memory import InMemorySaver
 
 from app.core.errors import ConflictError, NotFoundError
-from app.graphs.recruiter import graph as recruiter
 from app.services import chat_service
-from tests.test_recruiter_agent import VALID_ARGS, _save_call
+from tests.helpers import DRAFT_ONE, DRAFT_TWO, VALID_ARGS, graph_with_replies, save_call
 
 
-@pytest.fixture()
-def graph_with(monkeypatch: pytest.MonkeyPatch):
-    def build(replies: list[AIMessage]):
-        model = FakeMessagesListChatModel(responses=replies)
-        monkeypatch.setattr(recruiter, "get_agent_model", lambda: model)
-        monkeypatch.setitem(
-            recruiter.TOOL_HANDLERS,
-            "SaveJob",
-            lambda arguments, state: ("Job saved with job code HL-BE-01.", {"saved_job_id": 7}),
-        )
-        return recruiter.build_recruiter_graph(InMemorySaver())
-
-    return build
+def _kinds(view) -> list[str]:
+    return [item.kind for item in view.items]
 
 
-def test_conversation_continues_in_the_same_thread(graph_with) -> None:
-    graph = graph_with([AIMessage("Draft one."), AIMessage("Draft two.")])
+def test_first_draft_is_shown_as_a_description_card(monkeypatch) -> None:
+    graph = graph_with_replies(monkeypatch, [AIMessage(DRAFT_ONE)])
+
+    view = chat_service.send_message(graph, 1, None, "I need a backend engineer")
+
+    assert view.stage == "reviewing_description"
+    assert view.title == "Backend Engineer"
+    assert _kinds(view) == ["user", "description"]
+    card = view.items[-1]
+    assert (card.version, card.status, card.title) == (1, "waiting", "Backend Engineer")
+    assert view.brief.description.status == "waiting"
+
+
+def test_a_question_from_the_assistant_is_a_normal_reply(monkeypatch) -> None:
+    graph = graph_with_replies(monkeypatch, [AIMessage("Which seniority level?")])
+
+    view = chat_service.send_message(graph, 1, None, "I need an engineer")
+
+    assert view.stage == "describing"
+    assert _kinds(view) == ["user", "assistant"]
+    assert view.brief.description is None
+
+
+def test_a_revision_replaces_the_earlier_draft(monkeypatch) -> None:
+    graph = graph_with_replies(monkeypatch, [AIMessage(DRAFT_ONE), AIMessage(DRAFT_TWO)])
 
     first = chat_service.send_message(graph, 1, None, "I need a backend engineer")
-    second = chat_service.send_message(graph, 1, first.thread_id, "Make it senior")
+    view = chat_service.send_message(graph, 1, first.thread_id, "Make it senior")
 
-    assert first.status == "replied"
-    assert first.reply == "Draft one."
-    assert second.thread_id == first.thread_id
-    assert second.reply == "Draft two."
-
-
-def test_approval_flow_returns_the_saved_job(graph_with) -> None:
-    graph = graph_with([_save_call(VALID_ARGS), AIMessage("Saved as HL-BE-01.")])
-
-    waiting = chat_service.send_message(graph, 1, None, "I approve")
-    assert waiting.status == "waiting_for_approval"
-    assert waiting.pending_action.action == "SaveJob"
-    assert waiting.pending_action.arguments["title"] == "Backend Engineer"
-
-    done = chat_service.submit_approval(graph, 1, waiting.thread_id, True, None, None)
-    assert done.status == "replied"
-    assert done.job_id == 7
-    assert done.reply == "Saved as HL-BE-01."
+    cards = [item for item in view.items if item.kind == "description"]
+    assert [(card.version, card.status) for card in cards] == [
+        (1, "replaced"),
+        (2, "waiting"),
+    ]
+    assert view.brief.description.title == "Senior Backend Engineer"
 
 
-def test_a_new_message_while_waiting_counts_as_a_change_request(graph_with) -> None:
-    graph = graph_with([_save_call(VALID_ARGS), AIMessage("Updated the draft.")])
+def test_direct_edit_becomes_a_new_draft_without_calling_the_model(monkeypatch) -> None:
+    graph = graph_with_replies(monkeypatch, [AIMessage(DRAFT_ONE)])
+    first = chat_service.send_message(graph, 1, None, "I need a backend engineer")
 
-    waiting = chat_service.send_message(graph, 1, None, "I approve")
-    after = chat_service.send_message(graph, 1, waiting.thread_id, "Wait, add Docker")
+    view = chat_service.edit_description(
+        graph, 1, first.thread_id, "Backend Engineer (Python)", "## About\nEdited text."
+    )
 
-    assert after.status == "replied"
-    assert after.job_id is None
-    assert after.reply == "Updated the draft."
+    assert _kinds(view)[-2:] == ["note", "description"]
+    assert "Saved as draft 2" in view.items[-2].text
+    card = view.items[-1]
+    assert (card.version, card.status) == (2, "waiting")
+    assert card.title == "Backend Engineer (Python)"
+    assert card.text == "## About\nEdited text."
+    assert view.stage == "reviewing_description"
 
 
-def test_another_user_cannot_use_the_conversation(graph_with) -> None:
-    graph = graph_with([AIMessage("Draft.")])
+def test_approval_flow_saves_the_job(monkeypatch) -> None:
+    saved: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch,
+        [AIMessage(DRAFT_ONE), save_call(VALID_ARGS), AIMessage("Saved as HL-BE-01.")],
+        saved,
+    )
+    first = chat_service.send_message(graph, 1, None, "I need a backend engineer")
+
+    waiting = chat_service.send_message(graph, 1, first.thread_id, "I approve this.")
+    assert waiting.stage == "confirming_requirements"
+    assert waiting.items[-1].kind == "requirements"
+    assert waiting.items[-1].status == "waiting"
+    assert waiting.brief.requirements_status == "proposed"
+    assert waiting.brief.description.status == "approved"
+    assert saved == []
+
+    done = chat_service.submit_approval(graph, 1, first.thread_id, True, None, None)
+    assert done.stage == "saved"
+    assert done.brief.job_id == 7
+    assert done.brief.job_code == "HL-BE-01"
+    assert done.brief.requirements_status == "confirmed"
+    assert done.items[-1].text == "Saved as HL-BE-01."
+    assert len(saved) == 1
+
+
+def test_typing_a_clear_yes_confirms(monkeypatch) -> None:
+    saved: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch,
+        [AIMessage(DRAFT_ONE), save_call(VALID_ARGS), AIMessage("Saved.")],
+        saved,
+    )
+    first = chat_service.send_message(graph, 1, None, "I need a backend engineer")
+    chat_service.send_message(graph, 1, first.thread_id, "I approve this.")
+
+    done = chat_service.send_message(graph, 1, first.thread_id, "Looks good, save it")
+
+    assert done.stage == "saved"
+    assert len(saved) == 1
+
+
+def test_any_other_message_while_waiting_is_a_change_request(monkeypatch) -> None:
+    saved: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch,
+        [AIMessage(DRAFT_ONE), save_call(VALID_ARGS), AIMessage("What should change?")],
+        saved,
+    )
+    first = chat_service.send_message(graph, 1, None, "I need a backend engineer")
+    chat_service.send_message(graph, 1, first.thread_id, "I approve this.")
+
+    after = chat_service.send_message(
+        graph, 1, first.thread_id, "Yes, but make Docker a must-have"
+    )
+
+    assert saved == []
+    assert after.stage == "reviewing_description"
+    card = next(item for item in after.items if item.kind == "requirements")
+    assert card.status == "changed"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("yes", True),
+        ("Looks good, save it", True),
+        ("Confirm.", True),
+        ("Yes, but add Docker", False),
+        ("Make Docker a must-have", False),
+        ("ok change the weights", False),
+    ],
+)
+def test_clear_yes_detection(text: str, expected: bool) -> None:
+    assert chat_service.is_clear_yes(text) is expected
+
+
+def test_conversation_can_be_reopened_with_its_history(monkeypatch) -> None:
+    graph = graph_with_replies(monkeypatch, [AIMessage(DRAFT_ONE)])
+    first = chat_service.send_message(graph, 1, None, "I need a backend engineer")
+
+    reopened = chat_service.get_conversation(graph, 1, first.thread_id)
+
+    assert reopened == first
+
+
+def test_another_user_cannot_open_the_conversation(monkeypatch) -> None:
+    graph = graph_with_replies(monkeypatch, [AIMessage(DRAFT_ONE)])
     first = chat_service.send_message(graph, 1, None, "Hello")
 
     with pytest.raises(NotFoundError):
-        chat_service.send_message(graph, 2, first.thread_id, "Hello")
+        chat_service.get_conversation(graph, 2, first.thread_id)
 
 
-def test_approval_without_a_pending_action_is_refused(graph_with) -> None:
-    graph = graph_with([AIMessage("Draft.")])
+def test_approval_without_a_pending_action_is_refused(monkeypatch) -> None:
+    graph = graph_with_replies(monkeypatch, [AIMessage(DRAFT_ONE)])
     first = chat_service.send_message(graph, 1, None, "Hello")
 
     with pytest.raises(ConflictError):
