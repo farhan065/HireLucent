@@ -70,6 +70,12 @@ class Settings(BaseSettings):
             database=self.postgres_db,
         )
 
+    @property
+    def postgres_dsn(self) -> str:
+        """The same connection as a plain PostgreSQL address, for LangGraph."""
+        return self.database_url.set(drivername="postgresql").render_as_string(
+            hide_password=False
+        )
 
 @lru_cache
 def get_settings() -> Settings:

@@ -13,11 +13,20 @@ configure_logging(get_settings())
 target_metadata = Base.metadata
 
 
+def is_our_table(name: str, type_: str, parent_names: dict) -> bool:
+    """Ignore tables Alembic does not manage, such as LangGraph's checkpoints."""
+    return type_ != "table" or name in target_metadata.tables
+
+
 def run_migrations() -> None:
     """Apply migrations using the database URL from the app settings."""
     engine = create_engine(get_settings().database_url)
     with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_name=is_our_table,
+        )
         with context.begin_transaction():
             context.run_migrations()
 
