@@ -57,3 +57,49 @@
     }
   }
 }
+
+/* Motion for the Hiring Assistant. All of it is switched off below for
+   people who ask their device to reduce motion. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes dot-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@utility animate-rise-in {
+  animation: rise-in 0.25s ease-out both;
+}
+
+@utility animate-blink {
+  animation: blink 1s steps(1) infinite;
+}
+
+@utility animate-dot {
+  animation: dot-pulse 1.2s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise-in,
+  .animate-blink,
+  .animate-dot {
+    animation: none;
+  }
+}
