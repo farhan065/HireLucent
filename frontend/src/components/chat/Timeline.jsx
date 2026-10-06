@@ -10,7 +10,7 @@ import {
 } from './MessageBubble.jsx'
 import RequirementsCard from './RequirementsCard.jsx'
 
-function TimelineItem({ item, canAct, onApprove, onConfirm }) {
+function TimelineItem({ item, canAct, canEdit, onApprove, onConfirm, onEdit }) {
   if (item.kind === 'user') return <UserBubble text={item.text} />
   if (item.kind === 'note') return <NoteLine text={item.text} />
   if (item.kind === 'assistant') {
@@ -23,7 +23,13 @@ function TimelineItem({ item, canAct, onApprove, onConfirm }) {
   if (item.kind === 'description') {
     return (
       <AssistantRow>
-        <DescriptionCard item={item} canAct={canAct} onApprove={onApprove} />
+        <DescriptionCard
+          item={item}
+          canAct={canAct}
+          canEdit={canEdit}
+          onApprove={onApprove}
+          onEdit={onEdit}
+        />
       </AssistantRow>
     )
   }
@@ -68,8 +74,10 @@ export default function Timeline({
   pendingText,
   streamingText,
   isBusy,
+  canEdit,
   onApprove,
   onConfirm,
+  onEdit,
 }) {
   const endRef = useRef(null)
 
@@ -85,8 +93,10 @@ export default function Timeline({
           key={item.id}
           item={item}
           canAct={!isBusy}
+          canEdit={canEdit}
           onApprove={onApprove}
           onConfirm={onConfirm}
+          onEdit={onEdit}
         />
       ))}
       {pendingText && <UserBubble text={pendingText} />}
