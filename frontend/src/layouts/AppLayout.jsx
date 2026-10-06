@@ -1,9 +1,12 @@
-import { BookOpen, LayoutDashboard, LogOut } from 'lucide-react'
+import { BookOpen, LayoutDashboard, LogOut, Sparkles } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { useAuth } from '../auth/AuthContext.js'
 import Logo from '../components/Logo.jsx'
 
-const NAV_ITEMS = [{ to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true }]
+const NAV_ITEMS = [
+  { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/app/assistant', label: 'Hiring Assistant', icon: Sparkles },
+]
 
 // Screens that are built in later tasks. Shown so the layout is complete.
 const UPCOMING_ITEMS = [{ label: 'Knowledge Base', icon: BookOpen }]
@@ -69,7 +72,7 @@ export default function AppLayout() {
         </nav>
         <UserPanel />
       </aside>
-      <main className="flex-1 p-6 md:p-10">
+      <main className="min-w-0 flex-1 p-6 md:p-10">
         <Outlet />
       </main>
     </div>

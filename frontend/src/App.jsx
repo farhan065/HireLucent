@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router'
 import RequireInterviewer from './auth/RequireInterviewer.jsx'
 import AppLayout from './layouts/AppLayout.jsx'
+import AssistantPage from './pages/AssistantPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import LandingPage from './pages/LandingPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
@@ -15,6 +16,7 @@ export default function App() {
       <Route element={<RequireInterviewer />}>
         <Route path="/app" element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
+          <Route path="assistant/:threadId?" element={<AssistantPage />} />
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />
