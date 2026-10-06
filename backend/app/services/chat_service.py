@@ -194,7 +194,8 @@ def _finish_turn(
 def _view(graph: CompiledStateGraph, thread_id: str) -> ConversationView:
     snapshot = graph.get_state(thread_config(thread_id))
     job_code = conversation_store.job_code_for(snapshot.values.get("saved_job_id"))
-    return build_view(thread_id, snapshot.values, bool(snapshot.next), job_code)
+    pending = snapshot.tasks[0].interrupts[0].value if snapshot.next else None
+    return build_view(thread_id, snapshot.values, pending, job_code)
 
 
 def _is_waiting(graph: CompiledStateGraph, thread_id: str) -> bool:

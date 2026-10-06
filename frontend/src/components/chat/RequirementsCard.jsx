@@ -62,7 +62,9 @@ export default function RequirementsCard({ item, canAct, onConfirm }) {
         </Row>
         <Row label="Experience">
           <strong className="text-sm text-navy">
-            {requirements.min_experience_years}+ years
+            {requirements.min_experience_years > 0
+              ? `${requirements.min_experience_years}+ years`
+              : 'No minimum'}
           </strong>
         </Row>
         <Row label="Weights">

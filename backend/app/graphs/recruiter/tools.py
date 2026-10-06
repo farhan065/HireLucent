@@ -56,6 +56,7 @@ def save_job(arguments: dict[str, Any], state: dict[str, Any]) -> tuple[str, dic
 
 # What the model is shown.
 TOOL_SCHEMAS: list[type[BaseModel]] = [SaveJob]
+TOOL_SCHEMAS_BY_NAME = {schema.__name__: schema for schema in TOOL_SCHEMAS}
 
 # What runs when the model asks for a tool.
 ToolHandler = Callable[[dict[str, Any], dict[str, Any]], tuple[str, dict]]

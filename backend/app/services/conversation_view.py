@@ -25,12 +25,19 @@ REJECTED_PREFIX = "The interviewer did not approve"
 def build_view(
     thread_id: str,
     values: dict[str, Any],
-    is_waiting: bool,
+    pending: dict[str, Any] | None,
     job_code: str | None,
 ) -> ConversationView:
-    """Build the full view of one conversation from its saved state."""
+    """Build the full view of one conversation from its saved state.
+
+    pending is the action waiting for approval, if any, with its details
+    already checked and completed.
+    """
     messages: list[AnyMessage] = values.get("messages", [])
     items = _timeline(messages)
+    is_waiting = pending is not None
+    if pending is not None and items and items[-1].kind == "requirements":
+        items[-1].arguments = pending["arguments"]
     descriptions = [item for item in items if item.kind == "description"]
     requirement_cards = [item for item in items if item.kind == "requirements"]
     job_id = values.get("saved_job_id")

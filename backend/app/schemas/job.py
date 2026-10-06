@@ -61,7 +61,8 @@ class RequirementItem(BaseModel):
 class JobRequirements(BaseModel):
     """The requirements checklist the interviewer confirms for a job."""
 
-    min_experience_years: int = Field(default=0, ge=0, le=50)
+    # Required, so the assistant must state it. Use 0 when there is no minimum.
+    min_experience_years: int = Field(ge=0, le=50)
     items: list[RequirementItem] = Field(min_length=1)
 
     @model_validator(mode="after")

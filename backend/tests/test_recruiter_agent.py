@@ -86,7 +86,9 @@ def test_rejection_returns_to_the_agent_without_saving(monkeypatch) -> None:
     assert "Add Docker" in state.values["messages"][-2].content
 
 
-def test_invalid_details_are_sent_back_for_correction(monkeypatch) -> None:
+def test_invalid_details_are_corrected_before_the_interviewer_sees_them(
+    monkeypatch,
+) -> None:
     saved: list[dict] = []
     graph = graph_with_replies(
         monkeypatch,
@@ -96,14 +98,31 @@ def test_invalid_details_are_sent_back_for_correction(monkeypatch) -> None:
     config = thread_config("t5")
 
     _send(graph, config, "I approve")
-    graph.invoke(Command(resume={"approved": True}), config)
-    assert graph.get_state(config).next == ("human_approval",)
+    paused = graph.get_state(config)
+    assert paused.next == ("human_approval",)
+    assert paused.values["attempts"] == 1
+    shown = paused.tasks[0].interrupts[0].value["arguments"]
+    assert shown["scoring_weights"] == VALID_ARGS["scoring_weights"]
 
     graph.invoke(Command(resume={"approved": True}), config)
-    state = graph.get_state(config)
-    assert state.next == ()
+    assert graph.get_state(config).next == ()
     assert len(saved) == 1
-    assert state.values["attempts"] == 1
+
+
+def test_missing_details_are_filled_in_or_sent_back(monkeypatch) -> None:
+    incomplete = {
+        **VALID_ARGS,
+        "requirements": {"items": VALID_ARGS["requirements"]["items"]},
+    }
+    graph = graph_with_replies(
+        monkeypatch, [save_call(incomplete, "c1"), save_call(VALID_ARGS, "c2")]
+    )
+    config = thread_config("t5b")
+
+    _send(graph, config, "I approve")
+
+    shown = graph.get_state(config).tasks[0].interrupts[0].value["arguments"]
+    assert shown["requirements"]["min_experience_years"] == 2
 
 
 def test_repeated_failures_end_with_a_clear_message(monkeypatch) -> None:
@@ -114,8 +133,6 @@ def test_repeated_failures_end_with_a_clear_message(monkeypatch) -> None:
     config = thread_config("t6")
 
     _send(graph, config, "I approve")
-    for _ in range(3):
-        graph.invoke(Command(resume={"approved": True}), config)
 
     state = graph.get_state(config)
     assert state.next == ()
