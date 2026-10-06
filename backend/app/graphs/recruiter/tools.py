@@ -2,26 +2,32 @@
 
 A tool has two parts: a schema that tells the model what arguments to give,
 and a handler that does the work. The model never gets database access: the
-handler runs fixed code and takes the user from the graph state, not from
-the model.
+handler runs fixed code, and takes the user and the approved description
+from the graph state, not from the model.
 """
 
 from collections.abc import Callable
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from app.core.errors import ConflictError
 from app.db.session import SessionLocal
+from app.graphs.recruiter.drafts import latest_draft
 from app.schemas.job import JobRequirements, ScoringWeights
 from app.services import job_service
 
+ALREADY_SAVED_MESSAGE = (
+    "This conversation already has a saved job. Start a new job conversation "
+    "for another role."
+)
+
 
 class SaveJob(BaseModel):
-    """Save the approved job description with its requirements checklist and
-    scoring weights. Call this only after the interviewer has approved."""
+    """Save the job with its requirements checklist and scoring weights. The
+    approved job description is taken from the conversation. Call this only
+    after the interviewer has approved the description."""
 
-    title: str = Field(min_length=3, max_length=255, description="The job title.")
-    jd_text: str = Field(min_length=50, description="The full approved description.")
     requirements: JobRequirements
     scoring_weights: ScoringWeights
 
@@ -29,12 +35,18 @@ class SaveJob(BaseModel):
 def save_job(arguments: dict[str, Any], state: dict[str, Any]) -> tuple[str, dict]:
     """Validate the arguments and store the job. Returns a message for the
     model and the state fields to update."""
+    if state.get("saved_job_id"):
+        raise ConflictError(ALREADY_SAVED_MESSAGE)
     data = SaveJob.model_validate(arguments)
+    draft = latest_draft(state["messages"])
+    if draft is None:
+        raise ConflictError("There is no job description to save yet.")
+
     with SessionLocal() as db:
         job = job_service.create_job(
             db,
-            title=data.title,
-            jd_text=data.jd_text,
+            title=draft.title,
+            jd_text=draft.body,
             requirements=data.requirements,
             scoring_weights=data.scoring_weights,
             created_by=state["user_id"],
