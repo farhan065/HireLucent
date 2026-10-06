@@ -11,6 +11,7 @@
     handle_error -> respond -> end
 """
 
+import json
 import logging
 from functools import lru_cache
 from typing import Annotated, Literal
@@ -32,6 +33,7 @@ from app.core.logging import get_logger, log_event
 from app.graphs.base import MAX_ATTEMPTS, BaseState, capture_errors
 from app.graphs.checkpointer import get_checkpointer
 from app.graphs.recruiter.prompts import ERROR_REPLY, SYSTEM_PROMPT
+from app.rag import mcp_client
 from app.graphs.recruiter.tools import (
     EXTERNAL_ACTIONS,
     TOOL_HANDLERS,
@@ -50,9 +52,14 @@ class RecruiterState(BaseState, total=False):
     saved_job_id: int | None
 
 
+SEARCH_UNAVAILABLE = "The search is not available right now. Continue without it."
+
+
 def get_agent_model() -> Runnable[LanguageModelInput, AIMessage]:
-    """The chat model with the agent's tools attached."""
-    return get_chat_model().bind_tools(TOOL_SCHEMAS)
+    """The chat model with the agent's tools attached: our own tools and
+    the search tools offered by the MCP server."""
+    tools = [*TOOL_SCHEMAS, *mcp_client.tool_definitions()]
+    return get_chat_model().bind_tools(tools)
 
 
 def load_context(state: RecruiterState) -> dict:
@@ -132,11 +139,16 @@ def call_tools(state: RecruiterState) -> Command[Literal["agent", "handle_error"
 
     for call in state["messages"][-1].tool_calls:
         try:
-            content, changes = TOOL_HANDLERS[call["name"]](call["args"], state)
-            update.update(changes)
+            if call["name"] in TOOL_HANDLERS:
+                content, changes = TOOL_HANDLERS[call["name"]](call["args"], state)
+                update.update(changes)
+            else:
+                # Any other tool belongs to the MCP server.
+                content = json.dumps(mcp_client.call_tool(call["name"], call["args"]))
         except Exception as exc:
             attempts += 1
-            content = _describe_failure(exc)
+            is_ours = call["name"] in TOOL_HANDLERS
+            content = _describe_failure(exc) if is_ours else SEARCH_UNAVAILABLE
             log_event(
                 logger,
                 "tool_call_failed",
