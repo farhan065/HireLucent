@@ -12,6 +12,7 @@ from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
 from app.graphs.checkpointer import close_checkpointer, setup_checkpointer
 from app.schemas.error import ErrorResponse
+from app.services.task_service import fail_interrupted_tasks
 
 API_DESCRIPTION = (
     "Backend API for HireLucent, an AI-powered recruitment and interview "
@@ -24,6 +25,7 @@ API_DESCRIPTION = (
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Prepare shared resources at startup and release them at shutdown."""
     setup_checkpointer()
+    fail_interrupted_tasks()
     yield
     close_checkpointer()
 

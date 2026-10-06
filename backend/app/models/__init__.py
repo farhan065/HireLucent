@@ -6,6 +6,7 @@ from app.models.candidate import Candidate, ScreeningResult
 from app.models.document import Document
 from app.models.interview import InterviewSession, TranscriptTurn
 from app.models.job import Job
+from app.models.task import Task
 from app.models.user import User
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "InterviewSession",
     "Job",
     "ScreeningResult",
+    "Task",
     "TranscriptTurn",
     "User",
 ]
