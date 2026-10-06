@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     # The provider's limit for your model. Calls are paced to stay under it.
     llm_requests_per_minute: int = Field(default=15, ge=1)
 
+    # Vector database for the Knowledge Base and CV matching.
+    chroma_host: str = "chromadb"
+    chroma_port: int = 8000
+    max_upload_mb: int = Field(default=10, ge=1)
+
     jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60
 
