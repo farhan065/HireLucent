@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     # The Blogger MCP server, which publishes approved job posts.
     mcp_blogger_url: str = "http://mcp-blogger:8002/mcp"
     blogger_blog_id: str = ""
+    # The Google sign-in saved by scripts/google_auth.py.
+    google_token_file: str = "/secrets/google_token.json"
 
     jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60
