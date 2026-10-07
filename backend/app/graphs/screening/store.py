@@ -24,12 +24,13 @@ def load_cvs(job_id: int) -> list[dict]:
         return [{"candidate_id": row.id, "cv_path": row.cv_path} for row in rows]
 
 
-def save_text(candidate_id: int, text: str, source: str) -> None:
-    """Keep the text read from a CV. Screening continues from it."""
+def save_cv(candidate_id: int, text: str, source: str, parsed: dict) -> None:
+    """Keep the text and the structured facts read from a CV."""
     with SessionLocal() as db:
         candidate = db.get(Candidate, candidate_id)
         candidate.cv_text = text
         candidate.cv_text_source = source
+        candidate.cv_parsed = parsed
         candidate.screening_error = None
         candidate.status = CandidateStatus.APPLIED
         db.commit()

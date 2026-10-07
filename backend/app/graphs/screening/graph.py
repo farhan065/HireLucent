@@ -7,13 +7,15 @@ so the CVs are processed side by side and one bad file never stops the rest:
 
 Each branch runs the per-CV pipeline:
 
-    extract_text -> (text found)   -> end of the steps built so far
-                 -> (scanned PDF)  -> run_ocr -> (text found) -> ...
+    extract_text -> (text found)   -> parse_cv
+                 -> (scanned PDF)  -> run_ocr -> (text found) -> parse_cv
                                               -> (unreadable) -> log_failure
                  -> (unreadable)   -> log_failure
+    parse_cv     -> (facts read)   -> end of the steps built so far
+                 -> (AI not available) -> log_failure
 
-Later steps add parse_cv, check_must_haves, match_requirements, scoring and
-ranking to this pipeline.
+Later steps add check_must_haves, match_requirements, scoring and ranking
+to this pipeline.
 """
 
 import logging
@@ -28,10 +30,12 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from app.core.config import get_settings
+from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import BaseState
 from app.graphs.checkpointer import get_checkpointer
 from app.graphs.screening import store
+from app.graphs.screening.parsing import parse_cv
 from app.services.text_extraction import extract_text, ocr_pdf
 
 logger = get_logger(__name__)
@@ -42,6 +46,7 @@ MIN_TEXT_CHARS = 100
 FILE_MISSING = "The CV file could not be found. Fetch the CVs again."
 FILE_DAMAGED = "The CV file is damaged and could not be opened."
 NO_TEXT = "No text could be read from the CV, even with OCR."
+AI_UNAVAILABLE = "The AI service was not available. Screen the CVs again to retry."
 UNEXPECTED = "The CV could not be processed because of an unexpected problem."
 
 
@@ -53,6 +58,8 @@ class CVState(TypedDict, total=False):
     text: str
     # How the text was read: "text" or "ocr".
     text_source: str
+    # The structured facts read from the text (see app.schemas.cv.ParsedCV).
+    parsed: dict
     # Set when the CV cannot be processed. The message is safe to show.
     failure: str
 
@@ -87,11 +94,11 @@ def extract_text_node(state: CVState) -> dict:
     return {"text": text, "text_source": "text"}
 
 
-def route_after_extract(state: CVState) -> Literal["run_ocr", "log_failure", "__end__"]:
+def route_after_extract(state: CVState) -> Literal["parse_cv", "run_ocr", "log_failure"]:
     if state.get("failure"):
         return "log_failure"
     if len(state["text"]) >= MIN_TEXT_CHARS:
-        return END
+        return "parse_cv"
     # A PDF with almost no text is usually a scan. Other files have no
     # page images to read, so they cannot be recovered.
     if state["cv_path"].lower().endswith(".pdf"):
@@ -116,8 +123,20 @@ def run_ocr(state: CVState) -> dict:
     return {"text": text, "text_source": "ocr"}
 
 
-def route_after_ocr(state: CVState) -> Literal["log_failure", "__end__"]:
-    return END if len(state["text"]) >= MIN_TEXT_CHARS else "log_failure"
+def route_after_ocr(state: CVState) -> Literal["parse_cv", "log_failure"]:
+    return "parse_cv" if len(state["text"]) >= MIN_TEXT_CHARS else "log_failure"
+
+
+def parse_cv_node(state: CVState) -> dict:
+    """Ask the AI to turn the CV text into structured facts."""
+    try:
+        return {"parsed": parse_cv(state["text"])}
+    except ServiceUnavailableError:
+        return {"failure": AI_UNAVAILABLE}
+
+
+def route_after_parse(state: CVState) -> Literal["log_failure", "__end__"]:
+    return "log_failure" if state.get("failure") else END
 
 
 def log_failure(state: CVState) -> dict:
@@ -132,11 +151,13 @@ def build_cv_pipeline() -> CompiledStateGraph:
     graph = StateGraph(CVState)
     graph.add_node("extract_text", extract_text_node)
     graph.add_node("run_ocr", run_ocr)
+    graph.add_node("parse_cv", parse_cv_node)
     graph.add_node("log_failure", log_failure)
 
     graph.add_edge(START, "extract_text")
     graph.add_conditional_edges("extract_text", route_after_extract)
     graph.add_conditional_edges("run_ocr", route_after_ocr)
+    graph.add_conditional_edges("parse_cv", route_after_parse)
     graph.add_edge("log_failure", END)
     return graph.compile()
 
@@ -169,7 +190,9 @@ def screen_cv(cv: CVState) -> dict:
     try:
         result = cv_pipeline.invoke(cv)
         if not result.get("failure"):
-            store.save_text(candidate_id, result["text"], result["text_source"])
+            store.save_cv(
+                candidate_id, result["text"], result["text_source"], result["parsed"]
+            )
     except Exception as exc:
         log_event(
             logger,

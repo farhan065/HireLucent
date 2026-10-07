@@ -9,6 +9,7 @@ import pymupdf
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.core.errors import ServiceUnavailableError
 from app.graphs.base import thread_config
 from app.graphs.screening import graph as screening
 
@@ -18,6 +19,7 @@ CV_TEXT = (
     "Skills: PostgreSQL, Docker, REST APIs and automated testing.\n"
     "Education: BSc in Computer Science."
 )
+PARSED = {"skills": ["Python", "FastAPI"], "total_experience_years": 5}
 needs_tesseract = pytest.mark.skipif(
     shutil.which("tesseract") is None, reason="Tesseract is not installed here"
 )
@@ -56,16 +58,24 @@ class FakeStore:
     def __init__(self, cvs: list[dict]) -> None:
         self.cvs = cvs
         self.texts: dict[int, tuple[str, str]] = {}
+        self.parsed: dict[int, dict] = {}
         self.failures: dict[int, str] = {}
 
     def load_cvs(self, job_id: int) -> list[dict]:
         return self.cvs
 
-    def save_text(self, candidate_id: int, text: str, source: str) -> None:
+    def save_cv(self, candidate_id: int, text: str, source: str, parsed: dict) -> None:
         self.texts[candidate_id] = (text, source)
+        self.parsed[candidate_id] = parsed
 
     def save_failure(self, candidate_id: int, reason: str) -> None:
         self.failures[candidate_id] = reason
+
+
+@pytest.fixture(autouse=True)
+def fake_ai(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test calls the real AI. Each CV gets the same parsed facts."""
+    monkeypatch.setattr(screening, "parse_cv", lambda text: PARSED)
 
 
 def run_graph(monkeypatch: pytest.MonkeyPatch, paths: list[str]) -> tuple[dict, FakeStore]:
@@ -86,6 +96,7 @@ def test_text_is_read_from_pdf_and_docx(monkeypatch, tmp_path) -> None:
     assert store.texts[1][1] == "text"
     assert "FastAPI" in store.texts[1][0]
     assert "PostgreSQL" in store.texts[2][0]
+    assert store.parsed == {1: PARSED, 2: PARSED}
     assert store.failures == {}
 
 
@@ -107,6 +118,21 @@ def test_a_scan_that_ocr_cannot_read_is_marked_failed(monkeypatch, tmp_path) -> 
     assert summary["failed"] == 1
     assert store.failures[1] == screening.NO_TEXT
     assert store.texts == {}
+
+
+def test_a_cv_is_marked_failed_when_the_ai_is_not_available(
+    monkeypatch, tmp_path
+) -> None:
+    def unavailable(text: str) -> dict:
+        raise ServiceUnavailableError("AI is down")
+
+    monkeypatch.setattr(screening, "parse_cv", unavailable)
+
+    summary, store = run_graph(monkeypatch, [_text_pdf(tmp_path / "a.pdf")])
+
+    assert summary["failed"] == 1
+    assert store.failures[1] == screening.AI_UNAVAILABLE
+    assert store.parsed == {}
 
 
 def test_one_bad_cv_does_not_stop_the_others(monkeypatch, tmp_path) -> None:
@@ -134,12 +160,12 @@ def test_one_bad_cv_does_not_stop_the_others(monkeypatch, tmp_path) -> None:
 def test_an_unexpected_problem_is_recorded_against_that_cv_only(
     monkeypatch, tmp_path
 ) -> None:
-    def broken_save_text(candidate_id: int, text: str, source: str) -> None:
+    def broken_save_cv(candidate_id: int, text: str, source: str, parsed: dict) -> None:
         raise RuntimeError("database unavailable")
 
     cvs = [{"candidate_id": 1, "cv_path": _text_pdf(tmp_path / "a.pdf")}]
     store = FakeStore(cvs)
-    store.save_text = broken_save_text
+    store.save_cv = broken_save_cv
     monkeypatch.setattr(screening, "store", store)
     graph = screening.build_screening_graph(InMemorySaver())
 
