@@ -20,8 +20,12 @@ from app.schemas.chat import (
 
 NEW_CONVERSATION_TITLE = "New job"
 SAVE_TOOL = "SaveJob"
+PUBLISH_TOOL = "PublishJob"
 SAVED_PREFIX = "Job saved"
+PUBLISHED_PREFIX = "Job published at "
 REJECTED_PREFIX = "The interviewer did not approve"
+# The card each approval tool is shown as.
+CARD_KINDS = {SAVE_TOOL: "requirements", PUBLISH_TOOL: "post"}
 
 
 def build_view(
@@ -38,13 +42,18 @@ def build_view(
     messages: list[AnyMessage] = values.get("messages", [])
     items = _timeline(messages)
     is_waiting = pending is not None
-    if pending is not None and items and items[-1].kind == "requirements":
+    if pending is not None and items and items[-1].kind in ("requirements", "post"):
         items[-1].arguments = pending["arguments"]
     descriptions = [item for item in items if item.kind == "description"]
     requirement_cards = [item for item in items if item.kind == "requirements"]
+    published = next((item for item in items if item.kind == "published"), None)
     job_id = values.get("saved_job_id")
 
-    if job_id:
+    if published:
+        stage = ConversationStage.PUBLISHED
+    elif is_waiting and pending["action"] == PUBLISH_TOOL:
+        stage = ConversationStage.CONFIRMING_POST
+    elif job_id:
         stage = ConversationStage.SAVED
     elif is_waiting:
         stage = ConversationStage.CONFIRMING_REQUIREMENTS
@@ -54,6 +63,12 @@ def build_view(
         stage = ConversationStage.DESCRIBING
 
     brief = JobBrief(job_id=job_id, job_code=job_code)
+    if published:
+        approved_post = next(
+            item for item in items if item.kind == "post" and item.status == "approved"
+        )
+        brief.post_url = published.text
+        brief.form_url = (approved_post.arguments or {}).get("form_url")
     if descriptions:
         latest = descriptions[-1]
         brief.description = DescriptionBrief(
@@ -131,19 +146,29 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
                     TimelineItem(id=item_id, kind="assistant", text=message.text)
                 )
             for call in message.tool_calls:
-                if call["name"] != SAVE_TOOL:
+                if call["name"] not in CARD_KINDS:
                     used_template = used_template or _found_template(
                         results.get(call["id"])
                     )
                     continue
                 status = outcomes.get(call["id"], "waiting")
-                if status != "invalid":
+                if status == "invalid":
+                    continue
+                items.append(
+                    TimelineItem(
+                        id=call["id"],
+                        kind=CARD_KINDS[call["name"]],
+                        status=status,
+                        arguments=call["args"],
+                    )
+                )
+                result = results.get(call["id"], "")
+                if result.startswith(PUBLISHED_PREFIX):
                     items.append(
                         TimelineItem(
-                            id=call["id"],
-                            kind="requirements",
-                            status=status,
-                            arguments=call["args"],
+                            id=f"{call['id']}-live",
+                            kind="published",
+                            text=result.removeprefix(PUBLISHED_PREFIX),
                         )
                     )
 
@@ -174,13 +199,13 @@ def _description_item(
 
 
 def _tool_outcomes(messages: list[AnyMessage]) -> dict[str, str]:
-    """What happened to each save request: approved, changed or invalid."""
+    """What happened to each approval request: approved, changed or invalid."""
     outcomes: dict[str, str] = {}
     for message in messages:
         if not isinstance(message, ToolMessage):
             continue
         text = message.text
-        if text.startswith(SAVED_PREFIX):
+        if text.startswith((SAVED_PREFIX, PUBLISHED_PREFIX)):
             outcomes[message.tool_call_id] = "approved"
         elif text.startswith(REJECTED_PREFIX):
             outcomes[message.tool_call_id] = "changed"

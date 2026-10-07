@@ -9,8 +9,12 @@ from app.graphs.recruiter import graph as recruiter
 from tests.helpers import (
     DRAFT_ONE,
     DRAFT_TWO,
+    FORM_LINK,
+    FORM_URL,
+    POST_URL,
     VALID_ARGS,
     graph_with_replies,
+    publish_call,
     save_call,
     search_call,
 )
@@ -218,3 +222,75 @@ def test_an_unavailable_search_shows_no_source(monkeypatch) -> None:
 
     assert _kinds(view) == ["user", "description"]
     assert view.items[1].from_knowledge_base is False
+
+
+def _saved_job(monkeypatch, replies: list[AIMessage], published: list[dict]):
+    """A conversation taken as far as a saved job, ready for publishing."""
+    graph = graph_with_replies(
+        monkeypatch,
+        [AIMessage(DRAFT_ONE), save_call(VALID_ARGS), AIMessage("Saved. Form link?")]
+        + replies,
+        published=published,
+    )
+    first = chat_service.send_message(graph, 1, None, "I need a backend engineer")
+    chat_service.send_message(graph, 1, first.thread_id, "I approve this.")
+    chat_service.submit_approval(graph, 1, first.thread_id, True, None, None)
+    return graph, first.thread_id
+
+
+def test_publishing_flow_shows_the_post_then_the_live_link(monkeypatch) -> None:
+    published: list[dict] = []
+    graph, thread_id = _saved_job(
+        monkeypatch, [publish_call(), AIMessage("The job is live.")], published
+    )
+
+    waiting = chat_service.send_message(graph, 1, thread_id, FORM_LINK)
+    assert waiting.stage == "confirming_post"
+    card = waiting.items[-1]
+    assert (card.kind, card.status) == ("post", "waiting")
+    assert card.arguments["job_code"] == "HL-BE-01"
+    assert card.arguments["form_title"] == "Backend Engineer application"
+    assert waiting.brief.post_url is None
+    assert published == []
+
+    done = chat_service.submit_approval(graph, 1, thread_id, True, None, None)
+    assert done.stage == "published"
+    assert _kinds(done)[-3:] == ["post", "published", "assistant"]
+    assert done.items[-3].status == "approved"
+    assert done.items[-2].text == POST_URL
+    assert done.brief.post_url == POST_URL
+    assert done.brief.form_url == FORM_URL
+    assert len(published) == 1
+
+
+def test_a_refused_form_link_shows_no_post_card(monkeypatch) -> None:
+    published: list[dict] = []
+    graph, thread_id = _saved_job(
+        monkeypatch,
+        [publish_call("https://example.com/apply"), AIMessage("Please paste the form link.")],
+        published,
+    )
+
+    view = chat_service.send_message(graph, 1, thread_id, "https://example.com/apply")
+
+    assert view.stage == "saved"
+    assert "post" not in _kinds(view)
+    assert view.items[-1].text == "Please paste the form link."
+
+
+def test_a_change_request_replaces_the_post_card(monkeypatch) -> None:
+    published: list[dict] = []
+    graph, thread_id = _saved_job(
+        monkeypatch,
+        [publish_call(), publish_call(call_id="publish-2"), AIMessage("The job is live.")],
+        published,
+    )
+    chat_service.send_message(graph, 1, thread_id, FORM_LINK)
+
+    view = chat_service.send_message(graph, 1, thread_id, "Use the other form instead")
+
+    posts = [item for item in view.items if item.kind == "post"]
+    assert [post.status for post in posts] == ["changed", "waiting"]
+    assert view.stage == "confirming_post"
+    assert published == []
+

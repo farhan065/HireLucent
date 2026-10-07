@@ -6,7 +6,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 Stage = Literal[
-    "describing", "reviewing_description", "confirming_requirements", "saved"
+    "describing",
+    "reviewing_description",
+    "confirming_requirements",
+    "saved",
+    "confirming_post",
+    "published",
 ]
 
 
@@ -14,8 +19,11 @@ class TimelineItem(BaseModel):
     """One entry in the conversation, in the order it happened."""
 
     id: str
-    kind: Literal["user", "assistant", "note", "description", "requirements"]
+    kind: Literal[
+        "user", "assistant", "note", "description", "requirements", "post", "published"
+    ]
     # user, assistant and note: the text. description: the body in Markdown.
+    # published: the address of the public post.
     text: str = ""
     # description only
     title: str | None = None
@@ -23,9 +31,10 @@ class TimelineItem(BaseModel):
     # description only: a Knowledge Base template was used to write it.
     from_knowledge_base: bool = False
     # description: waiting, replaced or approved.
-    # requirements: waiting, changed or approved.
+    # requirements and post: waiting, changed or approved.
     status: str | None = None
-    # requirements only: the requirements and scoring weights.
+    # requirements: the requirements and scoring weights.
+    # post: the title, description, job code and application form.
     arguments: dict[str, Any] | None = None
 
 
@@ -45,6 +54,9 @@ class JobBrief(BaseModel):
     requirements_status: Literal["proposed", "confirmed"] | None = None
     job_id: int | None = None
     job_code: str | None = None
+    # Set once the job is published.
+    form_url: str | None = None
+    post_url: str | None = None
 
 
 class ConversationView(BaseModel):
