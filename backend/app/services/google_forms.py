@@ -15,6 +15,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from app.core.config import get_settings
+from app.core.errors import AppError
 from app.core.logging import get_logger, log_event
 
 logger = get_logger(__name__)
@@ -43,8 +44,10 @@ FORM_NOT_FOUND = (
 FORM_UNAVAILABLE = "Google Forms could not be reached. Please try again."
 
 
-class FormLinkError(Exception):
+class FormLinkError(AppError):
     """A form link that cannot be used. The message is safe to show."""
+
+    code = "form_link"
 
 
 @dataclass(frozen=True)

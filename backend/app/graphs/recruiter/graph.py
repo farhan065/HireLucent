@@ -4,8 +4,9 @@
     agent -> respond              (a plain answer)
     agent -> call_tools           (a read-only tool)
     agent -> human_approval       (an action that needs approval)
-    human_approval -> call_tools  (approved)
-    human_approval -> agent       (rejected, with feedback)
+    human_approval -> call_tools      (approved)
+    human_approval -> human_approval  (edited by the interviewer)
+    human_approval -> agent           (rejected, with feedback)
     call_tools -> agent           (tool result)
     call_tools -> handle_error    (too many failed attempts)
     handle_error -> respond -> end
@@ -36,6 +37,7 @@ from app.graphs.recruiter.prompts import ERROR_REPLY, SYSTEM_PROMPT
 from app.rag import mcp_client
 from app.graphs.recruiter.tools import (
     EXTERNAL_ACTIONS,
+    PREPARERS,
     TOOL_HANDLERS,
     TOOL_SCHEMAS,
     TOOL_SCHEMAS_BY_NAME,
@@ -93,8 +95,8 @@ def route_after_agent(
 
 def human_approval(
     state: RecruiterState,
-) -> Command[Literal["call_tools", "agent", "handle_error"]]:
-    """Pause until the interviewer approves or rejects the action.
+) -> Command[Literal["call_tools", "agent", "handle_error", "human_approval"]]:
+    """Pause until the interviewer approves, edits or rejects the action.
 
     The details are checked first. If the model left something out or got a
     value wrong, it is asked to correct them, so the interviewer is only ever
@@ -102,10 +104,12 @@ def human_approval(
     """
     request = state["messages"][-1]
     call = request.tool_calls[0]
+    name = call["name"]
     try:
-        schema = TOOL_SCHEMAS_BY_NAME[call["name"]]
-        arguments = schema.model_validate(call["args"]).model_dump()
-    except ValidationError as exc:
+        arguments = TOOL_SCHEMAS_BY_NAME[name].model_validate(call["args"]).model_dump()
+        if name in PREPARERS:
+            arguments = PREPARERS[name](arguments, state)
+    except (ValidationError, AppError) as exc:
         attempts = state.get("attempts", 0) + 1
         problem = ToolMessage(content=_describe_failure(exc), tool_call_id=call["id"])
         return Command(
@@ -113,23 +117,38 @@ def human_approval(
             update={"messages": [problem], "attempts": attempts},
         )
 
-    decision = interrupt({"action": call["name"], "arguments": arguments})
+    decision = interrupt({"action": name, "arguments": arguments})
+    edited = decision.get("arguments")
 
-    if not decision.get("approved"):
-        feedback = decision.get("feedback") or "No reason was given."
-        rejection = ToolMessage(
-            content=f"The interviewer did not approve this. Their feedback: {feedback}",
-            tool_call_id=call["id"],
+    if decision.get("approved"):
+        # Prepared details are used as shown. Otherwise the interviewer's
+        # edited version, if any, replaces the checked details.
+        final = arguments if name in PREPARERS else (edited or arguments)
+        return Command(
+            goto="call_tools", update={"messages": [_with_arguments(request, final)]}
         )
-        return Command(goto="agent", update={"messages": [rejection]})
 
-    # Save the checked details, or the interviewer's edited version of them.
-    # Replacing the message under the same id keeps the conversation consistent.
-    approved_call = {**call, "args": decision.get("arguments") or arguments}
-    approved = AIMessage(
-        content=request.content, tool_calls=[approved_call], id=request.id
+    if edited:
+        # The interviewer changed the details directly. Check the new ones
+        # and ask again, without involving the model.
+        return Command(
+            goto="human_approval",
+            update={"messages": [_with_arguments(request, edited)]},
+        )
+
+    feedback = decision.get("feedback") or "No reason was given."
+    rejection = ToolMessage(
+        content=f"The interviewer did not approve this. Their feedback: {feedback}",
+        tool_call_id=call["id"],
     )
-    return Command(goto="call_tools", update={"messages": [approved]})
+    return Command(goto="agent", update={"messages": [rejection]})
+
+
+def _with_arguments(request: AIMessage, arguments: dict) -> AIMessage:
+    """The same tool request with different arguments. Keeping the message
+    id replaces the original, so the conversation stays consistent."""
+    call = {**request.tool_calls[0], "args": arguments}
+    return AIMessage(content=request.content, tool_calls=[call], id=request.id)
 
 
 def call_tools(state: RecruiterState) -> Command[Literal["agent", "handle_error"]]:

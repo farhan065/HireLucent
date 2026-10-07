@@ -10,12 +10,15 @@ from app.graphs.base import thread_config
 from app.graphs.recruiter import graph as recruiter
 from app.graphs.recruiter.drafts import latest_draft, parse_draft
 from app.graphs.recruiter.prompts import ERROR_REPLY
-from app.graphs.recruiter.tools import save_job
+from app.graphs.recruiter.tools import prepare_publication, save_job
 from tests.helpers import (
     BAD_ARGS,
     DRAFT_ONE,
+    FORM_LINK,
+    FORM_URL,
     VALID_ARGS,
     graph_with_replies,
+    publish_call,
     save_call,
     search_call,
 )
@@ -222,3 +225,84 @@ def test_the_assistant_continues_when_search_is_unavailable(monkeypatch) -> None
     state = graph.get_state(config)
     assert state.values["messages"][-2].content == recruiter.SEARCH_UNAVAILABLE
     assert latest_draft(state.values["messages"]).title == "Backend Engineer"
+
+
+def test_publishing_waits_for_approval_then_runs(monkeypatch) -> None:
+    published: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch, [publish_call(), AIMessage("The job is live.")], published=published
+    )
+    config = thread_config("t10")
+
+    _send(graph, config, FORM_LINK)
+    waiting = graph.get_state(config)
+    assert waiting.next == ("human_approval",)
+    shown = waiting.tasks[0].interrupts[0].value
+    assert shown["action"] == "PublishJob"
+    assert shown["arguments"]["form_url"] == FORM_URL
+    assert published == []
+
+    graph.invoke(Command(resume={"approved": True}), config)
+    assert graph.get_state(config).next == ()
+    assert published[0]["title"] == "Backend Engineer"
+    assert published[0]["form_url"] == FORM_URL
+
+
+def test_a_bad_form_link_goes_back_to_the_model_without_asking(monkeypatch) -> None:
+    published: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch,
+        [publish_call("https://example.com/apply"), AIMessage("Please paste the form link.")],
+        published=published,
+    )
+    config = thread_config("t11")
+
+    _send(graph, config, "https://example.com/apply")
+
+    state = graph.get_state(config)
+    assert state.next == ()
+    assert "not a Google Form link" in state.values["messages"][-2].content
+    assert published == []
+
+
+def test_an_edited_post_is_checked_and_shown_again(monkeypatch) -> None:
+    published: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch, [publish_call(), AIMessage("The job is live.")], published=published
+    )
+    config = thread_config("t12")
+    _send(graph, config, FORM_LINK)
+
+    edit = {"form_link": FORM_LINK, "title": "Backend Engineer (Python)"}
+    graph.invoke(Command(resume={"approved": False, "arguments": edit}), config)
+
+    waiting = graph.get_state(config)
+    assert waiting.next == ("human_approval",)
+    assert waiting.tasks[0].interrupts[0].value["arguments"]["title"] == edit["title"]
+    assert published == []
+
+    graph.invoke(Command(resume={"approved": True}), config)
+    assert published[0]["title"] == "Backend Engineer (Python)"
+
+
+def test_details_sent_with_the_approval_cannot_replace_the_checked_post(
+    monkeypatch,
+) -> None:
+    published: list[dict] = []
+    graph = graph_with_replies(
+        monkeypatch, [publish_call(), AIMessage("The job is live.")], published=published
+    )
+    config = thread_config("t13")
+    _send(graph, config, FORM_LINK)
+
+    forged = {"form_url": "https://evil.example.com", "description": "Changed"}
+    graph.invoke(Command(resume={"approved": True, "arguments": forged}), config)
+
+    assert published[0]["form_url"] == FORM_URL
+    assert published[0]["description"].startswith("## About the Role")
+
+
+def test_publishing_needs_a_saved_job() -> None:
+    with pytest.raises(ConflictError):
+        prepare_publication({"form_link": FORM_LINK}, {"user_id": 1})
+
