@@ -6,10 +6,8 @@ import Logo from '../components/Logo.jsx'
 const NAV_ITEMS = [
   { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/app/assistant', label: 'Hiring Assistant', icon: Sparkles },
+  { to: '/app/knowledge', label: 'Knowledge Base', icon: BookOpen },
 ]
-
-// Screens that are built in later tasks. Shown so the layout is complete.
-const UPCOMING_ITEMS = [{ label: 'Knowledge Base', icon: BookOpen }]
 
 function navClass({ isActive }) {
   const base = 'flex min-h-11 items-center gap-3 rounded-xl px-3.5 text-[15px] font-semibold'
@@ -58,16 +56,6 @@ export default function AppLayout() {
               <Icon className="size-5" aria-hidden="true" />
               {label}
             </NavLink>
-          ))}
-          {UPCOMING_ITEMS.map(({ label, icon: Icon }) => (
-            <span
-              key={label}
-              className="flex min-h-11 items-center gap-3 rounded-xl px-3.5 text-[15px] font-semibold text-body/60"
-            >
-              <Icon className="size-5" aria-hidden="true" />
-              {label}
-              <span className="ml-auto hidden text-xs font-medium md:inline">Soon</span>
-            </span>
           ))}
         </nav>
         <UserPanel />
