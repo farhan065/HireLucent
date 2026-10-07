@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,6 +30,9 @@ class Job(TimestampMixin, Base):
     # responses, and the public address shown in the job post.
     form_id: Mapped[str | None] = mapped_column(String(100))
     form_url: Mapped[str | None] = mapped_column(String(500))
+    # How many form responses the last fetch saw. A higher number on the
+    # form now means new applications are waiting.
+    responses_seen: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     post_url: Mapped[str | None] = mapped_column(String(500))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))

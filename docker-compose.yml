@@ -27,6 +27,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./secrets:/secrets:ro
+      - cv_data:/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -146,6 +147,7 @@ volumes:
   postgres_data:
   chroma_data:
   ollama_data:
+  cv_data:
 
 networks:
   hirelucent:

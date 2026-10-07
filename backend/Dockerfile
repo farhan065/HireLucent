@@ -14,8 +14,8 @@ COPY app ./app
 COPY scripts ./scripts
 
 RUN useradd --create-home appuser \
-    && mkdir -p /app/logs \
-    && chown -R appuser /app
+    && mkdir -p /app/logs /data/cv_intake \
+    && chown -R appuser /app /data
 USER appuser
 
 EXPOSE 8000

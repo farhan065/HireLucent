@@ -26,6 +26,9 @@ class Candidate(TimestampMixin, Base):
     full_name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str] = mapped_column(String(255))
     source: Mapped[str] = mapped_column(String(30))
+    # The ID of the form response this application came from, so a later
+    # fetch does not collect it again.
+    source_ref: Mapped[str | None] = mapped_column(String(100))
     cv_path: Mapped[str] = mapped_column(String(500))
     cv_parsed: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(30), default=CandidateStatus.APPLIED)

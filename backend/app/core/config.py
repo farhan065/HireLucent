@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     chroma_host: str = "chromadb"
     chroma_port: int = 8000
     max_upload_mb: int = Field(default=10, ge=1)
+    # Where collected CVs are kept. A Docker volume, never the repository.
+    cv_storage_dir: str = "/data/cv_intake"
 
     # The RAG MCP server, which gives the assistant its search tools.
     mcp_rag_url: str = "http://mcp-rag:8001/mcp"
