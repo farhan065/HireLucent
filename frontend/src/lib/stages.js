@@ -4,10 +4,16 @@ export const STAGE_LABELS = {
   reviewing_description: 'Reviewing the description',
   confirming_requirements: 'Waiting for your approval',
   saved: 'Saved',
+  confirming_post: 'Waiting for your approval',
+  published: 'Published',
 }
 
 // Stages where the assistant is waiting for the interviewer to decide.
-export const WAITING_STAGES = ['reviewing_description', 'confirming_requirements']
+export const WAITING_STAGES = [
+  'reviewing_description',
+  'confirming_requirements',
+  'confirming_post',
+]
 
 export const WEIGHT_LABELS = {
   technical_skills: 'Technical',

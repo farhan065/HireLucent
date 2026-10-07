@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react'
+import { Check, ExternalLink, Link2 } from 'lucide-react'
 import { useState } from 'react'
 import RequirementList from '../RequirementList.jsx'
 import SidePanel from '../SidePanel.jsx'
@@ -12,7 +12,7 @@ function journeySteps(view) {
     { label: 'Role described', done: items.some((item) => item.kind === 'user') },
     { label: 'Description approved', done: brief.description?.status === 'approved' },
     { label: 'Requirements confirmed', done: brief.requirements_status === 'confirmed' },
-    { label: 'Published', done: false },
+    { label: 'Published', done: Boolean(brief.post_url) },
     { label: 'CVs screened', done: false },
     { label: 'Interviews scheduled', done: false },
   ]
@@ -47,6 +47,27 @@ function Journey({ view }) {
         )
       })}
     </ol>
+  )
+}
+
+// The line at the bottom of the brief: where the job stands.
+function footnote(brief) {
+  if (brief.post_url) return `Saved as ${brief.job_code} and published.`
+  if (brief.job_code) return `Saved as ${brief.job_code}. It is not published yet.`
+  return 'Nothing is saved or published until you confirm in the conversation.'
+}
+
+function BriefLink({ href, icon: Icon, children }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-1.5 text-brand hover:text-brand-dark"
+    >
+      <Icon className="size-4" aria-hidden="true" />
+      {children}
+    </a>
   )
 }
 
@@ -150,10 +171,27 @@ export default function JobBrief({ view }) {
         )}
       </Section>
 
+      <Section
+        title="Job post"
+        watch={brief.post_url}
+        chip={brief.post_url && <StatusChip tone="success">Live</StatusChip>}
+      >
+        {brief.post_url ? (
+          <div className="flex flex-col gap-2 text-sm font-semibold">
+            <BriefLink href={brief.post_url} icon={ExternalLink}>
+              View the public post
+            </BriefLink>
+            <BriefLink href={brief.form_url} icon={Link2}>
+              Open the application form
+            </BriefLink>
+          </div>
+        ) : (
+          <p className="text-sm">Published after you approve the post.</p>
+        )}
+      </Section>
+
       <p className="mt-auto rounded-2xl bg-mist px-3.5 py-3 text-[13px] leading-normal">
-        {brief.job_code
-          ? `Saved as ${brief.job_code}.`
-          : 'Nothing is saved or published until you confirm in the conversation.'}
+        {footnote(brief)}
       </p>
 
       {isReading && (

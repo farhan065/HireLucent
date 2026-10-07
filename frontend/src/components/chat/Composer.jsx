@@ -15,6 +15,14 @@ const SUGGESTIONS = {
     'Make all technical skills must-haves',
   ],
   saved: [],
+  confirming_post: ['Looks good, publish it'],
+  published: [],
+}
+
+const PLACEHOLDERS = {
+  describing: 'Describe the role you are hiring for…',
+  saved: 'Paste the Google Form link…',
+  published: 'Message the assistant…',
 }
 
 // The message box with suggested replies above it.
@@ -62,7 +70,7 @@ export default function Composer({ stage, isDisabled, onSend }) {
           onChange={(event) => setText(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
-            stage === 'describing' ? 'Describe the role you are hiring for…' : 'Tell the assistant what to change…'
+            PLACEHOLDERS[stage] ?? 'Tell the assistant what to change…'
           }
           className="max-h-40 min-h-11 flex-1 resize-none bg-transparent py-2.5 text-[15px] text-navy outline-none placeholder:text-body/60"
         />
