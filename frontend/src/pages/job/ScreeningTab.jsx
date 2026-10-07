@@ -1,9 +1,166 @@
-// The Screening tab of a job. Its content is added in the next step.
-export default function ScreeningTab() {
+import { ScanSearch } from 'lucide-react'
+import { useOutletContext } from 'react-router'
+import Button from '../../components/Button.jsx'
+import { HEADING, Initials, ListCard, ViewCvLink } from '../../components/jobs/candidates.jsx'
+import RunPanel from '../../components/jobs/RunPanel.jsx'
+import Skeleton from '../../components/Skeleton.jsx'
+import StatusChip from '../../components/StatusChip.jsx'
+import { useCandidates } from '../../hooks/useCandidates.js'
+import { formatDateTime } from '../../lib/jobs.js'
+
+const SCREENING = 'cv_screening'
+const TO_SCREEN = ['applied', 'screening_failed']
+const READ_AS = { text: 'Text', ocr: 'Scanned (OCR)' }
+
+// How the last screening ended, in one line.
+function LastScreening({ task }) {
+  if (!task) return null
+  const when = formatDateTime(task.finished_at ?? task.created_at)
+  if (task.status !== 'succeeded') {
+    return (
+      <p className="text-sm">
+        Last screening {when} ·{' '}
+        <strong className="font-semibold text-danger">{task.error_message}</strong>
+      </p>
+    )
+  }
+  const { read, read_by_ocr: byOcr, failed } = task.result
   return (
-    <section className="rounded-card border border-line bg-white p-8 text-center shadow-card">
-      <h2 className="text-xl font-bold">Screening</h2>
-      <p className="mt-2">This tab is being built and arrives in the next step.</p>
-    </section>
+    <p className="text-sm">
+      Last screening {when} ·{' '}
+      <strong className="font-semibold text-success">{read + byOcr} read</strong>
+      {byOcr > 0 && ` (${byOcr} by OCR)`}
+      {failed > 0 && (
+        <>
+          {' · '}
+          <strong className="font-semibold text-danger">{failed} could not be read</strong>
+        </>
+      )}
+    </p>
+  )
+}
+
+function ScreenedList({ candidates }) {
+  return (
+    <ListCard
+      title="Screened so far"
+      count={candidates.length}
+      note="Scores and ranking are added to this list in a later step."
+    >
+      <table className="w-full">
+        <thead className="bg-mist">
+          <tr>
+            <th scope="col" className={HEADING}>Candidate</th>
+            <th scope="col" className={`${HEADING} hidden md:table-cell`}>CV read as</th>
+            <th scope="col" className={HEADING}>Status</th>
+            <th scope="col" className={HEADING}>
+              <span className="sr-only">CV</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {candidates.map((candidate) => {
+            const hasFailed = candidate.status === 'screening_failed'
+            return (
+              <tr
+                key={candidate.id}
+                className={`border-t border-line/60 ${hasFailed ? 'bg-danger-soft/40' : ''}`}
+              >
+                <td className="px-5 py-3.5">
+                  <div className="flex items-center gap-4">
+                    <Initials name={candidate.full_name} />
+                    <div className="min-w-0">
+                      <p className="text-[15px] font-semibold text-navy">{candidate.full_name}</p>
+                      {hasFailed && (
+                        <p className="mt-0.5 text-[13px] text-danger">
+                          {candidate.screening_error}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </td>
+                <td className="hidden px-5 py-3.5 text-sm text-navy md:table-cell">
+                  {hasFailed ? '–' : READ_AS[candidate.cv_text_source]}
+                </td>
+                <td className="px-5 py-3.5">
+                  {hasFailed ? (
+                    <StatusChip tone="danger">Could not be read</StatusChip>
+                  ) : (
+                    <StatusChip tone="success">CV read</StatusChip>
+                  )}
+                </td>
+                <td className="px-5 py-3.5">
+                  <div className="flex justify-end">
+                    <ViewCvLink candidateId={candidate.id} />
+                  </div>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </ListCard>
+  )
+}
+
+// The Screening tab of a job: run the screening and see what was read.
+export default function ScreeningTab() {
+  const { job, run, listVersion } = useOutletContext()
+  const { candidates, error } = useCandidates(job.id, listVersion)
+  const screening = run.running?.kind === SCREENING ? run.running : null
+  const ready = (candidates ?? []).filter((item) => TO_SCREEN.includes(item.status)).length
+  const screened = (candidates ?? []).filter(
+    (item) => item.cv_text_source || item.status === 'screening_failed',
+  )
+  const hasNone = candidates?.length === 0
+
+  return (
+    <>
+      <RunPanel
+        title="Screen CVs"
+        description={
+          hasNone ? (
+            'Nothing to screen yet. Collect the applications first.'
+          ) : ready > 0 ? (
+            <>
+              <strong className="font-semibold text-navy">
+                {ready} {ready === 1 ? 'CV is' : 'CVs are'} ready to screen.
+              </strong>{' '}
+              The AI reads each CV and compares it with the job requirements. CVs already
+              screened are skipped.
+            </>
+          ) : (
+            'All collected CVs are screened. Fetch new applications to screen more.'
+          )
+        }
+        buttonLabel="Screen CVs"
+        busyLabel="Screening…"
+        icon={ScanSearch}
+        task={screening}
+        isDisabled={!run.isLoaded || Boolean(run.running) || ready === 0}
+        error={run.error}
+        onStart={() => run.start('screen')}
+      >
+        {run.running && !screening && (
+          <p className="text-sm">A fetch is running. Screen CVs is available when it ends.</p>
+        )}
+        <LastScreening task={run.last_screening} />
+        {hasNone && (
+          <div>
+            <Button variant="outline" to="../applications" relative="path">
+              Go to Applications
+            </Button>
+          </div>
+        )}
+      </RunPanel>
+
+      {error && (
+        <p role="alert" className="font-semibold text-danger">
+          {error}
+        </p>
+      )}
+      {!candidates && !error && <Skeleton className="h-48 w-full rounded-card" />}
+      {screened.length > 0 && <ScreenedList candidates={screened} />}
+    </>
   )
 }
