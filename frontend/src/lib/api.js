@@ -26,9 +26,11 @@ export function setAccessToken(token) {
 }
 
 export async function apiRequest(path, { method = 'GET', body } = {}) {
+  // A FormData body is a file upload. The browser sets its content type.
+  const isUpload = body instanceof FormData
   const headers = {}
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
-  
+  if (body !== undefined && !isUpload) headers['Content-Type'] = 'application/json'
+
   const token = getAccessToken()
   if (token) headers.Authorization = `Bearer ${token}`
 
@@ -37,7 +39,7 @@ export async function apiRequest(path, { method = 'GET', body } = {}) {
     response = await fetch(`${API_BASE}${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined || isUpload ? body : JSON.stringify(body),
     })
   } catch {
     throw new ApiError(0, 'network_error', 'Cannot reach the server. Check that it is running.')
