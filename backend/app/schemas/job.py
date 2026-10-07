@@ -104,7 +104,9 @@ class JobSummary(BaseModel):
     job_code: str
     title: str
     status: str
+    form_url: str | None
     post_url: str | None
+    published_at: datetime | None
     created_at: datetime
     candidate_counts: dict[str, int] = Field(
         default_factory=dict, description="Number of candidates in each status."
