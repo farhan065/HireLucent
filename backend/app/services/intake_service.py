@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.errors import AppError, ConflictError
+from app.core.errors import AppError, ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.db.session import SessionLocal
 from app.models import Candidate, Job, Task
@@ -32,6 +32,8 @@ TASK_KIND = "cv_intake"
 CV_EXTENSIONS = {".pdf", ".docx"}
 NOT_PUBLISHED_MESSAGE = "Publish the job before fetching CVs."
 UNKNOWN_NAME = "Unknown applicant"
+DOWNLOAD_FAILED = "The CV could not be downloaded."
+CV_MISSING = "The CV file is no longer stored. Fetch the CVs again."
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # How long a count of waiting applications is reused before Google is asked
@@ -45,6 +47,7 @@ def start_intake(
 ) -> Task:
     """Start fetching a job's CVs in the background and return the task."""
     job = _published_job(db, job_id)
+    task_service.ensure_idle(db, job_id)
     form_id = job.form_id
     return task_service.start_task(
         db,
@@ -52,11 +55,13 @@ def start_intake(
         TASK_KIND,
         user_id,
         lambda progress: run_intake(job_id, form_id, progress),
+        job_id=job_id,
     )
 
 
-def run_intake(job_id: int, form_id: str, progress: TaskProgress) -> dict[str, int]:
-    """Collect every new application and return the counts."""
+def run_intake(job_id: int, form_id: str, progress: TaskProgress) -> dict:
+    """Collect every new application. Returns the counts, and for each
+    application that could not be collected, who applied and why."""
     responses = google_forms.list_responses(form_id)
     with SessionLocal() as db:
         applied = db.execute(
@@ -73,27 +78,38 @@ def run_intake(job_id: int, form_id: str, progress: TaskProgress) -> dict[str, i
             "failed": 0,
             "already_collected": len(responses) - len(new),
         }
+        failed_items = []
 
         for index, response in enumerate(new, start=1):
             progress.update(index - 1, len(new), f"Collecting CV {index} of {len(new)}")
-            outcome = _collect(db, job_id, response, known_emails)
+            outcome, reason = _collect(db, job_id, response, known_emails)
             counts[outcome] += 1
+            if reason:
+                failed_items.append(
+                    {
+                        "name": response.full_name[:255] or UNKNOWN_NAME,
+                        "email": response.email[:255],
+                        "reason": reason,
+                    }
+                )
 
         db.get(Job, job_id).responses_seen = len(responses)
         db.commit()
 
     _waiting_cache.pop(job_id, None)
     progress.update(len(new), len(new), "Finished")
+    # Only the counts are logged. The names stay in the database.
     log_event(logger, "cv_intake_finished", job_id=job_id, **counts)
-    return counts
+    return {**counts, "failed_items": failed_items}
 
 
 def _collect(
     db: Session, job_id: int, response: FormResponse, known_emails: set[str]
-) -> str:
-    """Collect one application. Returns collected, duplicates or failed."""
+) -> tuple[str, str | None]:
+    """Collect one application. Returns collected, duplicates or failed,
+    and for a failure the reason in words that are safe to show."""
     if response.email in known_emails:
-        return "duplicates"
+        return "duplicates", None
     try:
         extension, content = read_cv(response)
         path = _store(job_id, extension, content)
@@ -119,9 +135,9 @@ def _collect(
             job_id=job_id,
             error_type=type(exc).__name__,
         )
-        return "failed"
+        return "failed", exc.message if isinstance(exc, AppError) else DOWNLOAD_FAILED
     known_emails.add(response.email)
-    return "collected"
+    return "collected", None
 
 
 def read_cv(response: FormResponse) -> tuple[str, bytes]:
@@ -186,6 +202,17 @@ def list_candidates(db: Session, job_id: int) -> list[Candidate]:
             .order_by(Candidate.created_at.desc(), Candidate.id.desc())
         )
     )
+
+
+def cv_file(db: Session, candidate_id: int) -> Path:
+    """Where a candidate's CV is stored, or a 404 error."""
+    candidate = db.get(Candidate, candidate_id)
+    if candidate is None:
+        raise NotFoundError("This candidate does not exist.")
+    path = Path(candidate.cv_path)
+    if not path.is_file():
+        raise NotFoundError(CV_MISSING)
+    return path
 
 
 def _published_job(db: Session, job_id: int) -> Job:

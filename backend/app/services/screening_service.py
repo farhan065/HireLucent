@@ -28,6 +28,7 @@ def start_screening(
 ) -> Task:
     """Start screening a job's waiting CVs and return the task."""
     job_service.get_job(db, job_id)
+    task_service.ensure_idle(db, job_id)
     if not store.load_cvs(job_id):
         raise ConflictError(NOTHING_TO_SCREEN)
     return task_service.start_task(
@@ -36,7 +37,13 @@ def start_screening(
         TASK_KIND,
         user_id,
         lambda progress: run_screening(graph, job_id, progress),
+        job_id=job_id,
     )
+
+
+def thread_id(task_id: str) -> str:
+    """Each run is its own thread, so its checkpoints do not mix with others."""
+    return f"screening-{task_id}"
 
 
 def run_screening(
@@ -44,8 +51,7 @@ def run_screening(
 ) -> dict[str, int]:
     """Run the graph, reporting progress as each CV finishes."""
     total = len(store.load_cvs(job_id))
-    # Each run is its own thread, so its checkpoints do not mix with others.
-    config = thread_config(f"screening-{progress.task_id}")
+    config = thread_config(thread_id(progress.task_id))
     config["max_concurrency"] = get_settings().screening_max_parallel
 
     done = 0
