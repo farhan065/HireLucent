@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     ai,
     auth,
+    candidates,
     chat,
     chat_ws,
     graphs,
@@ -24,6 +25,7 @@ api_router.include_router(graphs.router)
 api_router.include_router(tasks.router)
 api_router.include_router(jobs.router)
 api_router.include_router(intake.router)
+api_router.include_router(candidates.router)
 api_router.include_router(screening.router)
 api_router.include_router(chat.router)
 api_router.include_router(chat_ws.router)
