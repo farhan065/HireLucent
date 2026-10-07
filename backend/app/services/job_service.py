@@ -153,6 +153,14 @@ def mark_published(
     return get_job(db, job_id)
 
 
+def form_is_used(db: Session, form_id: str, except_job_id: int) -> bool:
+    """True if another job already collects its applications from this form."""
+    other = db.scalar(
+        select(Job.id).where(Job.form_id == form_id, Job.id != except_job_id).limit(1)
+    )
+    return other is not None
+
+
 def archive_job(db: Session, job_id: int) -> Job:
     """Mark a job as archived. Its data is kept."""
     job = get_job(db, job_id)

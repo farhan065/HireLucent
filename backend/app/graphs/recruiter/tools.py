@@ -20,6 +20,10 @@ from app.services import blogger, google_forms, job_service
 from app.services.job_post import post_html
 
 ALREADY_PUBLISHED_MESSAGE = "This job is already published."
+FORM_IN_USE_MESSAGE = (
+    "This form is already used by another job. Each job needs its own form, "
+    "so its applications stay separate. Paste the link of a new form."
+)
 ALREADY_SAVED_MESSAGE = (
     "This conversation already has a saved job. Start a new job conversation "
     "for another role."
@@ -101,6 +105,8 @@ def prepare_publication(arguments: dict[str, Any], state: dict[str, Any]) -> dic
         job = job_service.get_job(db, job_id)
         if job.status == JobStatus.PUBLISHED:
             raise ConflictError(ALREADY_PUBLISHED_MESSAGE)
+        if job_service.form_is_used(db, form.form_id, except_job_id=job_id):
+            raise ConflictError(FORM_IN_USE_MESSAGE)
         return {
             "form_link": arguments["form_link"],
             "title": arguments.get("title") or job.title,
