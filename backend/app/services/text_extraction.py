@@ -41,6 +41,20 @@ def check_file(filename: str, content: bytes, max_mb: int) -> str:
     return extension
 
 
+def ocr_pdf(content: bytes, max_pages: int) -> str:
+    """Read a scanned PDF by recognising the text in its page images.
+
+    Uses Tesseract through PyMuPDF. Only the first pages are read, which
+    keeps a very long scan from holding up the rest of a batch.
+    """
+    with pymupdf.open(stream=content, filetype="pdf") as pdf:
+        pages = []
+        for page in list(pdf)[:max_pages]:
+            recognised = page.get_textpage_ocr(language="eng", dpi=300, full=True)
+            pages.append(page.get_text(textpage=recognised).strip())
+    return "\n\n".join(page for page in pages if page).strip()
+
+
 def extract_text(extension: str, content: bytes) -> str:
     """Return the text of a file. An empty string means no text was found,
     for example in a scanned PDF."""

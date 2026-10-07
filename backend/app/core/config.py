@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=10, ge=1)
     # Where collected CVs are kept. A Docker volume, never the repository.
     cv_storage_dir: str = "/data/cv_intake"
+    # CV screening: how many CVs are processed at once, and how many pages
+    # of a scanned CV are read by OCR.
+    screening_max_parallel: int = Field(default=4, ge=1)
+    ocr_max_pages: int = Field(default=10, ge=1)
 
     # The RAG MCP server, which gives the assistant its search tools.
     mcp_rag_url: str = "http://mcp-rag:8001/mcp"
