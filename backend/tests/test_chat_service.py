@@ -176,34 +176,38 @@ def test_approval_without_a_pending_action_is_refused(monkeypatch) -> None:
         chat_service.submit_approval(graph, 1, first.thread_id, True, None, None)
 
 
-def test_a_search_is_shown_as_a_note_with_the_templates_used(monkeypatch) -> None:
+def test_a_draft_written_from_a_template_shows_its_source(monkeypatch) -> None:
     monkeypatch.setattr(
         recruiter.mcp_client,
         "call_tool",
         lambda name, arguments: [{"source": "backend.txt", "similarity": 0.8, "text": "T"}],
     )
     graph = graph_with_replies(
-        monkeypatch, [search_call(), AIMessage("Based on: backend.txt\n" + DRAFT_ONE)]
+        monkeypatch, [search_call(), AIMessage(DRAFT_ONE), AIMessage(DRAFT_TWO)]
     )
 
     view = chat_service.send_message(graph, 1, None, "I need a backend engineer")
 
-    assert _kinds(view) == ["user", "note", "assistant", "description"]
-    assert view.items[1].text == "Checked your Knowledge Base. Using: backend.txt"
-    assert view.items[2].text == "Based on: backend.txt"
+    assert _kinds(view) == ["user", "description"]
+    assert view.items[1].from_knowledge_base is True
     assert view.stage == "reviewing_description"
 
+    revised = chat_service.send_message(graph, 1, view.thread_id, "Make it shorter")
 
-def test_a_search_with_no_match_says_so(monkeypatch) -> None:
+    assert revised.items[-1].from_knowledge_base is True
+
+
+def test_a_search_with_no_match_shows_no_source(monkeypatch) -> None:
     monkeypatch.setattr(recruiter.mcp_client, "call_tool", lambda name, arguments: [])
     graph = graph_with_replies(monkeypatch, [search_call(), AIMessage(DRAFT_ONE)])
 
     view = chat_service.send_message(graph, 1, None, "I need a pastry chef")
 
-    assert view.items[1].text == "Checked your Knowledge Base. No similar template found."
+    assert _kinds(view) == ["user", "description"]
+    assert view.items[1].from_knowledge_base is False
 
 
-def test_an_unavailable_search_is_reported_plainly(monkeypatch) -> None:
+def test_an_unavailable_search_shows_no_source(monkeypatch) -> None:
     def broken_call_tool(name: str, arguments: dict) -> list[dict]:
         raise ConnectionError("server down")
 
@@ -212,5 +216,5 @@ def test_an_unavailable_search_is_reported_plainly(monkeypatch) -> None:
 
     view = chat_service.send_message(graph, 1, None, "I need a backend engineer")
 
-    assert view.items[1].text == "The Knowledge Base search was not available."
-    assert view.items[-1].kind == "description"
+    assert _kinds(view) == ["user", "description"]
+    assert view.items[1].from_knowledge_base is False

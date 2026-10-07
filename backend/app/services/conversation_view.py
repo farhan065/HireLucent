@@ -96,6 +96,9 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
     }
     items: list[TimelineItem] = []
     version = 0
+    # True from the first search that found a template. Every draft after
+    # it is built on that template, so each one shows the source.
+    used_template = False
 
     for index, message in enumerate(messages):
         item_id = message.id or f"m{index}"
@@ -110,7 +113,7 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
                     text=f"You edited the job description. Saved as draft {version}.",
                 )
             )
-            items.append(_description_item(item_id, draft, version))
+            items.append(_description_item(item_id, draft, version, used_template))
         elif isinstance(message, HumanMessage):
             items.append(TimelineItem(id=item_id, kind="user", text=message.text))
         elif isinstance(message, AIMessage):
@@ -122,14 +125,16 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
                             id=f"{item_id}-intro", kind="assistant", text=draft.preamble
                         )
                     )
-                items.append(_description_item(item_id, draft, version))
+                items.append(_description_item(item_id, draft, version, used_template))
             elif message.text.strip():
                 items.append(
                     TimelineItem(id=item_id, kind="assistant", text=message.text)
                 )
             for call in message.tool_calls:
                 if call["name"] != SAVE_TOOL:
-                    items.append(_search_note(call["id"], results.get(call["id"])))
+                    used_template = used_template or _found_template(
+                        results.get(call["id"])
+                    )
                     continue
                 status = outcomes.get(call["id"], "waiting")
                 if status != "invalid":
@@ -146,30 +151,24 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
     return items
 
 
-def _search_note(item_id: str, result: str | None) -> TimelineItem:
-    """A short line saying what the Knowledge Base search found."""
-    if result is not None and not result.startswith("["):
-        return TimelineItem(
-            id=item_id, kind="note", text="The Knowledge Base search was not available."
-        )
+def _found_template(result: str | None) -> bool:
+    """True if a Knowledge Base search returned at least one template."""
     try:
-        sources = [reference["source"] for reference in json.loads(result or "")]
-    except (ValueError, TypeError, KeyError):
-        sources = []
-    if sources:
-        text = "Checked your Knowledge Base. Using: " + ", ".join(sources)
-    else:
-        text = "Checked your Knowledge Base. No similar template found."
-    return TimelineItem(id=item_id, kind="note", text=text)
+        return bool(json.loads(result or ""))
+    except ValueError:
+        return False
 
 
-def _description_item(item_id: str, draft: Any, version: int) -> TimelineItem:
+def _description_item(
+    item_id: str, draft: Any, version: int, from_knowledge_base: bool
+) -> TimelineItem:
     return TimelineItem(
         id=item_id,
         kind="description",
         title=draft.title,
         text=draft.body,
         version=version,
+        from_knowledge_base=from_knowledge_base,
         status="waiting",
     )
 

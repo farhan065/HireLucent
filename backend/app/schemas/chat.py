@@ -20,6 +20,8 @@ class TimelineItem(BaseModel):
     # description only
     title: str | None = None
     version: int | None = None
+    # description only: a Knowledge Base template was used to write it.
+    from_knowledge_base: bool = False
     # description: waiting, replaced or approved.
     # requirements: waiting, changed or approved.
     status: str | None = None
