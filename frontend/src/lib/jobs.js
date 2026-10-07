@@ -8,21 +8,26 @@ export const JOB_STAGES = {
   description_approved: { label: 'Description approved', tone: 'info', group: 'drafting' },
   requirements_confirmed: { label: 'Requirements confirmed', tone: 'info', group: 'drafting' },
   published: { label: 'Published', tone: 'success', group: 'published' },
-  cvs_screened: { label: 'CVs screened', tone: 'source', group: 'cvs_screened' },
+  cvs_screened: { label: 'CVs screened', tone: 'teal', group: 'cvs_screened' },
   interviews_scheduled: {
     label: 'Interviews scheduled',
-    tone: 'teal',
+    tone: 'amber',
     group: 'interviews_scheduled',
   },
   archived: { label: 'Archived', tone: 'neutral', group: 'archived' },
 }
 
+// The filters on the Jobs page and Dashboard. "selected" is how a filter
+// looks when it is chosen, in the colour of its stage.
 export const STAGE_GROUPS = {
-  drafting: 'Drafting',
-  published: 'Published',
-  cvs_screened: 'CVs screened',
-  interviews_scheduled: 'Interviews scheduled',
-  archived: 'Archived',
+  drafting: { label: 'Drafting', selected: 'border-brand bg-tint text-brand-dark' },
+  published: { label: 'Published', selected: 'border-success bg-success-soft text-success' },
+  cvs_screened: { label: 'CVs screened', selected: 'border-teal bg-teal-soft text-teal' },
+  interviews_scheduled: {
+    label: 'Interviews scheduled',
+    selected: 'border-amber bg-amber-soft text-amber',
+  },
+  archived: { label: 'Archived', selected: 'border-body bg-mist text-navy' },
 }
 
 const SCREENED = ['screened', 'excluded', 'shortlisted', 'selected']

@@ -60,3 +60,14 @@ export async function apiRequest(path, { method = 'GET', body } = {}) {
   }
   return data
 }
+
+// Downloads a file that needs the access token, such as a candidate's CV.
+export async function apiFile(path) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${getAccessToken()}` },
+  }).catch(() => null)
+  if (!response?.ok) {
+    throw new ApiError(response?.status ?? 0, 'file_error', 'The file could not be opened.')
+  }
+  return response.blob()
+}

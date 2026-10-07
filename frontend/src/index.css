@@ -111,6 +111,33 @@
   }
 }
 
+/* A soft light moving across a placeholder while content loads. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@utility animate-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-line) 25%,
+    var(--color-mist) 50%,
+    var(--color-line) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer {
+    animation: none;
+  }
+}
+
 /* A brief light-blue outline on a part of the job brief that just changed. */
 @keyframes highlight {
   from {
