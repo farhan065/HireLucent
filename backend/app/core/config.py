@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     # Cosine distance: 0 is identical, 1 is unrelated.
     jd_reference_max_distance: float = Field(default=0.6, ge=0, le=2)
 
+    # The Blogger MCP server, which publishes approved job posts.
+    mcp_blogger_url: str = "http://mcp-blogger:8002/mcp"
+    blogger_blog_id: str = ""
+
     jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60
 
