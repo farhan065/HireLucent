@@ -1,15 +1,50 @@
 import { ExternalLink } from 'lucide-react'
-import { Link, Navigate, Outlet, useLocation, useOutletContext, useParams } from 'react-router'
+import { useCallback, useState } from 'react'
+import {
+  Link,
+  Navigate,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useOutletContext,
+  useParams,
+} from 'react-router'
+import DeleteJobButton from '../components/jobs/DeleteJobButton.jsx'
 import JobTabs from '../components/jobs/JobTabs.jsx'
+import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
 import { useJob } from '../hooks/useJob.js'
+import { useJobActivity } from '../hooks/useJobActivity.js'
 import { JOB_STAGES, formatDate, jobStage } from '../lib/jobs.js'
+
+function LoadingJob() {
+  return (
+    <div role="status" aria-label="Loading the job" className="flex flex-col gap-6">
+      <Skeleton className="h-4 w-40" />
+      <div className="flex flex-col gap-3">
+        <Skeleton className="h-9 w-80" />
+        <Skeleton className="h-5 w-64" />
+      </div>
+      <Skeleton className="h-10 w-full" />
+      <Skeleton className="h-40 w-full rounded-card" />
+    </div>
+  )
+}
 
 // One job's own page: its header and stage tabs, with the chosen tab below.
 export default function JobPage() {
   const { jobId } = useParams()
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const { job, threadId, waiting, error, reload } = useJob(jobId)
+
+  // When a fetch or a screening ends, the job and its candidates load again.
+  const [listVersion, setListVersion] = useState(0)
+  const handleFinished = useCallback(() => {
+    reload()
+    setListVersion((version) => version + 1)
+  }, [reload])
+  const run = useJobActivity(jobId, handleFinished)
 
   if (error) {
     return (
@@ -18,46 +53,58 @@ export default function JobPage() {
       </p>
     )
   }
-  if (!job) return <p role="status">Loading the job…</p>
 
-  const stage = JOB_STAGES[jobStage(job)]
+  const stage = job && JOB_STAGES[jobStage(job)]
   const current = pathname.endsWith('/screening') ? 'screening' : 'applications'
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
-      <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-sm">
-        <Link to="/app/jobs" className="font-semibold text-brand hover:text-brand-dark">
-          Jobs
-        </Link>
-        <span aria-hidden="true">›</span>
-        <span className="font-semibold text-navy">{job.title}</span>
-      </nav>
+      {!job ? (
+        <LoadingJob />
+      ) : (
+        <>
+          <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-sm">
+            <Link to="/app/jobs" className="font-semibold text-brand hover:text-brand-dark">
+              Jobs
+            </Link>
+            <span aria-hidden="true">›</span>
+            <span className="font-semibold text-navy">{job.title}</span>
+          </nav>
 
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight">{job.title}</h1>
-          <div className="mt-2 flex flex-wrap items-center gap-2.5 text-[15px]">
-            <span>{job.job_code}</span>
-            <StatusChip tone={stage.tone}>{stage.label}</StatusChip>
-            {job.published_at && <span>Published {formatDate(job.published_at)}</span>}
-          </div>
-        </div>
-        {job.post_url && (
-          <a
-            href={job.post_url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex min-h-10 items-center gap-1.5 text-[15px] font-semibold text-brand hover:text-brand-dark"
-          >
-            <ExternalLink className="size-4" aria-hidden="true" />
-            View the public post
-          </a>
-        )}
-      </header>
+          <header className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-extrabold tracking-tight">{job.title}</h1>
+              <div className="mt-2 flex flex-wrap items-center gap-2.5 text-[15px]">
+                <span>{job.job_code}</span>
+                <StatusChip tone={stage.tone}>{stage.label}</StatusChip>
+                {job.published_at && <span>Published {formatDate(job.published_at)}</span>}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-5">
+              {job.post_url && (
+                <a
+                  href={job.post_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-h-10 items-center gap-1.5 text-[15px] font-semibold text-brand hover:text-brand-dark"
+                >
+                  <ExternalLink className="size-4" aria-hidden="true" />
+                  View the public post
+                </a>
+              )}
+              <DeleteJobButton
+                job={job}
+                label="Delete job"
+                onDeleted={() => navigate('/app/jobs', { replace: true })}
+              />
+            </div>
+          </header>
 
-      <JobTabs job={job} threadId={threadId} waiting={waiting} current={current} />
+          <JobTabs job={job} threadId={threadId} waiting={waiting} current={current} />
 
-      <Outlet context={{ job, threadId, waiting, reload }} />
+          <Outlet context={{ job, threadId, waiting, run, listVersion }} />
+        </>
+      )}
     </div>
   )
 }
