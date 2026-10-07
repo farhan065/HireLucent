@@ -80,3 +80,5 @@ class ConversationStage(StrEnum):
     REVIEWING_DESCRIPTION = "reviewing_description"
     CONFIRMING_REQUIREMENTS = "confirming_requirements"
     SAVED = "saved"
+    CONFIRMING_POST = "confirming_post"
+    PUBLISHED = "published"

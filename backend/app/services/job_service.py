@@ -1,6 +1,7 @@
 """JobService: creating, reading, updating and archiving job profiles."""
 
 import re
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -134,6 +135,21 @@ def update_profile(
     job.scoring_weights = scoring_weights.model_dump()
     db.commit()
     log_event(logger, "job_profile_updated", job_id=job.id)
+    return get_job(db, job_id)
+
+
+def mark_published(
+    db: Session, job_id: int, form_id: str, form_url: str, post_url: str
+) -> Job:
+    """Record the application form and the public post of a published job."""
+    job = get_job(db, job_id)
+    job.form_id = form_id
+    job.form_url = form_url
+    job.post_url = post_url
+    job.status = JobStatus.PUBLISHED
+    job.published_at = datetime.now(UTC)
+    db.commit()
+    log_event(logger, "job_published", job_id=job.id)
     return get_job(db, job_id)
 
 
