@@ -7,15 +7,16 @@ editing address in quotes:
 
 import sys
 
-from app.services.google_forms import FormLinkError, get_form
+from app.core.errors import AppError
+from app.services.google_forms import get_form
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         sys.exit("Give the form's editing address in quotes.")
     try:
         form = get_form(sys.argv[1])
-    except FormLinkError as error:
-        sys.exit(str(error))
+    except AppError as error:
+        sys.exit(error.message)
     print(f"Form: {form.title}")
     print(f"Public link: {form.public_url}")
     print(f"Accepting responses: {'yes' if form.accepts_responses else 'no'}")
