@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiRequest } from '../../lib/api.js'
 import Button from '../Button.jsx'
 import Markdown from '../chat/Markdown.jsx'
-import RequirementChips from '../RequirementChips.jsx'
+import RequirementList from '../RequirementList.jsx'
 import SidePanel from '../SidePanel.jsx'
 import WeightsBar from '../WeightsBar.jsx'
 
@@ -47,14 +47,9 @@ export default function JobDetailsPanel({ jobId, threadId, onClose }) {
         <div className="text-[15px]">
           <Markdown>{job.jd_text}</Markdown>
 
-          <Heading>Must-have</Heading>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            <RequirementChips items={job.requirements.items} priority="must_have" />
-          </div>
-
-          <Heading>Preferred</Heading>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            <RequirementChips items={job.requirements.items} priority="preferred" />
+          <Heading>Requirements</Heading>
+          <div className="mt-2.5">
+            <RequirementList items={job.requirements.items} />
           </div>
 
           <Heading>Minimum experience</Heading>

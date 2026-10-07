@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { WEIGHT_LABELS } from '../../lib/stages.js'
 import Button from '../Button.jsx'
-import RequirementChips from '../RequirementChips.jsx'
+import RequirementList from '../RequirementList.jsx'
 import StatusChip from '../StatusChip.jsx'
 import RequirementsEditor from './RequirementsEditor.jsx'
 
@@ -58,13 +58,8 @@ export default function RequirementsCard({ item, canAct, onConfirm }) {
           onCancel={() => setIsEditing(false)}
         />
       ) : (
-        <div className="flex flex-col gap-2.5 px-4 py-3.5">
-          <Row label="Must-have">
-            <RequirementChips items={requirements.items} priority="must_have" />
-          </Row>
-          <Row label="Preferred">
-            <RequirementChips items={requirements.items} priority="preferred" />
-          </Row>
+        <div className="flex flex-col gap-3 px-4 py-3.5">
+          <RequirementList items={requirements.items} />
           <Row label="Experience">
             <strong className="text-sm text-navy">
               {requirements.min_experience_years > 0

@@ -1,6 +1,6 @@
 import { Check } from 'lucide-react'
 import { useState } from 'react'
-import RequirementChips from '../RequirementChips.jsx'
+import RequirementList from '../RequirementList.jsx'
 import SidePanel from '../SidePanel.jsx'
 import StatusChip from '../StatusChip.jsx'
 import WeightsBar from '../WeightsBar.jsx'
@@ -128,11 +128,9 @@ export default function JobBrief({ view }) {
       >
         {brief.requirements ? (
           <>
-            <div className="flex flex-wrap gap-1.5">
-              <RequirementChips items={brief.requirements.items} />
-            </div>
+            <RequirementList items={brief.requirements.items} />
             <p className="text-[13px]">
-              Dark chips are must-haves. Minimum experience:{' '}
+              Minimum experience:{' '}
               {brief.requirements.min_experience_years > 0
                 ? `${brief.requirements.min_experience_years} years`
                 : 'none'}
