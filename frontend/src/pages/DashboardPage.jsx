@@ -4,29 +4,13 @@ import JobCard from '../components/dashboard/JobCard.jsx'
 import JobDetailsPanel from '../components/dashboard/JobDetailsPanel.jsx'
 import RoleBox from '../components/dashboard/RoleBox.jsx'
 import { apiRequest } from '../lib/api.js'
+import { buildCards } from '../lib/jobs.js'
 import { WAITING_STAGES } from '../lib/stages.js'
 
 const FILTERS = {
   all: 'All jobs',
   open: 'Open jobs',
   waiting: 'Waiting for your decision',
-}
-
-// Join saved jobs with their conversations, and add conversations that
-// have not saved a job yet. Each entry becomes one card.
-function buildCards(jobs, conversations) {
-  const byJob = new Map(
-    conversations.filter((item) => item.job_id).map((item) => [item.job_id, item]),
-  )
-  const drafts = conversations
-    .filter((item) => !item.job_id)
-    .map((conversation) => ({ key: conversation.thread_id, conversation }))
-  const saved = jobs.map((job) => ({
-    key: `job-${job.id}`,
-    job,
-    conversation: byJob.get(job.id),
-  }))
-  return [...drafts, ...saved]
 }
 
 function matchesFilter(card, filter) {

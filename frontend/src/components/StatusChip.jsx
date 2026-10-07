@@ -5,6 +5,7 @@ const TONES = {
   info: 'bg-tint text-brand-dark',
   neutral: 'bg-mist text-body',
   source: 'bg-violet-soft text-violet',
+  teal: 'bg-teal-soft text-teal',
 }
 
 // Status is shown with a label as well as colour, never colour alone.
