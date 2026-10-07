@@ -74,7 +74,53 @@ requests to the backend, so the browser talks to a single address.
 |---|---|---|
 | Google Gemini API | Text generation and analysis | Prompts, which will include job descriptions, CV text and interview transcripts |
 | Ollama (local container) | Embeddings | Nothing leaves the machine |
+| Google Blogger API | Publishing approved job posts | The job title, description, job code and application form link |
+| Google Forms and Drive APIs | Checking the application form and collecting CVs | Nothing is sent. Form responses and uploaded CVs are read. |
 
 The provider and model are set in `.env` (`LLM_PROVIDER`, `LLM_MODEL`,
 `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`). Prompts and model answers are never
 written to the logs.
+
+## Google setup (publishing and CV collection)
+
+Job posts are published to a Blogger page, and CVs arrive through a Google
+Form. Blogger is an openly declared stand-in for job portals such as LinkedIn
+and BdJobs, whose posting APIs are open to partners only. The rest of the
+application starts and works without this setup; only publishing and CV
+collection need it.
+
+One-time setup with a personal Google account:
+
+1. Create a Blogger blog and note its blog ID.
+2. In a Google Cloud project, enable the Blogger, Google Forms and Google
+   Drive APIs.
+3. Set the OAuth consent screen to External and Testing, and add your own
+   address as a test user.
+4. Create an OAuth client of type Desktop app and save its JSON file as
+   `secrets/google_client.json`.
+5. Create an API key restricted to the Blogger API.
+6. Set `BLOGGER_BLOG_ID` and `BLOGGER_API_KEY` in `.env`.
+7. Sign in once, on your own computer (it opens a browser):
+
+   ```bash
+   cd backend
+   python -m scripts.google_auth
+   ```
+
+   This saves `secrets/google_token.json` and `secrets/blogger_tokens.json`.
+8. Start the application and check the connection. Nothing is published:
+
+   ```bash
+   docker compose up -d --build
+   docker compose exec backend python -m scripts.blogger_check
+   ```
+
+The `secrets/` folder is git-ignored and must never be committed. While the
+consent screen is in Testing mode a sign-in lasts about 7 days, so run step 7
+again when publishing stops working, and before a demo.
+
+The `mcp-blogger` service runs the community
+[blogger-mcp-server](https://github.com/zachsladecode/blogger-mcp-server)
+(MIT licence), pinned to one commit, behind an HTTP bridge. The application
+only ever calls its create-post tool, and only after the interviewer approves
+the post.
