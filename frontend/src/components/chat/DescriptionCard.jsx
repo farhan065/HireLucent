@@ -101,6 +101,11 @@ export default function DescriptionCard({ item, canAct, canEdit, onApprove, onEd
               {item.text.replace(/[#*]/g, '')}
             </p>
           )}
+          {item.from_knowledge_base && (
+            <div className="mt-3">
+              <StatusChip tone="source">Source: Knowledge Base</StatusChip>
+            </div>
+          )}
           {!isCurrent && (
             <button
               type="button"

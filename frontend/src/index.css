@@ -24,6 +24,13 @@
   --color-warning-soft: #fff4dc;
   --color-danger: #b42318;
   --color-danger-soft: #fdecea;
+  /* Where a draft came from, kept apart from status colours. */
+  --color-violet: #4b32c3;
+  --color-violet-soft: #f1eeff;
+  --color-teal: #0b5f80;
+  --color-teal-soft: #e4f4fb;
+  --color-amber: #8a4300;
+  --color-amber-soft: #fff1e6;
 
   --radius-card: 1.375rem;
   --shadow-card: 0 10px 30px rgb(11 31 75 / 0.06);

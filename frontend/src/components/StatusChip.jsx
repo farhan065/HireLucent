@@ -4,6 +4,7 @@ const TONES = {
   danger: 'bg-danger-soft text-danger',
   info: 'bg-tint text-brand-dark',
   neutral: 'bg-mist text-body',
+  source: 'bg-violet-soft text-violet',
 }
 
 // Status is shown with a label as well as colour, never colour alone.
