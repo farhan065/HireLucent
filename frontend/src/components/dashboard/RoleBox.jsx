@@ -10,7 +10,7 @@ const EXAMPLES = [
 ]
 
 // Start a new job from the dashboard by describing the role. The text is
-// carried to the Hiring Assistant and sent as the first message.
+// carried to the AI Agent and sent as the first message.
 export default function RoleBox() {
   const [text, setText] = useState('')
   const navigate = useNavigate()
@@ -44,7 +44,7 @@ export default function RoleBox() {
 
       <div className="relative">
         <span className="text-[13px] font-semibold uppercase tracking-widest text-brand">
-          Hiring Assistant
+          AI Agent
         </span>
         <h2 className="mt-1.5 text-2xl font-extrabold tracking-tight">
           What role are you hiring for?

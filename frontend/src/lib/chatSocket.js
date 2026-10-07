@@ -2,7 +2,7 @@ import { getAccessToken } from './api.js'
 
 const RECONNECT_DELAY_MS = 2000
 
-// Opens the live connection to the Hiring Assistant and keeps it open.
+// Opens the live connection to the AI Agent and keeps it open.
 // onEvent receives each server event; onStatus receives "connecting",
 // "connected" or "disconnected".
 export function openChatSocket({ onEvent, onStatus }) {

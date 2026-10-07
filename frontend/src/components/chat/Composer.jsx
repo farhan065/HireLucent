@@ -64,7 +64,7 @@ export default function Composer({ stage, isDisabled, onSend }) {
       )}
       <div className="flex items-end gap-2.5 rounded-[18px] border-[1.5px] border-line bg-white py-2 pl-4 pr-2 shadow-card focus-within:border-brand">
         <textarea
-          aria-label="Message the Hiring Assistant"
+          aria-label="Message the AI Agent"
           rows={1}
           value={text}
           onChange={(event) => setText(event.target.value)}

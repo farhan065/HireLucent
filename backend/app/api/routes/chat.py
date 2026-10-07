@@ -1,4 +1,4 @@
-"""Hiring Assistant endpoints (the non-streaming API)."""
+"""AI Agent endpoints (the non-streaming API)."""
 
 from fastapi import APIRouter, Depends
 from langgraph.graph.state import CompiledStateGraph
@@ -37,7 +37,7 @@ def list_conversations(
 @router.post(
     "/messages",
     response_model=ConversationView,
-    summary="Send a message to the Hiring Assistant",
+    summary="Send a message to the AI Agent",
     responses={503: {"model": ErrorResponse, "description": "AI unavailable"}},
 )
 def send_message(

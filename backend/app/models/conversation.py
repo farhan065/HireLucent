@@ -1,4 +1,4 @@
-"""Chat conversations with the Hiring Assistant, one per job.
+"""Chat conversations with the AI Agent, one per job.
 
 The messages themselves are stored by LangGraph in its checkpoints. This
 table holds a short summary of each conversation, so they can be listed.

@@ -65,7 +65,7 @@
   }
 }
 
-/* Motion for the Hiring Assistant. All of it is switched off below for
+/* Motion for the AI Agent. All of it is switched off below for
    people who ask their device to reduce motion. */
 @keyframes rise-in {
   from {

@@ -1,4 +1,4 @@
-"""Schemas for the Hiring Assistant conversation."""
+"""Schemas for the AI Agent conversation."""
 
 from datetime import datetime
 from typing import Any, Literal

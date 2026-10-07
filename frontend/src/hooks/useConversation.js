@@ -4,7 +4,7 @@ import { openChatSocket } from '../lib/chatSocket.js'
 
 const CONNECTION_LOST = 'Connection lost. Reconnecting…'
 
-// Everything the Hiring Assistant screen needs for one conversation:
+// Everything the AI Agent screen needs for one conversation:
 // the current view from the server, the reply being written, and the
 // actions the interviewer can take.
 export function useConversation(threadId, onStarted, firstMessage) {
