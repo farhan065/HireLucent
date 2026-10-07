@@ -30,7 +30,12 @@ class Candidate(TimestampMixin, Base):
     # fetch does not collect it again.
     source_ref: Mapped[str | None] = mapped_column(String(100))
     cv_path: Mapped[str] = mapped_column(String(500))
+    # The text read from the CV, and how it was read: "text" or "ocr".
+    cv_text: Mapped[str | None] = mapped_column(Text)
+    cv_text_source: Mapped[str | None] = mapped_column(String(10))
     cv_parsed: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Why screening could not process this CV, shown to the interviewer.
+    screening_error: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(30), default=CandidateStatus.APPLIED)
 
     # Final human decision (step 13).

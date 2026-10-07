@@ -15,6 +15,10 @@ class CandidateSummary(BaseModel):
     email: str
     source: str
     status: str
+    cv_text_source: str | None = Field(
+        description='How the CV was read: "text", "ocr", or empty if not read yet.'
+    )
+    screening_error: str | None
     created_at: datetime
 
 
