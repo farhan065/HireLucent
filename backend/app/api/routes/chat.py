@@ -1,9 +1,11 @@
 """AI Agent endpoints (the non-streaming API)."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from langgraph.graph.state import CompiledStateGraph
+from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, require_interviewer
+from app.db.session import get_db
 from app.graphs.recruiter.graph import get_recruiter_graph
 from app.models import Conversation
 from app.schemas.chat import (
@@ -14,7 +16,7 @@ from app.schemas.chat import (
     DescriptionEditRequest,
 )
 from app.schemas.error import ErrorResponse
-from app.services import chat_service, conversation_store
+from app.services import chat_service, conversation_store, job_deletion
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -32,6 +34,22 @@ def list_conversations(
 ) -> list[Conversation]:
     """Most recently used first. There is one conversation per job."""
     return conversation_store.list_summaries(principal.subject_id)
+
+
+@router.delete(
+    "/conversations/{thread_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a conversation that has not saved a job yet",
+    responses={**NOT_FOUND, **CONFLICT},
+)
+def delete_conversation(
+    thread_id: str,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+) -> None:
+    """For a job that is still being drafted. A saved job is deleted with
+    DELETE /jobs/{id}, which removes its conversation too."""
+    job_deletion.delete_draft(db, principal.subject_id, thread_id)
 
 
 @router.post(
