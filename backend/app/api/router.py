@@ -12,6 +12,7 @@ from app.api.routes import (
     intake,
     jobs,
     knowledge,
+    screening,
     tasks,
 )
 
@@ -23,6 +24,7 @@ api_router.include_router(graphs.router)
 api_router.include_router(tasks.router)
 api_router.include_router(jobs.router)
 api_router.include_router(intake.router)
+api_router.include_router(screening.router)
 api_router.include_router(chat.router)
 api_router.include_router(chat_ws.router)
 api_router.include_router(knowledge.router)
