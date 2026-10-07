@@ -26,6 +26,7 @@ services:
       - "8000:8000"
     volumes:
       - ./logs:/app/logs
+      - ./secrets:/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,6 +81,24 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    networks:
+      - hirelucent
+
+  mcp-blogger:
+    build: ./mcp-blogger
+    restart: unless-stopped
+    environment:
+      BLOGGER_API_KEY: ${BLOGGER_API_KEY:-}
+      BLOGGER_ID: ${BLOGGER_BLOG_ID:-}
+    volumes:
+      # Read and write: the server saves its refreshed sign-in here.
+      - ./secrets:/secrets
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8002/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - hirelucent
 
