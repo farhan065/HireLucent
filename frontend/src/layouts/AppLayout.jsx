@@ -1,12 +1,13 @@
-import { BookOpen, BriefcaseBusiness, LayoutDashboard, LogOut, Sparkles } from 'lucide-react'
+import { BookOpen, BriefcaseBusiness, LayoutDashboard, LogOut } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { useAuth } from '../auth/AuthContext.js'
+import AgentAvatar from '../components/AgentAvatar.jsx'
 import Logo from '../components/Logo.jsx'
 
 const NAV_ITEMS = [
   { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/app/jobs', label: 'Jobs', icon: BriefcaseBusiness },
-  { to: '/app/assistant', label: 'AI Agent', icon: Sparkles },
+  { to: '/app/assistant', label: 'AI Agent', icon: AgentAvatar },
   { to: '/app/knowledge', label: 'Knowledge Base', icon: BookOpen },
 ]
 

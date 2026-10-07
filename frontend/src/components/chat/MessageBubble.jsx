@@ -1,15 +1,9 @@
+import AgentAvatar from '../AgentAvatar.jsx'
 import Markdown from './Markdown.jsx'
 
-// The small HireLucent mark shown beside everything the assistant says.
+// The agent's face, shown beside everything it says.
 export function AssistantMark() {
-  return (
-    <span
-      aria-hidden="true"
-      className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-brand"
-    >
-      <img src="/favicon.svg" alt="" className="size-6" />
-    </span>
-  )
+  return <AgentAvatar className="size-8" />
 }
 
 // A row with the assistant's mark on the left and its content beside it.
