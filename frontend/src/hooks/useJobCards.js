@@ -26,5 +26,10 @@ export function useJobCards() {
       .catch((loadError) => setError(loadError.message))
   }, [])
 
-  return { cards, error }
+  // Take a deleted job out of the list without loading everything again.
+  function remove(key) {
+    setCards((current) => current.filter((card) => card.key !== key))
+  }
+
+  return { cards, error, remove }
 }

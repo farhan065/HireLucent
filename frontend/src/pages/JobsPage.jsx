@@ -1,7 +1,10 @@
-import { ArrowRight, Search, Sparkles } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
+import AgentAvatar from '../components/AgentAvatar.jsx'
 import Button from '../components/Button.jsx'
+import DeleteJobButton from '../components/jobs/DeleteJobButton.jsx'
+import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
 import { useJobCards } from '../hooks/useJobCards.js'
 import {
@@ -16,16 +19,16 @@ import {
 const LINK = 'flex min-h-10 items-center gap-1.5 text-sm font-semibold text-brand hover:text-brand-dark'
 const HEADING = 'px-5 py-2.5 text-left text-xs font-semibold uppercase tracking-wider'
 
-function FilterButton({ isActive, count, onClick, children }) {
+const ALL_SELECTED = 'border-brand bg-brand text-white'
+
+function FilterButton({ isActive, selected, count, onClick, children }) {
   return (
     <button
       type="button"
       aria-pressed={isActive}
       onClick={onClick}
-      className={`min-h-10 rounded-full px-3.5 text-sm font-semibold ${
-        isActive
-          ? 'bg-navy text-white'
-          : 'border-[1.5px] border-line bg-white text-body hover:border-brand'
+      className={`min-h-10 rounded-full border-[1.5px] px-3.5 text-sm font-semibold ${
+        isActive ? selected : 'border-line bg-white text-body hover:border-brand'
       }`}
     >
       {children} <span className="ml-1 opacity-70">{count}</span>
@@ -33,7 +36,7 @@ function FilterButton({ isActive, count, onClick, children }) {
   )
 }
 
-function JobRow({ card }) {
+function JobRow({ card, onDeleted }) {
   const { job, conversation, waiting, stage } = card
   const chatLink = conversation && `/app/assistant/${conversation.thread_id}`
   return (
@@ -60,16 +63,16 @@ function JobRow({ card }) {
         <div className="flex items-center justify-end gap-4">
           {chatLink && (
             <Link to={chatLink} className={LINK}>
-              <Sparkles className="size-4" aria-hidden="true" />
+              <AgentAvatar className="size-5" />
               AI Agent
             </Link>
           )}
           {job && (
             <Link to={`/app/jobs/${job.id}`} className={LINK}>
-              <ArrowRight className="size-4" aria-hidden="true" />
-              Open job
+              Open job page
             </Link>
           )}
+          <DeleteJobButton job={job} conversation={conversation} onDeleted={onDeleted} />
         </div>
       </td>
     </tr>
@@ -78,7 +81,7 @@ function JobRow({ card }) {
 
 // Every job in one list, with filters by stage and a search box.
 export default function JobsPage() {
-  const { cards, error } = useJobCards()
+  const { cards, error, remove } = useJobCards()
   const [group, setGroup] = useState('all')
   const [search, setSearch] = useState('')
 
@@ -101,7 +104,7 @@ export default function JobsPage() {
           </p>
         </div>
         <Button to="/app/assistant" state={{ fresh: true }}>
-          <Sparkles className="size-4.5" aria-hidden="true" />
+          <Plus className="size-4.5" aria-hidden="true" />
           New job
         </Button>
       </header>
@@ -111,7 +114,18 @@ export default function JobsPage() {
           {error}
         </p>
       )}
-      {!cards && !error && <p role="status">Loading your jobs…</p>}
+      {!cards && !error && (
+        <div
+          role="status"
+          aria-label="Loading your jobs"
+          className="flex flex-col gap-4 rounded-card border border-line bg-white p-5 shadow-card"
+        >
+          <Skeleton className="h-10 w-2/3" />
+          {[0, 1, 2, 3].map((row) => (
+            <Skeleton key={row} className="h-14 w-full" />
+          ))}
+        </div>
+      )}
 
       {cards && (
         <section
@@ -122,15 +136,17 @@ export default function JobsPage() {
             <div className="flex flex-wrap gap-2">
               <FilterButton
                 isActive={group === 'all'}
+                selected={ALL_SELECTED}
                 count={rows.length}
                 onClick={() => setGroup('all')}
               >
                 All
               </FilterButton>
-              {Object.entries(STAGE_GROUPS).map(([key, label]) => (
+              {Object.entries(STAGE_GROUPS).map(([key, { label, selected }]) => (
                 <FilterButton
                   key={key}
                   isActive={group === key}
+                  selected={selected}
                   count={rows.filter((row) => row.stage.group === key).length}
                   onClick={() => setGroup(key)}
                 >
@@ -173,7 +189,7 @@ export default function JobsPage() {
                 </thead>
                 <tbody>
                   {shown.map((row) => (
-                    <JobRow key={row.key} card={row} />
+                    <JobRow key={row.key} card={row} onDeleted={() => remove(row.key)} />
                   ))}
                 </tbody>
               </table>
