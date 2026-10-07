@@ -6,7 +6,9 @@ import Composer from '../components/chat/Composer.jsx'
 import JobBrief from '../components/chat/JobBrief.jsx'
 import JobSwitcher from '../components/chat/JobSwitcher.jsx'
 import Timeline from '../components/chat/Timeline.jsx'
+import JobTabs from '../components/jobs/JobTabs.jsx'
 import { useConversation } from '../hooks/useConversation.js'
+import { useJob } from '../hooks/useJob.js'
 import { getLastThread, setLastThread } from '../lib/stages.js'
 
 const APPROVE_MESSAGE = 'I approve this job description.'
@@ -33,7 +35,7 @@ function EmptyState() {
   )
 }
 
-// The Hiring Assistant: one conversation that creates and manages one job.
+// The AI Agent: one conversation that creates and manages one job.
 export default function AssistantPage() {
   const { threadId } = useParams()
   const location = useLocation()
@@ -74,6 +76,8 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
   const connection = STATUS_LABELS[status]
   const stage = view?.stage ?? 'describing'
   const isEmpty = !view && !isBusy
+  // Once the job is saved, its stage tabs are shown above the conversation.
+  const saved = useJob(view?.brief.job_id, view?.brief.post_url)
 
   // Remember this conversation, or forget it if it could not be opened.
   useEffect(() => {
@@ -95,6 +99,16 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
           </Button>
         </div>
       </header>
+      {saved.job && (
+        <div className="border-b border-line bg-white px-6 pt-3.5">
+          <JobTabs
+            job={saved.job}
+            threadId={view.thread_id}
+            waiting={saved.waiting}
+            current="post"
+          />
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
