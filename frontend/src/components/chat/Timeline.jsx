@@ -8,9 +8,20 @@ import {
   ThinkingDots,
   UserBubble,
 } from './MessageBubble.jsx'
+import PostCard from './PostCard.jsx'
+import PublishedCard from './PublishedCard.jsx'
 import RequirementsCard from './RequirementsCard.jsx'
 
-function TimelineItem({ item, canAct, canEdit, onApprove, onConfirm, onEdit }) {
+function TimelineItem({
+  item,
+  canAct,
+  canEdit,
+  onApprove,
+  onConfirm,
+  onEdit,
+  onPublish,
+  onEditPost,
+}) {
   if (item.kind === 'user') return <UserBubble text={item.text} />
   if (item.kind === 'note') return <NoteLine text={item.text} />
   if (item.kind === 'assistant') {
@@ -30,6 +41,20 @@ function TimelineItem({ item, canAct, canEdit, onApprove, onConfirm, onEdit }) {
           onApprove={onApprove}
           onEdit={onEdit}
         />
+      </AssistantRow>
+    )
+  }
+  if (item.kind === 'post') {
+    return (
+      <AssistantRow>
+        <PostCard item={item} canAct={canAct} onPublish={onPublish} onEdit={onEditPost} />
+      </AssistantRow>
+    )
+  }
+  if (item.kind === 'published') {
+    return (
+      <AssistantRow>
+        <PublishedCard url={item.text} />
       </AssistantRow>
     )
   }
@@ -78,6 +103,8 @@ export default function Timeline({
   onApprove,
   onConfirm,
   onEdit,
+  onPublish,
+  onEditPost,
 }) {
   const endRef = useRef(null)
 
@@ -97,6 +124,8 @@ export default function Timeline({
           onApprove={onApprove}
           onConfirm={onConfirm}
           onEdit={onEdit}
+          onPublish={onPublish}
+          onEditPost={onEditPost}
         />
       ))}
       {pendingText && <UserBubble text={pendingText} />}

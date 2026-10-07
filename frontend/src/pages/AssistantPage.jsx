@@ -114,6 +114,10 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
                     conversation.submitApproval(true, edited ? { arguments: edited } : {})
                   }
                   onEdit={conversation.editDescription}
+                  onPublish={() => conversation.submitApproval(true)}
+                  onEditPost={(changes) =>
+                    conversation.submitApproval(false, { arguments: changes })
+                  }
                 />
               )}
             </div>
