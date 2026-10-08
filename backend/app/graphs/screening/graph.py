@@ -200,7 +200,7 @@ def match_requirements(state: CVState) -> dict:
         )
     except ServiceUnavailableError:
         return {"failure": AI_UNAVAILABLE}
-    store.save_matches(state["candidate_id"], matches)
+    store.save_matches(state["candidate_id"], matches, matching.match_score(matches))
     return {"matches": matches}
 
 
@@ -304,8 +304,13 @@ def screen_cv(cv: CVState) -> dict:
 
 
 def rank_candidates(state: ScreeningState) -> dict:
-    """Where every branch meets again. For now it only counts the outcomes;
-    ranking is added once the scoring steps exist."""
+    """Where every branch meets again. Ranks all matched candidates of the
+    job, from this run and earlier ones, by match score, and counts what
+    happened in this run. The final score replaces the match score as the
+    ranking once scoring exists."""
+    matched = store.load_matched(state["job_id"])
+    store.save_ranks(state["job_id"], matching.rank_order(matched))
+
     outcomes = state.get("outcomes", [])
     results = [item["outcome"] for item in outcomes]
     read_as = [item["read_as"] for item in outcomes]

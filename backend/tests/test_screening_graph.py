@@ -61,6 +61,8 @@ class FakeStore:
         self.excluded: dict[int, list[str]] = {}
         self.passed: list[int] = []
         self.matches: dict[int, list[dict]] = {}
+        self.scores: dict[int, float] = {}
+        self.ranks: list[int] = []
         self.texts: dict[int, tuple[str, str]] = {}
         self.parsed: dict[int, dict] = {}
         self.failures: dict[int, str] = {}
@@ -77,8 +79,23 @@ class FakeStore:
     def save_passed(self, candidate_id: int) -> None:
         self.passed.append(candidate_id)
 
-    def save_matches(self, candidate_id: int, matches: list[dict]) -> None:
+    def save_matches(self, candidate_id: int, matches: list[dict], score: float) -> None:
         self.matches[candidate_id] = matches
+        self.scores[candidate_id] = score
+
+    def load_matched(self, job_id: int) -> list[dict]:
+        return [
+            {
+                "candidate_id": candidate_id,
+                "full_name": f"Candidate {candidate_id}",
+                "match_score": self.scores[candidate_id],
+                "matches": matches,
+            }
+            for candidate_id, matches in self.matches.items()
+        ]
+
+    def save_ranks(self, job_id: int, ordered_ids: list[int]) -> None:
+        self.ranks = ordered_ids
 
     def save_cv(self, candidate_id: int, text: str, source: str, parsed: dict) -> None:
         self.texts[candidate_id] = (text, source)
@@ -88,7 +105,7 @@ class FakeStore:
         self.failures[candidate_id] = reason
 
 
-MATCHES = [{"id": "R1", "status": "met"}]
+MATCHES = [{"id": "R1", "priority": "must_have", "status": "met"}]
 
 
 @pytest.fixture(autouse=True)
@@ -369,3 +386,20 @@ def test_matching_failing_keeps_the_must_have_result(monkeypatch, tmp_path) -> N
     assert summary["failed"] == 1
     assert store.passed == [1]
     assert store.failures[1] == screening.AI_UNAVAILABLE
+
+
+def test_matched_candidates_are_ranked_by_match_score(monkeypatch, tmp_path) -> None:
+    # The branches run side by side, so the result depends on the candidate,
+    # not on the order of the calls.
+    statuses = {1: "partially_met", 2: "met"}
+    monkeypatch.setattr(
+        screening.matching,
+        "match",
+        lambda cid, *args: [{"id": "R1", "priority": "must_have", "status": statuses[cid]}],
+    )
+    paths = [_text_pdf(tmp_path / "a.pdf"), _text_pdf(tmp_path / "b.pdf")]
+
+    summary, store = run_graph(monkeypatch, paths)
+
+    assert store.scores == {1: 50.0, 2: 100.0}
+    assert store.ranks == [2, 1]
