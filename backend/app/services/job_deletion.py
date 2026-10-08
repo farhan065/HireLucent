@@ -1,5 +1,6 @@
 """Deletes a job together with everything stored for it."""
 
+import logging
 import shutil
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from app.core.errors import ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.graphs.checkpointer import get_checkpointer
 from app.models import Conversation, Task
+from app.rag import store as rag_store
 from app.services import job_service, screening_service, task_service
 
 logger = get_logger(__name__)
@@ -38,6 +40,7 @@ def delete_job(db: Session, job_id: int) -> None:
     )
     threads += [screening_service.thread_id(task_id) for task_id in screening_tasks]
 
+    _delete_cv_vectors(job_id)
     db.execute(delete(Conversation).where(Conversation.job_id == job_id))
     # Candidates, screening results and tasks go with the job (cascade).
     db.delete(job)
@@ -59,6 +62,22 @@ def delete_draft(db: Session, user_id: int, thread_id: str) -> None:
     db.commit()
     _delete_threads([thread_id])
     log_event(logger, "conversation_deleted")
+
+
+def _delete_cv_vectors(job_id: int) -> None:
+    """Remove the job's CV sections from the vector store."""
+    try:
+        rag_store.get_collection(rag_store.CV_EMBEDDINGS).delete(where={"job_id": job_id})
+    except Exception as exc:
+        # The database rows still go. The sections are tagged with this job
+        # only, so nothing can reach them once the job is gone.
+        log_event(
+            logger,
+            "cv_vectors_not_deleted",
+            level=logging.WARNING,
+            job_id=job_id,
+            error_type=type(exc).__name__,
+        )
 
 
 def _delete_threads(threads: list[str]) -> None:
