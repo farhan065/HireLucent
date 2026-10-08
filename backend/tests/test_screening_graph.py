@@ -1,6 +1,7 @@
 """Tests for the CV Screening graph. Files are made on the spot, and the
 database is replaced with a stand-in that records what would be saved."""
 
+import copy
 import shutil
 from pathlib import Path
 
@@ -63,6 +64,7 @@ class FakeStore:
         self.matches: dict[int, list[dict]] = {}
         self.scores: dict[int, float] = {}
         self.ranks: list[int] = []
+        self.final_ranks: list[int] = []
         self.results: dict[int, dict] = {}
         self.texts: dict[int, tuple[str, str]] = {}
         self.parsed: dict[int, dict] = {}
@@ -92,19 +94,21 @@ class FakeStore:
         self.matches[candidate_id] = matches
         self.scores[candidate_id] = score
 
-    def load_matched(self, job_id: int) -> list[dict]:
-        return [
+    def rerank(self, job_id: int) -> None:
+        candidates = [
             {
                 "candidate_id": candidate_id,
                 "full_name": f"Candidate {candidate_id}",
                 "match_score": self.scores[candidate_id],
                 "matches": matches,
+                "final_score": self.results.get(candidate_id, {}).get("final_score"),
+                "criteria_score": self.results.get(candidate_id, {}).get("criteria_score"),
             }
             for candidate_id, matches in self.matches.items()
         ]
-
-    def save_ranks(self, job_id: int, ordered_ids: list[int]) -> None:
-        self.ranks = ordered_ids
+        scored = [c for c in candidates if c["final_score"] is not None]
+        self.ranks = screening.matching.rank_order(candidates)
+        self.final_ranks = screening.scoring.final_order(scored)
 
     def save_cv(self, candidate_id: int, text: str, source: str, parsed: dict) -> None:
         self.texts[candidate_id] = (text, source)
@@ -120,6 +124,7 @@ DIMENSIONS = {
     name: {"score": 80, "justification": "Clear evidence in the CV."}
     for name in ("technical_skills", "experience", "qualifications")
 }
+SUMMARY = "Strong Python backend work. No degree is stated."
 WEIGHTS = {"technical_skills": 0.5, "experience": 0.3, "qualifications": 0.2}
 
 
@@ -130,7 +135,11 @@ def fake_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(screening, "parse_cv", lambda text: PARSED)
     monkeypatch.setattr(screening.matching, "match", lambda cid, jid, reqs, cv: MATCHES)
     monkeypatch.setattr(screening.scoring, "ats_score", lambda reqs, jd, text: ATS)
-    monkeypatch.setattr(screening.scoring, "dimension_scores", lambda *args: DIMENSIONS)
+    monkeypatch.setattr(
+        screening.scoring,
+        "dimension_scores",
+        lambda *args: {"dimensions": copy.deepcopy(DIMENSIONS), "summary": SUMMARY},
+    )
 
 
 def run_graph(
@@ -422,6 +431,33 @@ def test_matched_candidates_are_ranked_by_match_score(monkeypatch, tmp_path) -> 
     assert store.ranks == [2, 1]
 
 
+def test_scored_candidates_are_ranked_by_final_score(monkeypatch, tmp_path) -> None:
+    # Candidate 1 matches better, but candidate 2 gets the higher AI scores,
+    # so the two views rank them differently.
+    statuses = {1: "met", 2: "partially_met"}
+    monkeypatch.setattr(
+        screening.matching,
+        "match",
+        lambda cid, *args: [{"id": "R1", "priority": "must_have", "status": statuses[cid]}],
+    )
+
+    def fake_scores(title, requirements, matches, parsed):
+        score = 60 if matches[0]["status"] == "met" else 90
+        dimensions = {
+            name: {"score": score, "justification": "Clear evidence in the CV."}
+            for name in WEIGHTS
+        }
+        return {"dimensions": dimensions, "summary": SUMMARY}
+
+    monkeypatch.setattr(screening.scoring, "dimension_scores", fake_scores)
+    paths = [_text_pdf(tmp_path / "a.pdf"), _text_pdf(tmp_path / "b.pdf")]
+
+    summary, store = run_graph(monkeypatch, paths)
+
+    assert store.ranks == [1, 2]
+    assert store.final_ranks == [2, 1]
+
+
 def test_a_matched_cv_is_scored_and_saved(monkeypatch, tmp_path) -> None:
     summary, store = run_graph(monkeypatch, [_text_pdf(tmp_path / "a.pdf")])
 
@@ -432,6 +468,7 @@ def test_a_matched_cv_is_scored_and_saved(monkeypatch, tmp_path) -> None:
     assert result["final_score"] == 78.0
     assert result["dimensions"]["experience"]["weight"] == 0.3
     assert result["ats"] == ATS
+    assert result["summary"] == SUMMARY
 
 
 def test_a_cv_matched_before_goes_straight_to_scoring(monkeypatch) -> None:

@@ -39,6 +39,7 @@ GOOD = {
     "experience": {"score": 80, "justification": "Four years in backend roles."},
     "qualifications": {"score": 40, "justification": "No degree is stated in the CV."},
 }
+SUMMARY = "Strong Django and PostgreSQL work. No degree is stated, which lowers the score."
 
 
 def test_ats_score_averages_keyword_coverage_and_similarity(monkeypatch) -> None:
@@ -66,14 +67,15 @@ def test_the_ai_gets_the_evidence_grouped_by_dimension(monkeypatch) -> None:
 
     def fake_ai(prompt: str, schema: type) -> DimensionScores:
         prompts.append(prompt)
-        return DimensionScores(**GOOD)
+        return DimensionScores(**GOOD, summary=SUMMARY)
 
     monkeypatch.setattr(scoring.ai_client, "generate_structured", fake_ai)
     parsed = {"total_experience_years": 4, "education": [], "certifications": []}
 
-    dimensions = scoring.dimension_scores("Backend Engineer", REQUIREMENTS, MATCHES, parsed)
+    answer = scoring.dimension_scores("Backend Engineer", REQUIREMENTS, MATCHES, parsed)
 
-    assert dimensions["technical_skills"] == GOOD["technical_skills"]
+    assert answer["dimensions"]["technical_skills"] == GOOD["technical_skills"]
+    assert answer["summary"] == SUMMARY
     prompt = prompts[0]
     assert 'R1 (must-have) Python web development: met. Evidence: "Built REST' in prompt
     assert "Relevant experience:\n- No requirements." in prompt
@@ -89,7 +91,12 @@ def test_the_ai_gets_the_evidence_grouped_by_dimension(monkeypatch) -> None:
 )
 def test_an_invalid_answer_is_rejected(bad: dict) -> None:
     with pytest.raises(ValidationError):
-        DimensionScores(**(GOOD | {"experience": bad}))
+        DimensionScores(**(GOOD | {"experience": bad}), summary=SUMMARY)
+
+
+def test_a_missing_summary_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        DimensionScores(**GOOD, summary="Good.")
 
 
 def test_final_score_is_weighted_and_combined_with_ats() -> None:
@@ -99,3 +106,14 @@ def test_final_score_is_weighted_and_combined_with_ats() -> None:
 
     # 88 x 0.5 + 80 x 0.3 + 40 x 0.2 = 76; 0.8 x 76 + 0.2 x 73 = 75.4
     assert totals == {"criteria_score": 76.0, "final_score": 75.4}
+
+
+def test_final_order_breaks_ties_by_criteria_score_then_name() -> None:
+    candidates = [
+        {"candidate_id": 1, "full_name": "Zara", "final_score": 70.0, "criteria_score": 72.0},
+        {"candidate_id": 2, "full_name": "Adam", "final_score": 70.0, "criteria_score": 72.0},
+        {"candidate_id": 3, "full_name": "Mina", "final_score": 70.0, "criteria_score": 80.0},
+        {"candidate_id": 4, "full_name": "Omar", "final_score": 85.0, "criteria_score": 60.0},
+    ]
+
+    assert scoring.final_order(candidates) == [4, 3, 2, 1]

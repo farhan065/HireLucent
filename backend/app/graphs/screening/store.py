@@ -8,6 +8,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.db.session import SessionLocal
+from app.graphs.screening import matching, scoring
 from app.models import Candidate, Job, ScreeningResult
 from app.models.enums import CandidateStatus
 
@@ -142,11 +143,14 @@ def save_result(candidate_id: int, scores: dict) -> None:
         result.ats_details = scores["ats"]
         result.criteria_score = scores["criteria_score"]
         result.final_score = scores["final_score"]
+        result.justification = scores["summary"]
         db.commit()
 
 
-def load_matched(job_id: int) -> list[dict]:
-    """Every matched candidate of a job, for ranking."""
+def rerank(job_id: int) -> None:
+    """Rank the job's candidates again, after a screening or a deletion:
+    matched candidates by match score, scored candidates by final score.
+    Anyone else has no rank."""
     with SessionLocal() as db:
         rows = db.execute(
             select(Candidate.id, Candidate.full_name, ScreeningResult)
@@ -156,29 +160,31 @@ def load_matched(job_id: int) -> list[dict]:
                 Candidate.status != CandidateStatus.EXCLUDED,
                 ScreeningResult.requirement_matches.is_not(None),
             )
-        )
-        return [
+        ).all()
+        candidates = [
             {
                 "candidate_id": candidate_id,
                 "full_name": full_name,
                 "match_score": result.match_score or 0.0,
                 "matches": result.requirement_matches,
+                "final_score": result.final_score,
+                "criteria_score": result.criteria_score,
             }
             for candidate_id, full_name, result in rows
         ]
-
-
-def save_ranks(job_id: int, ordered_ids: list[int]) -> None:
-    """Number the job's matched candidates 1, 2, 3 in the given order. Any
-    other candidate of the job has no rank."""
-    positions = {candidate_id: rank for rank, candidate_id in enumerate(ordered_ids, 1)}
-    with SessionLocal() as db:
-        results = db.scalars(
+        scored = [c for c in candidates if c["final_score"] is not None]
+        match_ranks = _positions(matching.rank_order(candidates))
+        final_ranks = _positions(scoring.final_order(scored))
+        for result in db.scalars(
             select(ScreeningResult).join(Candidate).where(Candidate.job_id == job_id)
-        )
-        for result in results:
-            result.rank = positions.get(result.candidate_id)
+        ):
+            result.rank = match_ranks.get(result.candidate_id)
+            result.final_rank = final_ranks.get(result.candidate_id)
         db.commit()
+
+
+def _positions(ordered_ids: list[int]) -> dict[int, int]:
+    return {candidate_id: rank for rank, candidate_id in enumerate(ordered_ids, 1)}
 
 
 def _result(db, candidate_id: int) -> ScreeningResult:

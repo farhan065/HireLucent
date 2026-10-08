@@ -241,16 +241,18 @@ def score_candidate(state: CVState) -> dict:
     """Score each dimension with the AI, then combine them with the job's
     weights and the ATS score into the final score."""
     try:
-        dimensions = scoring.dimension_scores(
+        answer = scoring.dimension_scores(
             state["title"], state["requirements"], state["matches"], state["parsed"]
         )
     except ServiceUnavailableError:
         return {"failure": AI_UNAVAILABLE}
+    dimensions = answer["dimensions"]
     weights = state["scoring_weights"]
     totals = scoring.combine(dimensions, weights, state["ats"]["score"])
     for name, dimension in dimensions.items():
         dimension["weight"] = weights[name]
-    return {"scores": {"dimensions": dimensions, "ats": state["ats"], **totals}}
+    scores = {"dimensions": dimensions, "ats": state["ats"], "summary": answer["summary"]}
+    return {"scores": scores | totals}
 
 
 def route_after_score(state: CVState) -> Literal["log_failure", "save_result"]:
@@ -365,12 +367,11 @@ def screen_cv(cv: CVState) -> dict:
 
 
 def rank_candidates(state: ScreeningState) -> dict:
-    """Where every branch meets again. Ranks all matched candidates of the
-    job, from this run and earlier ones, by match score, and counts what
-    happened in this run. The final score replaces the match score as the
-    ranking once scoring exists."""
-    matched = store.load_matched(state["job_id"])
-    store.save_ranks(state["job_id"], matching.rank_order(matched))
+    """Where every branch meets again. Ranks all candidates of the job, from
+    this run and earlier ones (by final score, and by match score for the
+    requirement match view), and counts what happened in this run. It never
+    shortlists anyone; that is the interviewer's decision."""
+    store.rerank(state["job_id"])
 
     outcomes = state.get("outcomes", [])
     results = [item["outcome"] for item in outcomes]
