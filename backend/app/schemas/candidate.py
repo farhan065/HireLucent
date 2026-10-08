@@ -22,6 +22,10 @@ class CandidateSummary(BaseModel):
     excluded_reason: str | None = Field(
         default=None, description="Why screening excluded the candidate, one reason per line."
     )
+    match_counts: dict[str, int] | None = Field(
+        default=None,
+        description="Requirements met, partially_met and unmet. Empty until matched.",
+    )
     must_haves_met: bool | None = Field(
         default=None, description="Whether the must-have check passed. Empty until it has run."
     )

@@ -3,7 +3,9 @@
 Kept apart from the graph so its nodes stay easy to follow and to test.
 """
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
+
+from sqlalchemy.orm import selectinload
 
 from app.db.session import SessionLocal
 from app.models import Candidate, Job, ScreeningResult
@@ -14,31 +16,40 @@ TO_SCREEN = (CandidateStatus.APPLIED, CandidateStatus.SCREENING_FAILED)
 
 
 def _waiting(job_id: int):
-    """Candidates of a job with screening steps still to run. One that has a
-    screening result has been through every step built so far."""
+    """Candidates of a job with screening steps still to run: no result yet,
+    or they met the must-haves but have not been matched."""
     return (
         select(Candidate)
         .outerjoin(ScreeningResult)
         .where(
             Candidate.job_id == job_id,
             Candidate.status.in_(TO_SCREEN),
-            ScreeningResult.id.is_(None),
+            or_(
+                ScreeningResult.id.is_(None),
+                and_(
+                    ScreeningResult.excluded_reason.is_(None),
+                    ScreeningResult.requirement_matches.is_(None),
+                ),
+            ),
         )
     )
 
 
 def load_cvs(job_id: int) -> list[dict]:
     """The CVs of a job that are waiting to be screened. A CV that was read
-    and parsed before carries its text and facts, so it is not read again."""
+    and parsed before carries its text and facts, so it is not read again,
+    and one that met the must-haves before is not checked again."""
     with SessionLocal() as db:
         cvs = []
-        for candidate in db.scalars(_waiting(job_id).order_by(Candidate.id)):
+        query = _waiting(job_id).options(selectinload(Candidate.screening_result))
+        for candidate in db.scalars(query.order_by(Candidate.id)):
             cv = {"candidate_id": candidate.id, "cv_path": candidate.cv_path}
             if candidate.cv_parsed:
                 cv |= {
                     "text": candidate.cv_text,
                     "text_source": candidate.cv_text_source,
                     "parsed": candidate.cv_parsed,
+                    "must_haves_met": candidate.screening_result is not None,
                 }
             cvs.append(cv)
         return cvs
@@ -95,6 +106,16 @@ def save_passed(candidate_id: int) -> None:
         candidate.screening_error = None
         candidate.status = CandidateStatus.APPLIED
         _result(db, candidate_id).excluded_reason = None
+        db.commit()
+
+
+def save_matches(candidate_id: int, matches: list[dict]) -> None:
+    """Keep the result of matching each requirement against the CV."""
+    with SessionLocal() as db:
+        candidate = db.get(Candidate, candidate_id)
+        candidate.screening_error = None
+        candidate.status = CandidateStatus.APPLIED
+        _result(db, candidate_id).requirement_matches = matches
         db.commit()
 
 

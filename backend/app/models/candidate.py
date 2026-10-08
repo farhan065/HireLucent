@@ -61,6 +61,15 @@ class Candidate(TimestampMixin, Base):
         return self.screening_result.excluded_reason if self.screening_result else None
 
     @property
+    def match_counts(self) -> dict[str, int] | None:
+        """How many requirements are met, partly met and unmet."""
+        matches = self.screening_result.requirement_matches if self.screening_result else None
+        if matches is None:
+            return None
+        statuses = [item["status"] for item in matches]
+        return {key: statuses.count(key) for key in ("met", "partially_met", "unmet")}
+
+    @property
     def must_haves_met(self) -> bool | None:
         """Whether the must-have check passed. None until it has run."""
         if self.screening_result is None:
