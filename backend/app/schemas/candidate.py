@@ -37,6 +37,13 @@ class CandidateSummary(BaseModel):
     rank: int | None = Field(
         default=None, description="Position among the job's matched candidates, 1 is best."
     )
+    scores: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Final, criteria and ATS scores, each dimension with its score, weight "
+            "and justification, and the ATS parts. Empty until scored."
+        ),
+    )
     must_haves_met: bool | None = Field(
         default=None, description="Whether the must-have check passed. Empty until it has run."
     )

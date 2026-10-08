@@ -17,7 +17,7 @@ TO_SCREEN = (CandidateStatus.APPLIED, CandidateStatus.SCREENING_FAILED)
 
 def _waiting(job_id: int):
     """Candidates of a job with screening steps still to run: no result yet,
-    or they met the must-haves but have not been matched."""
+    or they met the must-haves but have not been scored."""
     return (
         select(Candidate)
         .outerjoin(ScreeningResult)
@@ -28,7 +28,7 @@ def _waiting(job_id: int):
                 ScreeningResult.id.is_(None),
                 and_(
                     ScreeningResult.excluded_reason.is_(None),
-                    ScreeningResult.requirement_matches.is_(None),
+                    ScreeningResult.final_score.is_(None),
                 ),
             ),
         )
@@ -51,6 +51,8 @@ def load_cvs(job_id: int) -> list[dict]:
                     "parsed": candidate.cv_parsed,
                     "must_haves_met": candidate.screening_result is not None,
                 }
+                if candidate.screening_result and candidate.screening_result.requirement_matches:
+                    cv["matches"] = candidate.screening_result.requirement_matches
             cvs.append(cv)
         return cvs
 
@@ -61,10 +63,16 @@ def count_to_screen(job_id: int) -> int:
         return db.scalar(select(func.count()).select_from(_waiting(job_id).subquery()))
 
 
-def load_requirements(job_id: int) -> dict:
-    """The job's requirements checklist, the same for every CV."""
+def load_job(job_id: int) -> dict:
+    """What every CV of the job is checked and scored against."""
     with SessionLocal() as db:
-        return db.get(Job, job_id).requirements
+        job = db.get(Job, job_id)
+        return {
+            "title": job.title,
+            "jd_text": job.jd_text,
+            "requirements": job.requirements,
+            "scoring_weights": job.scoring_weights,
+        }
 
 
 def save_cv(candidate_id: int, text: str, source: str, parsed: dict) -> None:
@@ -118,6 +126,22 @@ def save_matches(candidate_id: int, matches: list[dict], score: float) -> None:
         result = _result(db, candidate_id)
         result.requirement_matches = matches
         result.match_score = score
+        db.commit()
+
+
+def save_result(candidate_id: int, scores: dict) -> None:
+    """Keep the scores and mark the candidate as screened. Their screening
+    is complete, so the next run skips them."""
+    with SessionLocal() as db:
+        candidate = db.get(Candidate, candidate_id)
+        candidate.screening_error = None
+        candidate.status = CandidateStatus.SCREENED
+        result = _result(db, candidate_id)
+        result.dimension_scores = scores["dimensions"]
+        result.ats_score = scores["ats"]["score"]
+        result.ats_details = scores["ats"]
+        result.criteria_score = scores["criteria_score"]
+        result.final_score = scores["final_score"]
         db.commit()
 
 

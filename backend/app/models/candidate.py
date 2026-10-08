@@ -74,6 +74,20 @@ class Candidate(TimestampMixin, Base):
         return self.screening_result.rank if self.screening_result else None
 
     @property
+    def scores(self) -> dict[str, Any] | None:
+        """The scores of a screened candidate, with their breakdown."""
+        result = self.screening_result
+        if result is None or result.final_score is None:
+            return None
+        return {
+            "final_score": result.final_score,
+            "criteria_score": result.criteria_score,
+            "ats_score": result.ats_score,
+            "dimensions": result.dimension_scores,
+            "ats": result.ats_details,
+        }
+
+    @property
     def match_counts(self) -> dict[str, int] | None:
         """How many requirements are met, partly met and unmet."""
         matches = self.screening_result.requirement_matches if self.screening_result else None
@@ -108,6 +122,8 @@ class ScreeningResult(TimestampMixin, Base):
     rank: Mapped[int | None] = mapped_column(Integer)
     criteria_score: Mapped[float | None] = mapped_column(Float)
     ats_score: Mapped[float | None] = mapped_column(Float)
+    # The two parts of the ATS score: keyword coverage and similarity.
+    ats_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     final_score: Mapped[float | None] = mapped_column(Float)
     justification: Mapped[str | None] = mapped_column(Text)
     excluded_reason: Mapped[str | None] = mapped_column(Text)
