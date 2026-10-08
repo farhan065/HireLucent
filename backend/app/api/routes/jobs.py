@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_interviewer
 from app.db.session import get_db
 from app.models import Job
+from app.graphs.screening import store as screening_store
 from app.schemas.error import ErrorResponse
 from app.schemas.job import JobDetail, JobProfileUpdate, JobSummary
 from app.schemas.task import JobActivity
@@ -80,6 +81,7 @@ def read_job_activity(job_id: int, db: Session = Depends(get_db)) -> JobActivity
         last_screening=task_service.last_finished(
             db, job_id, screening_service.TASK_KIND
         ),
+        ready_to_screen=screening_store.count_to_screen(job_id),
     )
 
 

@@ -36,6 +36,7 @@ class JobActivity(BaseModel):
     running: TaskResponse | None
     last_intake: TaskResponse | None
     last_screening: TaskResponse | None
+    ready_to_screen: int = Field(description="CVs with screening steps still to run.")
 
 
 class DemoTaskRequest(BaseModel):
