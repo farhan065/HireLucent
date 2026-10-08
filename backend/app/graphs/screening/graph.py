@@ -7,7 +7,8 @@ so the CVs are processed side by side and one bad file never stops the rest:
 
 Each branch runs the per-CV pipeline:
 
-    start        -> (must-haves met before) -> match_requirements
+    start        -> (matched before)        -> compute_ats_score
+                 -> (must-haves met before) -> match_requirements
                  -> (parsed before)         -> check_must_haves
                  -> (new CV)                -> extract_text
     extract_text -> (text found)   -> parse_cv
@@ -19,10 +20,16 @@ Each branch runs the per-CV pipeline:
     check_must_haves -> (passed)           -> match_requirements
                      -> (missing must-have) -> exclude_candidate
                      -> (AI not available)  -> log_failure
-    match_requirements -> (matched)          -> end of the steps built so far
+    match_requirements -> (matched)          -> compute_ats_score
                        -> (AI not available) -> log_failure
+    compute_ats_score  -> (scored)           -> score_candidate
+                       -> (embeddings down)  -> log_failure
+    score_candidate    -> (scored)           -> save_result
+                       -> (no valid answer)  -> log_failure
+    save_result        -> end
 
-Later steps add the ATS score, scoring and ranking to this pipeline.
+score_candidate's "invalid output -> retry" is done by the AI access layer:
+an answer that does not fit DimensionScores is rejected and asked for again.
 """
 
 import logging
@@ -41,7 +48,7 @@ from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import BaseState
 from app.graphs.checkpointer import get_checkpointer
-from app.graphs.screening import matching, must_haves, store
+from app.graphs.screening import matching, must_haves, scoring, store
 from app.graphs.screening.parsing import parse_cv
 from app.services.text_extraction import extract_text, ocr_pdf
 
@@ -70,21 +77,28 @@ class CVState(TypedDict, total=False):
     text_source: str
     # The structured facts read from the text (see app.schemas.cv.ParsedCV).
     parsed: dict
-    # The job's requirements checklist, the same for every CV.
+    # The job: its title, description, requirements checklist and scoring
+    # weights, the same for every CV.
+    title: str
+    jd_text: str
     requirements: dict
+    scoring_weights: dict
     # Why the candidate is excluded. Empty when the must-haves are met.
     exclusion: list[str]
     # True when an earlier run found the must-haves met.
     must_haves_met: bool
     # Per requirement: met, partially met or unmet, with CV evidence.
     matches: list[dict]
+    # The ATS score with its parts, then every score of the candidate.
+    ats: dict
+    scores: dict
     # Set when the CV cannot be processed. The message is safe to show.
     failure: str
 
 
 class ScreeningState(BaseState, total=False):
     job_id: int
-    requirements: dict
+    job: dict
     cvs: list[CVState]
     # One entry per CV, added by its branch as it finishes.
     outcomes: Annotated[list[dict], operator.add]
@@ -96,9 +110,11 @@ class ScreeningState(BaseState, total=False):
 
 def route_start(
     state: CVState,
-) -> Literal["match_requirements", "check_must_haves", "extract_text"]:
+) -> Literal["compute_ats_score", "match_requirements", "check_must_haves", "extract_text"]:
     """A CV continues from the step it reached in an earlier run, so nothing
-    is read, parsed or checked twice."""
+    is read, parsed, checked or matched twice."""
+    if state.get("matches") is not None:
+        return "compute_ats_score"
     if state.get("must_haves_met"):
         return "match_requirements"
     return "check_must_haves" if state.get("parsed") else "extract_text"
@@ -204,8 +220,47 @@ def match_requirements(state: CVState) -> dict:
     return {"matches": matches}
 
 
-def route_after_match(state: CVState) -> Literal["log_failure", "__end__"]:
-    return "log_failure" if state.get("failure") else END
+def route_after_match(state: CVState) -> Literal["log_failure", "compute_ats_score"]:
+    return "log_failure" if state.get("failure") else "compute_ats_score"
+
+
+def compute_ats_score(state: CVState) -> dict:
+    """Keyword coverage and similarity to the job description. No chat model."""
+    try:
+        ats = scoring.ats_score(state["requirements"], state["jd_text"], state["text"])
+    except ServiceUnavailableError:
+        return {"failure": AI_UNAVAILABLE}
+    return {"ats": ats}
+
+
+def route_after_ats(state: CVState) -> Literal["log_failure", "score_candidate"]:
+    return "log_failure" if state.get("failure") else "score_candidate"
+
+
+def score_candidate(state: CVState) -> dict:
+    """Score each dimension with the AI, then combine them with the job's
+    weights and the ATS score into the final score."""
+    try:
+        dimensions = scoring.dimension_scores(
+            state["title"], state["requirements"], state["matches"], state["parsed"]
+        )
+    except ServiceUnavailableError:
+        return {"failure": AI_UNAVAILABLE}
+    weights = state["scoring_weights"]
+    totals = scoring.combine(dimensions, weights, state["ats"]["score"])
+    for name, dimension in dimensions.items():
+        dimension["weight"] = weights[name]
+    return {"scores": {"dimensions": dimensions, "ats": state["ats"], **totals}}
+
+
+def route_after_score(state: CVState) -> Literal["log_failure", "save_result"]:
+    return "log_failure" if state.get("failure") else "save_result"
+
+
+def save_result(state: CVState) -> dict:
+    """Keep every score. The candidate's screening is complete."""
+    store.save_result(state["candidate_id"], state["scores"])
+    return {}
 
 
 def exclude_candidate(state: CVState) -> dict:
@@ -231,6 +286,9 @@ def build_cv_pipeline() -> CompiledStateGraph:
     graph.add_node("check_must_haves", check_must_haves_node)
     graph.add_node("exclude_candidate", exclude_candidate)
     graph.add_node("match_requirements", match_requirements)
+    graph.add_node("compute_ats_score", compute_ats_score)
+    graph.add_node("score_candidate", score_candidate)
+    graph.add_node("save_result", save_result)
     graph.add_node("log_failure", log_failure)
 
     graph.add_conditional_edges(START, route_start)
@@ -239,6 +297,9 @@ def build_cv_pipeline() -> CompiledStateGraph:
     graph.add_conditional_edges("parse_cv", route_after_parse)
     graph.add_conditional_edges("check_must_haves", route_after_check)
     graph.add_conditional_edges("match_requirements", route_after_match)
+    graph.add_conditional_edges("compute_ats_score", route_after_ats)
+    graph.add_conditional_edges("score_candidate", route_after_score)
+    graph.add_edge("save_result", END)
     graph.add_edge("exclude_candidate", END)
     graph.add_edge("log_failure", END)
     return graph.compile()
@@ -251,9 +312,9 @@ cv_pipeline = build_cv_pipeline()
 
 
 def load_inputs(state: ScreeningState) -> dict:
-    """Find the job's CVs that are waiting, and the requirements to check."""
+    """Find the job's CVs that are waiting, and what to check them against."""
     job_id = state["job_id"]
-    return {"cvs": store.load_cvs(job_id), "requirements": store.load_requirements(job_id)}
+    return {"cvs": store.load_cvs(job_id), "job": store.load_job(job_id)}
 
 
 def send_each_cv(state: ScreeningState) -> list[Send] | Literal["rank_candidates"]:
@@ -263,7 +324,7 @@ def send_each_cv(state: ScreeningState) -> list[Send] | Literal["rank_candidates
     return [
         Send(
             "screen_cv",
-            {**cv, "job_id": state["job_id"], "requirements": state["requirements"]},
+            {**cv, "job_id": state["job_id"], **state["job"]},
         )
         for cv in state["cvs"]
     ]

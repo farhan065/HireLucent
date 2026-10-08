@@ -63,6 +63,7 @@ class FakeStore:
         self.matches: dict[int, list[dict]] = {}
         self.scores: dict[int, float] = {}
         self.ranks: list[int] = []
+        self.results: dict[int, dict] = {}
         self.texts: dict[int, tuple[str, str]] = {}
         self.parsed: dict[int, dict] = {}
         self.failures: dict[int, str] = {}
@@ -70,8 +71,16 @@ class FakeStore:
     def load_cvs(self, job_id: int) -> list[dict]:
         return self.cvs
 
-    def load_requirements(self, job_id: int) -> dict:
-        return self.requirements
+    def load_job(self, job_id: int) -> dict:
+        return {
+            "title": "Backend Engineer",
+            "jd_text": "We need a backend engineer.",
+            "requirements": self.requirements,
+            "scoring_weights": WEIGHTS,
+        }
+
+    def save_result(self, candidate_id: int, scores: dict) -> None:
+        self.results[candidate_id] = scores
 
     def save_exclusion(self, candidate_id: int, reasons: list[str]) -> None:
         self.excluded[candidate_id] = reasons
@@ -106,6 +115,12 @@ class FakeStore:
 
 
 MATCHES = [{"id": "R1", "priority": "must_have", "status": "met"}]
+ATS = {"score": 70.0, "keyword_coverage": 60.0, "similarity": 80.0}
+DIMENSIONS = {
+    name: {"score": 80, "justification": "Clear evidence in the CV."}
+    for name in ("technical_skills", "experience", "qualifications")
+}
+WEIGHTS = {"technical_skills": 0.5, "experience": 0.3, "qualifications": 0.2}
 
 
 @pytest.fixture(autouse=True)
@@ -114,6 +129,8 @@ def fake_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     parsed facts and the same match result."""
     monkeypatch.setattr(screening, "parse_cv", lambda text: PARSED)
     monkeypatch.setattr(screening.matching, "match", lambda cid, jid, reqs, cv: MATCHES)
+    monkeypatch.setattr(screening.scoring, "ats_score", lambda reqs, jd, text: ATS)
+    monkeypatch.setattr(screening.scoring, "dimension_scores", lambda *args: DIMENSIONS)
 
 
 def run_graph(
@@ -403,3 +420,51 @@ def test_matched_candidates_are_ranked_by_match_score(monkeypatch, tmp_path) -> 
 
     assert store.scores == {1: 50.0, 2: 100.0}
     assert store.ranks == [2, 1]
+
+
+def test_a_matched_cv_is_scored_and_saved(monkeypatch, tmp_path) -> None:
+    summary, store = run_graph(monkeypatch, [_text_pdf(tmp_path / "a.pdf")])
+
+    result = store.results[1]
+    # 80 on every dimension, so the criteria score is 80 whatever the weights.
+    assert result["criteria_score"] == 80.0
+    # 0.8 x 80 + 0.2 x 70
+    assert result["final_score"] == 78.0
+    assert result["dimensions"]["experience"]["weight"] == 0.3
+    assert result["ats"] == ATS
+
+
+def test_a_cv_matched_before_goes_straight_to_scoring(monkeypatch) -> None:
+    def never(*args):
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(screening.matching, "match", never)
+    cv = {
+        "candidate_id": 1,
+        "cv_path": "/missing.pdf",
+        "text": CV_TEXT,
+        "text_source": "text",
+        "parsed": PARSED,
+        "must_haves_met": True,
+        "matches": MATCHES,
+    }
+    store = FakeStore([cv])
+    monkeypatch.setattr(screening, "store", store)
+
+    graph = screening.build_screening_graph(InMemorySaver())
+    graph.invoke({"job_id": 1}, thread_config("screening-score"))
+
+    assert store.results[1]["final_score"] == 78.0
+
+
+def test_scoring_failing_keeps_the_matches(monkeypatch, tmp_path) -> None:
+    def unavailable(*args):
+        raise ServiceUnavailableError("AI is down")
+
+    monkeypatch.setattr(screening.scoring, "dimension_scores", unavailable)
+
+    summary, store = run_graph(monkeypatch, [_text_pdf(tmp_path / "a.pdf")])
+
+    assert summary["failed"] == 1
+    assert store.matches == {1: MATCHES}
+    assert store.results == {}
