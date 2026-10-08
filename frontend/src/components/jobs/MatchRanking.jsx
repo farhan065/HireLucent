@@ -142,7 +142,7 @@ function RankedRow({ candidate, isOpen, onToggle }) {
           <MatchCounts counts={candidate.match_counts} />
         </div>
         <div className="hidden lg:block">
-          <StatusChip tone="success">Matched</StatusChip>
+          <StatusChip tone="success">{candidate.scores ? 'Scored' : 'Matched'}</StatusChip>
         </div>
         <div className="hidden justify-end lg:flex">
           <ViewCvLink candidateId={candidate.id} />

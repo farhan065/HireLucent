@@ -29,7 +29,7 @@ function LastScreening({ task }) {
       {passed > 0 && (
         <>
           {' · '}
-          <strong className="font-semibold text-success">{passed} matched</strong>
+          <strong className="font-semibold text-success">{passed} scored</strong>
         </>
       )}
       {excluded > 0 && (
@@ -105,8 +105,8 @@ export default function ScreeningTab() {
               <strong className="font-semibold text-navy">
                 {ready} {ready === 1 ? 'CV is' : 'CVs are'} ready to screen.
               </strong>{' '}
-              Each CV is read, checked against the must-haves, and matched with every
-              requirement by meaning. CVs already screened are skipped.
+              Each CV is read, checked against the must-haves, matched with every
+              requirement by meaning, and scored. CVs already screened are skipped.
             </>
           ) : (
             'All collected CVs are screened. Fetch new applications to screen more.'
