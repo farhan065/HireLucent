@@ -1,34 +1,13 @@
 import { ScanSearch } from 'lucide-react'
 import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
-import { HEADING, Initials, ListCard, ViewCvLink } from '../../components/jobs/candidates.jsx'
+import MatchRanking from '../../components/jobs/MatchRanking.jsx'
 import RunPanel from '../../components/jobs/RunPanel.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
-import StatusChip from '../../components/StatusChip.jsx'
 import { useCandidates } from '../../hooks/useCandidates.js'
 import { formatDateTime } from '../../lib/jobs.js'
 
 const SCREENING = 'cv_screening'
-const READ_AS = { text: 'Text', ocr: 'Scanned (OCR)' }
-
-// The requirement match of one candidate as three small counts.
-function MatchCounts({ counts }) {
-  if (!counts) return <span className="text-sm">–</span>
-  const parts = [
-    ['met', 'met', 'bg-success-soft text-success'],
-    ['partially_met', 'partly', 'bg-warning-soft text-warning'],
-    ['unmet', 'not met', 'bg-danger-soft text-danger'],
-  ]
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {parts.map(([key, label, style]) => (
-        <span key={key} className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${style}`}>
-          {counts[key]} {label}
-        </span>
-      ))}
-    </div>
-  )
-}
 
 // How the last screening ended, in one line.
 function LastScreening({ task }) {
@@ -69,81 +48,36 @@ function LastScreening({ task }) {
   )
 }
 
-function ScreenedList({ candidates }) {
+const SUB_TABS = [
+  { key: 'match', label: 'Requirement match' },
+  { key: 'final', label: 'Final ranking', note: 'after scoring' },
+]
+
+// The two rankings of a job. The final ranking opens once scoring exists.
+function SubTabs() {
   return (
-    <ListCard
-      title="Screened so far"
-      count={candidates.length}
-      note="Scores and ranking are added to this list in a later step."
-    >
-      <table className="w-full">
-        <thead className="bg-mist">
-          <tr>
-            <th scope="col" className={HEADING}>Candidate</th>
-            <th scope="col" className={`${HEADING} hidden lg:table-cell`}>CV read as</th>
-            <th scope="col" className={HEADING}>Requirements</th>
-            <th scope="col" className={HEADING}>Status</th>
-            <th scope="col" className={HEADING}>
-              <span className="sr-only">CV</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {candidates.map((candidate) => {
-            const hasFailed = candidate.status === 'screening_failed'
-            const isExcluded = candidate.status === 'excluded'
-            const tint = hasFailed ? 'bg-danger-soft/40' : isExcluded ? 'bg-warning-soft/40' : ''
-            return (
-              <tr key={candidate.id} className={`border-t border-line/60 ${tint}`}>
-                <td className="px-5 py-3.5">
-                  <div className="flex items-center gap-4">
-                    <Initials name={candidate.full_name} />
-                    <div className="min-w-0">
-                      <p className="text-[15px] font-semibold text-navy">{candidate.full_name}</p>
-                      {hasFailed && (
-                        <p className="mt-0.5 text-[13px] text-danger">
-                          {candidate.screening_error}
-                        </p>
-                      )}
-                      {isExcluded &&
-                        candidate.excluded_reason?.split('\n').map((reason) => (
-                          <p key={reason} className="mt-0.5 text-[13px] text-warning">
-                            {reason}
-                          </p>
-                        ))}
-                    </div>
-                  </div>
-                </td>
-                <td className="hidden px-5 py-3.5 text-sm text-navy lg:table-cell">
-                  {hasFailed ? '–' : READ_AS[candidate.cv_text_source]}
-                </td>
-                <td className="px-5 py-3.5">
-                  <MatchCounts counts={candidate.match_counts} />
-                </td>
-                <td className="px-5 py-3.5">
-                  {hasFailed ? (
-                    <StatusChip tone="danger">Could not be read</StatusChip>
-                  ) : isExcluded ? (
-                    <StatusChip tone="warning">Excluded</StatusChip>
-                  ) : candidate.match_counts ? (
-                    <StatusChip tone="success">Matched</StatusChip>
-                  ) : candidate.must_haves_met ? (
-                    <StatusChip tone="info">Met the must-haves</StatusChip>
-                  ) : (
-                    <StatusChip tone="info">CV read</StatusChip>
-                  )}
-                </td>
-                <td className="px-5 py-3.5">
-                  <div className="flex justify-end">
-                    <ViewCvLink candidateId={candidate.id} />
-                  </div>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </ListCard>
+    <div role="tablist" aria-label="Rankings" className="flex flex-wrap gap-2">
+      {SUB_TABS.map((tab) => {
+        const isActive = tab.key === 'match'
+        return (
+          <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            disabled={!isActive}
+            className={`flex min-h-10 items-center gap-2 rounded-full border-[1.5px] px-4 text-sm font-semibold ${
+              isActive
+                ? 'border-brand bg-brand text-white'
+                : 'cursor-not-allowed border-line bg-white text-body/60'
+            }`}
+          >
+            {tab.label}
+            {tab.note && <span className="text-xs font-medium">{tab.note}</span>}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -205,7 +139,12 @@ export default function ScreeningTab() {
         </p>
       )}
       {!candidates && !error && <Skeleton className="h-48 w-full rounded-card" />}
-      {screened.length > 0 && <ScreenedList candidates={screened} />}
+      {screened.length > 0 && (
+        <>
+          <SubTabs />
+          <MatchRanking candidates={screened} />
+        </>
+      )}
     </>
   )
 }
