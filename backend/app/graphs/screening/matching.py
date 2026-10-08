@@ -175,3 +175,36 @@ def match(candidate_id: int, job_id: int, requirements: dict, cv: dict) -> list[
         )
     return matches
 
+
+
+# Points per status for the match score. A must-have counts double.
+POINTS = {"met": 1.0, "partially_met": 0.5, "unmet": 0.0}
+
+
+def match_score(matches: list[dict]) -> float:
+    """How well the CV matches the requirements, from 0 to 100."""
+    weights = [2 if item["priority"] == "must_have" else 1 for item in matches]
+    if not weights:
+        return 0.0
+    earned = sum(
+        weight * POINTS[item["status"]] for weight, item in zip(weights, matches, strict=True)
+    )
+    return round(100 * earned / sum(weights), 1)
+
+
+def rank_order(candidates: list[dict]) -> list[int]:
+    """Candidate ids, best match first. Ties go to more must-haves met,
+    then to the name, so the order is always the same."""
+
+    def must_haves_met(candidate: dict) -> int:
+        return sum(
+            1
+            for item in candidate["matches"]
+            if item["priority"] == "must_have" and item["status"] == "met"
+        )
+
+    ordered = sorted(
+        candidates,
+        key=lambda c: (-c["match_score"], -must_haves_met(c), c["full_name"].lower()),
+    )
+    return [candidate["candidate_id"] for candidate in ordered]

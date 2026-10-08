@@ -135,3 +135,30 @@ def test_evidence_not_found_in_the_cv_is_flagged(monkeypatch, collection) -> Non
 
     assert matches[0]["evidence_in_cv"] is False
 
+
+
+def test_match_score_counts_must_haves_double() -> None:
+    matches = [
+        {"priority": "must_have", "status": "met"},
+        {"priority": "must_have", "status": "partially_met"},
+        {"priority": "preferred", "status": "unmet"},
+    ]
+
+    # (2 + 1 + 0) out of (2 + 2 + 1)
+    assert matching.match_score(matches) == 60.0
+    assert matching.match_score([]) == 0.0
+
+
+def test_ties_go_to_more_must_haves_met_then_name() -> None:
+    def candidate(cid, name, score, statuses):
+        matches = [{"priority": "must_have", "status": status} for status in statuses]
+        return {"candidate_id": cid, "full_name": name, "match_score": score, "matches": matches}
+
+    candidates = [
+        candidate(1, "Zara", 75.0, ["met", "partially_met"]),
+        candidate(2, "Adam", 75.0, ["met", "partially_met"]),
+        candidate(3, "Mina", 75.0, ["met", "met"]),
+        candidate(4, "Omar", 90.0, ["met", "met"]),
+    ]
+
+    assert matching.rank_order(candidates) == [4, 3, 2, 1]
