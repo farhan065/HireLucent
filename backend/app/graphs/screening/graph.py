@@ -7,19 +7,22 @@ so the CVs are processed side by side and one bad file never stops the rest:
 
 Each branch runs the per-CV pipeline:
 
-    start        -> (parsed before) -> check_must_haves
-                 -> (new CV)        -> extract_text
+    start        -> (must-haves met before) -> match_requirements
+                 -> (parsed before)         -> check_must_haves
+                 -> (new CV)                -> extract_text
     extract_text -> (text found)   -> parse_cv
                  -> (scanned PDF)  -> run_ocr -> (text found) -> parse_cv
                                               -> (unreadable) -> log_failure
                  -> (unreadable)   -> log_failure
     parse_cv     -> (facts read)   -> check_must_haves
                  -> (AI not available) -> log_failure
-    check_must_haves -> (passed)           -> end of the steps built so far
+    check_must_haves -> (passed)           -> match_requirements
                      -> (missing must-have) -> exclude_candidate
                      -> (AI not available)  -> log_failure
+    match_requirements -> (matched)          -> end of the steps built so far
+                       -> (AI not available) -> log_failure
 
-Later steps add match_requirements, scoring and ranking to this pipeline.
+Later steps add the ATS score, scoring and ranking to this pipeline.
 """
 
 import logging
@@ -38,7 +41,7 @@ from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import BaseState
 from app.graphs.checkpointer import get_checkpointer
-from app.graphs.screening import must_haves, store
+from app.graphs.screening import matching, must_haves, store
 from app.graphs.screening.parsing import parse_cv
 from app.services.text_extraction import extract_text, ocr_pdf
 
@@ -60,6 +63,7 @@ class CVState(TypedDict, total=False):
     """What is known about one CV as it moves through its branch."""
 
     candidate_id: int
+    job_id: int
     cv_path: str
     text: str
     # How the text was read: "text" or "ocr".
@@ -70,6 +74,10 @@ class CVState(TypedDict, total=False):
     requirements: dict
     # Why the candidate is excluded. Empty when the must-haves are met.
     exclusion: list[str]
+    # True when an earlier run found the must-haves met.
+    must_haves_met: bool
+    # Per requirement: met, partially met or unmet, with CV evidence.
+    matches: list[dict]
     # Set when the CV cannot be processed. The message is safe to show.
     failure: str
 
@@ -86,9 +94,13 @@ class ScreeningState(BaseState, total=False):
 # --- Per-CV pipeline -------------------------------------------------------
 
 
-def route_start(state: CVState) -> Literal["check_must_haves", "extract_text"]:
-    """A CV that was read and parsed in an earlier run continues from there,
-    so it is not read again and the AI is not asked to parse it twice."""
+def route_start(
+    state: CVState,
+) -> Literal["match_requirements", "check_must_haves", "extract_text"]:
+    """A CV continues from the step it reached in an earlier run, so nothing
+    is read, parsed or checked twice."""
+    if state.get("must_haves_met"):
+        return "match_requirements"
     return "check_must_haves" if state.get("parsed") else "extract_text"
 
 
@@ -167,15 +179,33 @@ def check_must_haves_node(state: CVState) -> dict:
         reasons = must_haves.check(state["requirements"], state["text"], state["parsed"])
     except ServiceUnavailableError:
         return {"failure": AI_UNAVAILABLE}
+    if not reasons:
+        store.save_passed(state["candidate_id"])
     return {"exclusion": reasons}
 
 
 def route_after_check(
     state: CVState,
-) -> Literal["exclude_candidate", "log_failure", "__end__"]:
+) -> Literal["exclude_candidate", "log_failure", "match_requirements"]:
     if state.get("failure"):
         return "log_failure"
-    return "exclude_candidate" if state["exclusion"] else END
+    return "exclude_candidate" if state["exclusion"] else "match_requirements"
+
+
+def match_requirements(state: CVState) -> dict:
+    """Judge every requirement against the CV by meaning, with evidence."""
+    try:
+        matches = matching.match(
+            state["candidate_id"], state["job_id"], state["requirements"], state
+        )
+    except ServiceUnavailableError:
+        return {"failure": AI_UNAVAILABLE}
+    store.save_matches(state["candidate_id"], matches)
+    return {"matches": matches}
+
+
+def route_after_match(state: CVState) -> Literal["log_failure", "__end__"]:
+    return "log_failure" if state.get("failure") else END
 
 
 def exclude_candidate(state: CVState) -> dict:
@@ -200,6 +230,7 @@ def build_cv_pipeline() -> CompiledStateGraph:
     graph.add_node("parse_cv", parse_cv_node)
     graph.add_node("check_must_haves", check_must_haves_node)
     graph.add_node("exclude_candidate", exclude_candidate)
+    graph.add_node("match_requirements", match_requirements)
     graph.add_node("log_failure", log_failure)
 
     graph.add_conditional_edges(START, route_start)
@@ -207,6 +238,7 @@ def build_cv_pipeline() -> CompiledStateGraph:
     graph.add_conditional_edges("run_ocr", route_after_ocr)
     graph.add_conditional_edges("parse_cv", route_after_parse)
     graph.add_conditional_edges("check_must_haves", route_after_check)
+    graph.add_conditional_edges("match_requirements", route_after_match)
     graph.add_edge("exclude_candidate", END)
     graph.add_edge("log_failure", END)
     return graph.compile()
@@ -229,7 +261,10 @@ def send_each_cv(state: ScreeningState) -> list[Send] | Literal["rank_candidates
     if not state["cvs"]:
         return "rank_candidates"
     return [
-        Send("screen_cv", {**cv, "requirements": state["requirements"]})
+        Send(
+            "screen_cv",
+            {**cv, "job_id": state["job_id"], "requirements": state["requirements"]},
+        )
         for cv in state["cvs"]
     ]
 
@@ -244,8 +279,6 @@ def screen_cv(cv: CVState) -> dict:
     was_read_before = bool(cv.get("parsed"))
     try:
         result = cv_pipeline.invoke(cv)
-        if not result.get("failure") and not result.get("exclusion"):
-            store.save_passed(candidate_id)
     except Exception as exc:
         log_event(
             logger,

@@ -60,6 +60,7 @@ class FakeStore:
         self.requirements = requirements or {"min_experience_years": 0, "items": []}
         self.excluded: dict[int, list[str]] = {}
         self.passed: list[int] = []
+        self.matches: dict[int, list[dict]] = {}
         self.texts: dict[int, tuple[str, str]] = {}
         self.parsed: dict[int, dict] = {}
         self.failures: dict[int, str] = {}
@@ -76,6 +77,9 @@ class FakeStore:
     def save_passed(self, candidate_id: int) -> None:
         self.passed.append(candidate_id)
 
+    def save_matches(self, candidate_id: int, matches: list[dict]) -> None:
+        self.matches[candidate_id] = matches
+
     def save_cv(self, candidate_id: int, text: str, source: str, parsed: dict) -> None:
         self.texts[candidate_id] = (text, source)
         self.parsed[candidate_id] = parsed
@@ -84,10 +88,15 @@ class FakeStore:
         self.failures[candidate_id] = reason
 
 
+MATCHES = [{"id": "R1", "status": "met"}]
+
+
 @pytest.fixture(autouse=True)
 def fake_ai(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test calls the real AI. Each CV gets the same parsed facts."""
+    """No test calls the real AI or the vector store. Each CV gets the same
+    parsed facts and the same match result."""
     monkeypatch.setattr(screening, "parse_cv", lambda text: PARSED)
+    monkeypatch.setattr(screening.matching, "match", lambda cid, jid, reqs, cv: MATCHES)
 
 
 def run_graph(
@@ -325,3 +334,38 @@ def test_the_ai_being_down_during_the_check_marks_the_cv_failed(
     assert store.failures[1] == screening.AI_UNAVAILABLE
     # The parsed facts are kept, so the next run continues from the check.
     assert 1 in store.parsed
+
+
+def test_a_cv_that_met_the_must_haves_before_goes_straight_to_matching(monkeypatch) -> None:
+    def never(*args):
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(screening.must_haves, "check", never)
+    cv = {
+        "candidate_id": 1,
+        "cv_path": "/missing.pdf",
+        "text": CV_TEXT,
+        "text_source": "text",
+        "parsed": PARSED,
+        "must_haves_met": True,
+    }
+    store = FakeStore([cv], ONE_MUST_HAVE)
+    monkeypatch.setattr(screening, "store", store)
+
+    graph = screening.build_screening_graph(InMemorySaver())
+    graph.invoke({"job_id": 1}, thread_config("screening-match"))
+
+    assert store.matches == {1: MATCHES}
+
+
+def test_matching_failing_keeps_the_must_have_result(monkeypatch, tmp_path) -> None:
+    def unavailable(*args):
+        raise ServiceUnavailableError("AI is down")
+
+    monkeypatch.setattr(screening.matching, "match", unavailable)
+
+    summary, store = run_graph(monkeypatch, [_text_pdf(tmp_path / "a.pdf")])
+
+    assert summary["failed"] == 1
+    assert store.passed == [1]
+    assert store.failures[1] == screening.AI_UNAVAILABLE
