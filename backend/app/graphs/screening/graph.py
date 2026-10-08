@@ -46,6 +46,8 @@ MIN_TEXT_CHARS = 100
 FILE_MISSING = "The CV file could not be found. Fetch the CVs again."
 FILE_DAMAGED = "The CV file is damaged and could not be opened."
 NO_TEXT = "No text could be read from the CV, even with OCR."
+NO_TEXT_IN_FILE = "No text could be read from the CV file."
+OCR_FAILED = "The scanned CV could not be read. Screen the CVs again to retry."
 AI_UNAVAILABLE = "The AI service was not available. Screen the CVs again to retry."
 UNEXPECTED = "The CV could not be processed because of an unexpected problem."
 
@@ -119,12 +121,14 @@ def run_ocr(state: CVState) -> dict:
             candidate_id=state["candidate_id"],
             error_type=type(exc).__name__,
         )
-        return {"text": ""}
+        return {"text": "", "failure": OCR_FAILED}
     return {"text": text, "text_source": "ocr"}
 
 
 def route_after_ocr(state: CVState) -> Literal["parse_cv", "log_failure"]:
-    return "parse_cv" if len(state["text"]) >= MIN_TEXT_CHARS else "log_failure"
+    if state.get("failure") or len(state["text"]) < MIN_TEXT_CHARS:
+        return "log_failure"
+    return "parse_cv"
 
 
 def parse_cv_node(state: CVState) -> dict:
@@ -141,7 +145,8 @@ def route_after_parse(state: CVState) -> Literal["log_failure", "__end__"]:
 
 def log_failure(state: CVState) -> dict:
     """Record why this CV could not be processed. The batch carries on."""
-    reason = state.get("failure") or NO_TEXT
+    is_pdf = state["cv_path"].lower().endswith(".pdf")
+    reason = state.get("failure") or (NO_TEXT if is_pdf else NO_TEXT_IN_FILE)
     store.save_failure(state["candidate_id"], reason)
     return {"failure": reason}
 

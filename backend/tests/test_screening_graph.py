@@ -153,7 +153,7 @@ def test_one_bad_cv_does_not_stop_the_others(monkeypatch, tmp_path) -> None:
     assert store.failures == {
         2: screening.FILE_DAMAGED,
         3: screening.FILE_MISSING,
-        4: screening.NO_TEXT,
+        4: screening.NO_TEXT_IN_FILE,
     }
 
 
@@ -179,3 +179,41 @@ def test_no_cvs_gives_an_empty_summary(monkeypatch) -> None:
     summary, store = run_graph(monkeypatch, [])
 
     assert summary == {"total": 0, "read": 0, "read_by_ocr": 0, "failed": 0}
+
+
+def test_a_docx_with_tables_is_read(monkeypatch, tmp_path) -> None:
+    """Two-column CV templates keep their text in a table."""
+    document = docx.Document()
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Skills: PostgreSQL, Docker, Redis"
+    table.cell(0, 1).text = CV_TEXT
+    path = tmp_path / "columns.docx"
+    document.save(path)
+
+    summary, store = run_graph(monkeypatch, [str(path)])
+
+    assert summary["read"] == 1
+    text = store.texts[1][0]
+    assert "Redis" in text and "FastAPI" in text
+
+
+def test_an_ocr_error_is_reported_as_such(monkeypatch, tmp_path) -> None:
+    def broken_ocr(content: bytes, max_pages: int) -> str:
+        raise RuntimeError("engine busy")
+
+    monkeypatch.setattr(screening, "ocr_pdf", broken_ocr)
+
+    summary, store = run_graph(monkeypatch, [_scanned_pdf(tmp_path / "scan.pdf")])
+
+    assert summary["failed"] == 1
+    assert store.failures[1] == screening.OCR_FAILED
+
+
+@needs_tesseract
+def test_scanned_cvs_are_read_side_by_side(monkeypatch, tmp_path) -> None:
+    """Screening runs several branches at once; OCR must not clash."""
+    paths = [_scanned_pdf(tmp_path / f"scan{index}.pdf") for index in range(3)]
+
+    summary, store = run_graph(monkeypatch, paths)
+
+    assert summary == {"total": 3, "read": 0, "read_by_ocr": 3, "failed": 0}
