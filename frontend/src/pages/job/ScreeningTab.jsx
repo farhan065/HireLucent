@@ -9,7 +9,6 @@ import { useCandidates } from '../../hooks/useCandidates.js'
 import { formatDateTime } from '../../lib/jobs.js'
 
 const SCREENING = 'cv_screening'
-const TO_SCREEN = ['applied', 'screening_failed']
 const READ_AS = { text: 'Text', ocr: 'Scanned (OCR)' }
 
 // How the last screening ended, in one line.
@@ -24,12 +23,23 @@ function LastScreening({ task }) {
       </p>
     )
   }
-  const { read, read_by_ocr: byOcr, failed } = task.result
+  const { total, read, read_by_ocr: byOcr, passed = 0, excluded = 0, failed } = task.result
   return (
     <p className="text-sm">
-      Last screening {when} ·{' '}
-      <strong className="font-semibold text-success">{read + byOcr} read</strong>
-      {byOcr > 0 && ` (${byOcr} by OCR)`}
+      Last screening {when} · {total} {total === 1 ? 'CV' : 'CVs'}
+      {read + byOcr > 0 && ` · ${read + byOcr} read${byOcr > 0 ? ` (${byOcr} by OCR)` : ''}`}
+      {passed > 0 && (
+        <>
+          {' · '}
+          <strong className="font-semibold text-success">{passed} met the must-haves</strong>
+        </>
+      )}
+      {excluded > 0 && (
+        <>
+          {' · '}
+          <strong className="font-semibold text-warning">{excluded} excluded</strong>
+        </>
+      )}
       {failed > 0 && (
         <>
           {' · '}
@@ -61,11 +71,10 @@ function ScreenedList({ candidates }) {
         <tbody>
           {candidates.map((candidate) => {
             const hasFailed = candidate.status === 'screening_failed'
+            const isExcluded = candidate.status === 'excluded'
+            const tint = hasFailed ? 'bg-danger-soft/40' : isExcluded ? 'bg-warning-soft/40' : ''
             return (
-              <tr
-                key={candidate.id}
-                className={`border-t border-line/60 ${hasFailed ? 'bg-danger-soft/40' : ''}`}
-              >
+              <tr key={candidate.id} className={`border-t border-line/60 ${tint}`}>
                 <td className="px-5 py-3.5">
                   <div className="flex items-center gap-4">
                     <Initials name={candidate.full_name} />
@@ -76,6 +85,12 @@ function ScreenedList({ candidates }) {
                           {candidate.screening_error}
                         </p>
                       )}
+                      {isExcluded &&
+                        candidate.excluded_reason?.split('\n').map((reason) => (
+                          <p key={reason} className="mt-0.5 text-[13px] text-warning">
+                            {reason}
+                          </p>
+                        ))}
                     </div>
                   </div>
                 </td>
@@ -85,8 +100,12 @@ function ScreenedList({ candidates }) {
                 <td className="px-5 py-3.5">
                   {hasFailed ? (
                     <StatusChip tone="danger">Could not be read</StatusChip>
+                  ) : isExcluded ? (
+                    <StatusChip tone="warning">Excluded</StatusChip>
+                  ) : candidate.must_haves_met ? (
+                    <StatusChip tone="success">Met the must-haves</StatusChip>
                   ) : (
-                    <StatusChip tone="success">CV read</StatusChip>
+                    <StatusChip tone="info">CV read</StatusChip>
                   )}
                 </td>
                 <td className="px-5 py-3.5">
@@ -108,9 +127,10 @@ export default function ScreeningTab() {
   const { job, run, listVersion } = useOutletContext()
   const { candidates, error } = useCandidates(job.id, listVersion)
   const screening = run.running?.kind === SCREENING ? run.running : null
-  const ready = (candidates ?? []).filter((item) => TO_SCREEN.includes(item.status)).length
+  const ready = run.ready_to_screen ?? 0
   const screened = (candidates ?? []).filter(
-    (item) => item.cv_text_source || item.status === 'screening_failed',
+    (item) =>
+      item.cv_text_source || item.status === 'screening_failed' || item.status === 'excluded',
   )
   const hasNone = candidates?.length === 0
 
@@ -126,8 +146,8 @@ export default function ScreeningTab() {
               <strong className="font-semibold text-navy">
                 {ready} {ready === 1 ? 'CV is' : 'CVs are'} ready to screen.
               </strong>{' '}
-              The AI reads each CV and compares it with the job requirements. CVs already
-              screened are skipped.
+              Each CV is read and checked against the job&apos;s must-have requirements.
+              CVs already screened are skipped.
             </>
           ) : (
             'All collected CVs are screened. Fetch new applications to screen more.'
