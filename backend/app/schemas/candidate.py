@@ -1,6 +1,7 @@
 """Schemas for candidates and CV intake."""
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +26,16 @@ class CandidateSummary(BaseModel):
     match_counts: dict[str, int] | None = Field(
         default=None,
         description="Requirements met, partially_met and unmet. Empty until matched.",
+    )
+    requirement_matches: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Per requirement: status, evidence quoted from the CV, reason.",
+    )
+    match_score: float | None = Field(
+        default=None, description="How well the CV matches the requirements, 0 to 100."
+    )
+    rank: int | None = Field(
+        default=None, description="Position among the job's matched candidates, 1 is best."
     )
     must_haves_met: bool | None = Field(
         default=None, description="Whether the must-have check passed. Empty until it has run."

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -61,6 +61,19 @@ class Candidate(TimestampMixin, Base):
         return self.screening_result.excluded_reason if self.screening_result else None
 
     @property
+    def requirement_matches(self) -> list[dict] | None:
+        """Per requirement: met, partially met or unmet, with CV evidence."""
+        return self.screening_result.requirement_matches if self.screening_result else None
+
+    @property
+    def match_score(self) -> float | None:
+        return self.screening_result.match_score if self.screening_result else None
+
+    @property
+    def rank(self) -> int | None:
+        return self.screening_result.rank if self.screening_result else None
+
+    @property
     def match_counts(self) -> dict[str, int] | None:
         """How many requirements are met, partly met and unmet."""
         matches = self.screening_result.requirement_matches if self.screening_result else None
@@ -88,6 +101,11 @@ class ScreeningResult(TimestampMixin, Base):
     requirement_matches: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     # Per dimension: score, weight and justification.
     dimension_scores: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # How well the CV matches the requirements (0 to 100), and the rank it
+    # gives among the job's candidates. The final score replaces this ranking
+    # once scoring exists.
+    match_score: Mapped[float | None] = mapped_column(Float)
+    rank: Mapped[int | None] = mapped_column(Integer)
     criteria_score: Mapped[float | None] = mapped_column(Float)
     ats_score: Mapped[float | None] = mapped_column(Float)
     final_score: Mapped[float | None] = mapped_column(Float)
