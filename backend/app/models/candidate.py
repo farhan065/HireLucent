@@ -55,6 +55,18 @@ class Candidate(TimestampMixin, Base):
         back_populates="candidate", cascade="all, delete-orphan", passive_deletes=True
     )
 
+    @property
+    def excluded_reason(self) -> str | None:
+        """Why screening excluded the candidate, one reason per line."""
+        return self.screening_result.excluded_reason if self.screening_result else None
+
+    @property
+    def must_haves_met(self) -> bool | None:
+        """Whether the must-have check passed. None until it has run."""
+        if self.screening_result is None:
+            return None
+        return self.screening_result.excluded_reason is None
+
 
 class ScreeningResult(TimestampMixin, Base):
     __tablename__ = "screening_results"

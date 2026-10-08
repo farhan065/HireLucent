@@ -19,6 +19,12 @@ class CandidateSummary(BaseModel):
         description='How the CV was read: "text", "ocr", or empty if not read yet.'
     )
     screening_error: str | None
+    excluded_reason: str | None = Field(
+        default=None, description="Why screening excluded the candidate, one reason per line."
+    )
+    must_haves_met: bool | None = Field(
+        default=None, description="Whether the must-have check passed. Empty until it has run."
+    )
     created_at: datetime
 
 

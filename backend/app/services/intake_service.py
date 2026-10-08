@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import BackgroundTasks
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.core.errors import AppError, ConflictError, NotFoundError
@@ -199,6 +199,7 @@ def list_candidates(db: Session, job_id: int) -> list[Candidate]:
         db.scalars(
             select(Candidate)
             .where(Candidate.job_id == job_id)
+            .options(selectinload(Candidate.screening_result))
             .order_by(Candidate.created_at.desc(), Candidate.id.desc())
         )
     )
