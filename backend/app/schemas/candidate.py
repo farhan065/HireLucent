@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CandidateSummary(BaseModel):
@@ -41,7 +41,8 @@ class CandidateSummary(BaseModel):
         default=None,
         description=(
             "Final, criteria and ATS scores, each dimension with its score, weight "
-            "and justification, and the ATS parts. Empty until scored."
+            "and justification, the ATS parts, the summary of why the candidate "
+            "ranks where they do, and the final rank. Empty until scored."
         ),
     )
     must_haves_met: bool | None = Field(
@@ -57,3 +58,25 @@ class IntakeStatus(BaseModel):
             "job is not published or Google could not be asked."
         )
     )
+
+
+class ShortlistChange(BaseModel):
+    shortlisted: bool
+
+
+class ShortlistRule(BaseModel):
+    """Shortlist by one rule: the top N of the final ranking, or everyone
+    with at least a given final score."""
+
+    top: int | None = Field(default=None, ge=1, le=500)
+    min_score: float | None = Field(default=None, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def exactly_one_rule(self) -> "ShortlistRule":
+        if (self.top is None) == (self.min_score is None):
+            raise ValueError("Give either top or min_score.")
+        return self
+
+
+class ShortlistCount(BaseModel):
+    shortlisted: int

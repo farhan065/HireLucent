@@ -19,7 +19,7 @@ from app.core.config import get_settings
 from app.core.errors import AppError, ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.db.session import SessionLocal
-from app.models import Candidate, Job, Task
+from app.models import Candidate, Job, RemovedApplication, Task
 from app.models.enums import CandidateSource, CandidateStatus, JobStatus
 from app.services import google_drive, google_forms, job_service, task_service
 from app.services.google_forms import FormResponse
@@ -71,7 +71,19 @@ def run_intake(job_id: int, form_id: str, progress: TaskProgress) -> dict:
         ).all()
         known_refs = {ref for ref, _ in applied}
         known_emails = {email for _, email in applied}
-        new = [item for item in responses if item.response_id not in known_refs]
+        # Applications whose candidate was deleted are never collected again.
+        removed = set(
+            db.scalars(
+                select(RemovedApplication.response_id).where(
+                    RemovedApplication.job_id == job_id
+                )
+            )
+        )
+        new = [
+            item
+            for item in responses
+            if item.response_id not in known_refs and item.response_id not in removed
+        ]
         counts = {
             "collected": 0,
             "duplicates": 0,

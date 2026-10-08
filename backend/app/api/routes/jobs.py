@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.models import Job
 from app.graphs.screening import store as screening_store
 from app.schemas.error import ErrorResponse
+from app.schemas.candidate import ShortlistCount, ShortlistRule
 from app.schemas.job import JobDetail, JobProfileUpdate, JobSummary
 from app.schemas.task import JobActivity
 from app.services import (
@@ -15,6 +16,7 @@ from app.services import (
     job_deletion,
     job_service,
     screening_service,
+    shortlist_service,
     task_service,
 )
 
@@ -99,3 +101,27 @@ def delete_job(job_id: int, db: Session = Depends(get_db)) -> None:
     and its conversation. The public post and the application form are not
     touched. This cannot be undone."""
     job_deletion.delete_job(db, job_id)
+
+
+@router.post(
+    "/{job_id}/shortlist",
+    response_model=ShortlistCount,
+    summary="Shortlist the top N candidates, or everyone above a final score",
+    responses=NOT_FOUND,
+)
+def apply_shortlist_rule(
+    job_id: int, payload: ShortlistRule, db: Session = Depends(get_db)
+) -> ShortlistCount:
+    """Adds to the shortlist; nobody already on it is removed."""
+    count = shortlist_service.shortlist_by_rule(db, job_id, payload.top, payload.min_score)
+    return ShortlistCount(shortlisted=count)
+
+
+@router.delete(
+    "/{job_id}/shortlist",
+    response_model=ShortlistCount,
+    summary="Take everyone off the job's shortlist",
+    responses=NOT_FOUND,
+)
+def clear_shortlist(job_id: int, db: Session = Depends(get_db)) -> ShortlistCount:
+    return ShortlistCount(shortlisted=shortlist_service.clear(db, job_id))

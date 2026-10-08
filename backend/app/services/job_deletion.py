@@ -1,4 +1,4 @@
-"""Deletes a job together with everything stored for it."""
+"""Deletes a job, or one candidate, together with everything stored for it."""
 
 import logging
 import shutil
@@ -11,7 +11,8 @@ from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.graphs.checkpointer import get_checkpointer
-from app.models import Conversation, Task
+from app.graphs.screening import store as screening_store
+from app.models import Candidate, Conversation, RemovedApplication, Task
 from app.rag import store as rag_store
 from app.services import job_service, screening_service, task_service
 
@@ -40,7 +41,7 @@ def delete_job(db: Session, job_id: int) -> None:
     )
     threads += [screening_service.thread_id(task_id) for task_id in screening_tasks]
 
-    _delete_cv_vectors(job_id)
+    _delete_cv_vectors({"job_id": job_id})
     db.execute(delete(Conversation).where(Conversation.job_id == job_id))
     # Candidates, screening results and tasks go with the job (cascade).
     db.delete(job)
@@ -64,10 +65,36 @@ def delete_draft(db: Session, user_id: int, thread_id: str) -> None:
     log_event(logger, "conversation_deleted")
 
 
-def _delete_cv_vectors(job_id: int) -> None:
-    """Remove the job's CV sections from the vector store."""
+def delete_candidate(db: Session, candidate_id: int) -> None:
+    """Remove a candidate, their CV file, their screening results and their
+    CV sections. This cannot be undone.
+
+    Their form response is remembered by its ID only, so Fetch CVs never
+    collects the application again. The ranks of the others are updated.
+    """
+    candidate = db.get(Candidate, candidate_id)
+    if candidate is None:
+        raise NotFoundError("This candidate does not exist.")
+    job_id = candidate.job_id
+    task_service.ensure_idle(db, job_id)
+
+    _delete_cv_vectors({"candidate_id": candidate_id})
+    if candidate.source_ref:
+        db.add(RemovedApplication(job_id=job_id, response_id=candidate.source_ref))
+    cv_path = Path(candidate.cv_path)
+    # The screening result goes with the candidate (cascade).
+    db.delete(candidate)
+    db.commit()
+    cv_path.unlink(missing_ok=True)
+
+    screening_store.rerank(job_id)
+    log_event(logger, "candidate_deleted", candidate_id=candidate_id, job_id=job_id)
+
+
+def _delete_cv_vectors(where: dict) -> None:
+    """Remove CV sections from the vector store: a job's or one candidate's."""
     try:
-        rag_store.get_collection(rag_store.CV_EMBEDDINGS).delete(where={"job_id": job_id})
+        rag_store.get_collection(rag_store.CV_EMBEDDINGS).delete(where=where)
     except Exception as exc:
         # The database rows still go. The sections are tagged with this job
         # only, so nothing can reach them once the job is gone.
@@ -75,7 +102,6 @@ def _delete_cv_vectors(job_id: int) -> None:
             logger,
             "cv_vectors_not_deleted",
             level=logging.WARNING,
-            job_id=job_id,
             error_type=type(exc).__name__,
         )
 
