@@ -85,6 +85,8 @@ class Candidate(TimestampMixin, Base):
             "ats_score": result.ats_score,
             "dimensions": result.dimension_scores,
             "ats": result.ats_details,
+            "summary": result.justification,
+            "final_rank": result.final_rank,
         }
 
     @property
@@ -120,6 +122,8 @@ class ScreeningResult(TimestampMixin, Base):
     # once scoring exists.
     match_score: Mapped[float | None] = mapped_column(Float)
     rank: Mapped[int | None] = mapped_column(Integer)
+    # The rank by final score among the job's scored candidates.
+    final_rank: Mapped[int | None] = mapped_column(Integer)
     criteria_score: Mapped[float | None] = mapped_column(Float)
     ats_score: Mapped[float | None] = mapped_column(Float)
     # The two parts of the ATS score: keyword coverage and similarity.
@@ -129,3 +133,16 @@ class ScreeningResult(TimestampMixin, Base):
     excluded_reason: Mapped[str | None] = mapped_column(Text)
 
     candidate: Mapped[Candidate] = relationship(back_populates="screening_result")
+
+
+class RemovedApplication(TimestampMixin, Base):
+    """A form response whose candidate the interviewer deleted. Fetch CVs
+    skips it, so a deleted application is never collected again. Only
+    Google's response ID is kept, which holds no personal data."""
+
+    __tablename__ = "removed_applications"
+    __table_args__ = (UniqueConstraint("job_id", "response_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    response_id: Mapped[str] = mapped_column(String(100))

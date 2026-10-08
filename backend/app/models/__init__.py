@@ -2,7 +2,7 @@
 
 from app.models.assessment import Assessment
 from app.models.base import Base
-from app.models.candidate import Candidate, ScreeningResult
+from app.models.candidate import Candidate, RemovedApplication, ScreeningResult
 from app.models.conversation import Conversation
 from app.models.document import Document
 from app.models.interview import InterviewSession, TranscriptTurn
@@ -18,6 +18,7 @@ __all__ = [
     "Document",
     "InterviewSession",
     "Job",
+    "RemovedApplication",
     "ScreeningResult",
     "Task",
     "TranscriptTurn",
