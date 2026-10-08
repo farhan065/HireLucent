@@ -29,7 +29,7 @@ def start_screening(
     """Start screening a job's waiting CVs and return the task."""
     job_service.get_job(db, job_id)
     task_service.ensure_idle(db, job_id)
-    if not store.load_cvs(job_id):
+    if not store.count_to_screen(job_id):
         raise ConflictError(NOTHING_TO_SCREEN)
     return task_service.start_task(
         db,
@@ -50,7 +50,7 @@ def run_screening(
     graph: CompiledStateGraph, job_id: int, progress: TaskProgress
 ) -> dict[str, int]:
     """Run the graph, reporting progress as each CV finishes."""
-    total = len(store.load_cvs(job_id))
+    total = store.count_to_screen(job_id)
     config = thread_config(thread_id(progress.task_id))
     config["max_concurrency"] = get_settings().screening_max_parallel
 

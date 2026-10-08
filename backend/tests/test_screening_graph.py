@@ -55,14 +55,26 @@ def _docx(path: Path, text: str = CV_TEXT) -> str:
 class FakeStore:
     """Stands in for the database."""
 
-    def __init__(self, cvs: list[dict]) -> None:
+    def __init__(self, cvs: list[dict], requirements: dict | None = None) -> None:
         self.cvs = cvs
+        self.requirements = requirements or {"min_experience_years": 0, "items": []}
+        self.excluded: dict[int, list[str]] = {}
+        self.passed: list[int] = []
         self.texts: dict[int, tuple[str, str]] = {}
         self.parsed: dict[int, dict] = {}
         self.failures: dict[int, str] = {}
 
     def load_cvs(self, job_id: int) -> list[dict]:
         return self.cvs
+
+    def load_requirements(self, job_id: int) -> dict:
+        return self.requirements
+
+    def save_exclusion(self, candidate_id: int, reasons: list[str]) -> None:
+        self.excluded[candidate_id] = reasons
+
+    def save_passed(self, candidate_id: int) -> None:
+        self.passed.append(candidate_id)
 
     def save_cv(self, candidate_id: int, text: str, source: str, parsed: dict) -> None:
         self.texts[candidate_id] = (text, source)
@@ -78,9 +90,11 @@ def fake_ai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(screening, "parse_cv", lambda text: PARSED)
 
 
-def run_graph(monkeypatch: pytest.MonkeyPatch, paths: list[str]) -> tuple[dict, FakeStore]:
+def run_graph(
+    monkeypatch: pytest.MonkeyPatch, paths: list[str], requirements: dict | None = None
+) -> tuple[dict, FakeStore]:
     cvs = [{"candidate_id": index, "cv_path": path} for index, path in enumerate(paths, 1)]
-    store = FakeStore(cvs)
+    store = FakeStore(cvs, requirements)
     monkeypatch.setattr(screening, "store", store)
     graph = screening.build_screening_graph(InMemorySaver())
     result = graph.invoke({"job_id": 1}, thread_config("screening-test"))
@@ -92,7 +106,14 @@ def test_text_is_read_from_pdf_and_docx(monkeypatch, tmp_path) -> None:
 
     summary, store = run_graph(monkeypatch, paths)
 
-    assert summary == {"total": 2, "read": 2, "read_by_ocr": 0, "failed": 0}
+    assert summary == {
+        "total": 2,
+        "read": 2,
+        "read_by_ocr": 0,
+        "passed": 2,
+        "excluded": 0,
+        "failed": 0,
+    }
     assert store.texts[1][1] == "text"
     assert "FastAPI" in store.texts[1][0]
     assert "PostgreSQL" in store.texts[2][0]
@@ -104,7 +125,7 @@ def test_text_is_read_from_pdf_and_docx(monkeypatch, tmp_path) -> None:
 def test_a_scanned_pdf_is_read_by_ocr(monkeypatch, tmp_path) -> None:
     summary, store = run_graph(monkeypatch, [_scanned_pdf(tmp_path / "scan.pdf")])
 
-    assert summary == {"total": 1, "read": 0, "read_by_ocr": 1, "failed": 0}
+    assert summary["read_by_ocr"] == 1 and summary["failed"] == 0
     text, source = store.texts[1]
     assert source == "ocr"
     assert "Python" in text
@@ -148,7 +169,7 @@ def test_one_bad_cv_does_not_stop_the_others(monkeypatch, tmp_path) -> None:
 
     summary, store = run_graph(monkeypatch, paths)
 
-    assert summary == {"total": 5, "read": 2, "read_by_ocr": 0, "failed": 3}
+    assert (summary["total"], summary["read"], summary["failed"]) == (5, 2, 3)
     assert sorted(store.texts) == [1, 5]
     assert store.failures == {
         2: screening.FILE_DAMAGED,
@@ -178,7 +199,7 @@ def test_an_unexpected_problem_is_recorded_against_that_cv_only(
 def test_no_cvs_gives_an_empty_summary(monkeypatch) -> None:
     summary, store = run_graph(monkeypatch, [])
 
-    assert summary == {"total": 0, "read": 0, "read_by_ocr": 0, "failed": 0}
+    assert summary["total"] == 0
 
 
 def test_a_docx_with_tables_is_read(monkeypatch, tmp_path) -> None:
@@ -216,4 +237,91 @@ def test_scanned_cvs_are_read_side_by_side(monkeypatch, tmp_path) -> None:
 
     summary, store = run_graph(monkeypatch, paths)
 
-    assert summary == {"total": 3, "read": 0, "read_by_ocr": 3, "failed": 0}
+    assert summary["read_by_ocr"] == 3 and summary["failed"] == 0
+
+
+MUST_HAVE = {
+    "id": "R1",
+    "text": "Container orchestration",
+    "category": "technical_skills",
+    "priority": "must_have",
+    "keywords": ["kubernetes", "k8s"],
+}
+ONE_MUST_HAVE = {"min_experience_years": 0, "items": [MUST_HAVE]}
+
+
+def test_a_cv_parsed_before_is_not_read_or_parsed_again(monkeypatch) -> None:
+    def never(*args):
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(screening, "parse_cv", never)
+    monkeypatch.setattr(screening, "extract_text", never)
+    cv = {
+        "candidate_id": 1,
+        "cv_path": "/missing.pdf",
+        "text": CV_TEXT,
+        "text_source": "text",
+        "parsed": PARSED,
+    }
+    store = FakeStore([cv])
+    monkeypatch.setattr(screening, "store", store)
+
+    graph = screening.build_screening_graph(InMemorySaver())
+    summary = graph.invoke({"job_id": 1}, thread_config("screening-resume"))["summary"]
+
+    assert summary["passed"] == 1 and summary["read"] == 0
+    assert store.passed == [1]
+
+
+def test_a_must_have_found_by_keyword_needs_no_ai(monkeypatch, tmp_path) -> None:
+    def no_ai(*args):
+        raise AssertionError("the AI should not be asked")
+
+    monkeypatch.setattr(screening.must_haves, "generate_structured", no_ai)
+    path = _text_pdf(tmp_path / "a.pdf", CV_TEXT + "\nRan services on Kubernetes.")
+
+    summary, store = run_graph(monkeypatch, [path], ONE_MUST_HAVE)
+
+    assert summary["passed"] == 1
+    assert store.excluded == {}
+
+
+def test_a_must_have_the_ai_cannot_find_excludes_the_candidate(
+    monkeypatch, tmp_path
+) -> None:
+    answers = screening.must_haves.MustHaveAnswers(
+        answers=[{"id": "R1", "shown": False}]
+    )
+    monkeypatch.setattr(screening.must_haves, "generate_structured", lambda p, s: answers)
+
+    summary, store = run_graph(monkeypatch, [_text_pdf(tmp_path / "a.pdf")], ONE_MUST_HAVE)
+
+    assert summary["excluded"] == 1
+    assert store.excluded[1] == ["Missing must-have (R1): Container orchestration"]
+    assert store.passed == []
+
+
+def test_too_little_experience_excludes_without_asking_the_ai(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(screening, "parse_cv", lambda text: {"total_experience_years": 2})
+
+    requirements = {"min_experience_years": 5, "items": [MUST_HAVE]}
+    summary, store = run_graph(monkeypatch, [_text_pdf(tmp_path / "a.pdf")], requirements)
+
+    assert summary["excluded"] == 1
+    assert store.excluded[1] == ["2 years of experience; the job asks for at least 5 years."]
+
+
+def test_the_ai_being_down_during_the_check_marks_the_cv_failed(
+    monkeypatch, tmp_path
+) -> None:
+    def unavailable(prompt, schema):
+        raise ServiceUnavailableError("AI is down")
+
+    monkeypatch.setattr(screening.must_haves, "generate_structured", unavailable)
+
+    summary, store = run_graph(monkeypatch, [_text_pdf(tmp_path / "a.pdf")], ONE_MUST_HAVE)
+
+    assert summary["failed"] == 1
+    assert store.failures[1] == screening.AI_UNAVAILABLE
+    # The parsed facts are kept, so the next run continues from the check.
+    assert 1 in store.parsed

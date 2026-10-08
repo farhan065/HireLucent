@@ -7,15 +7,19 @@ so the CVs are processed side by side and one bad file never stops the rest:
 
 Each branch runs the per-CV pipeline:
 
+    start        -> (parsed before) -> check_must_haves
+                 -> (new CV)        -> extract_text
     extract_text -> (text found)   -> parse_cv
                  -> (scanned PDF)  -> run_ocr -> (text found) -> parse_cv
                                               -> (unreadable) -> log_failure
                  -> (unreadable)   -> log_failure
-    parse_cv     -> (facts read)   -> end of the steps built so far
+    parse_cv     -> (facts read)   -> check_must_haves
                  -> (AI not available) -> log_failure
+    check_must_haves -> (passed)           -> end of the steps built so far
+                     -> (missing must-have) -> exclude_candidate
+                     -> (AI not available)  -> log_failure
 
-Later steps add check_must_haves, match_requirements, scoring and ranking
-to this pipeline.
+Later steps add match_requirements, scoring and ranking to this pipeline.
 """
 
 import logging
@@ -34,7 +38,7 @@ from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import BaseState
 from app.graphs.checkpointer import get_checkpointer
-from app.graphs.screening import store
+from app.graphs.screening import must_haves, store
 from app.graphs.screening.parsing import parse_cv
 from app.services.text_extraction import extract_text, ocr_pdf
 
@@ -62,12 +66,17 @@ class CVState(TypedDict, total=False):
     text_source: str
     # The structured facts read from the text (see app.schemas.cv.ParsedCV).
     parsed: dict
+    # The job's requirements checklist, the same for every CV.
+    requirements: dict
+    # Why the candidate is excluded. Empty when the must-haves are met.
+    exclusion: list[str]
     # Set when the CV cannot be processed. The message is safe to show.
     failure: str
 
 
 class ScreeningState(BaseState, total=False):
     job_id: int
+    requirements: dict
     cvs: list[CVState]
     # One entry per CV, added by its branch as it finishes.
     outcomes: Annotated[list[dict], operator.add]
@@ -75,6 +84,12 @@ class ScreeningState(BaseState, total=False):
 
 
 # --- Per-CV pipeline -------------------------------------------------------
+
+
+def route_start(state: CVState) -> Literal["check_must_haves", "extract_text"]:
+    """A CV that was read and parsed in an earlier run continues from there,
+    so it is not read again and the AI is not asked to parse it twice."""
+    return "check_must_haves" if state.get("parsed") else "extract_text"
 
 
 def extract_text_node(state: CVState) -> dict:
@@ -132,15 +147,41 @@ def route_after_ocr(state: CVState) -> Literal["parse_cv", "log_failure"]:
 
 
 def parse_cv_node(state: CVState) -> dict:
-    """Ask the AI to turn the CV text into structured facts."""
+    """Ask the AI to turn the CV text into structured facts, and keep them,
+    so a later run can continue from here."""
     try:
-        return {"parsed": parse_cv(state["text"])}
+        parsed = parse_cv(state["text"])
     except ServiceUnavailableError:
         return {"failure": AI_UNAVAILABLE}
+    store.save_cv(state["candidate_id"], state["text"], state["text_source"], parsed)
+    return {"parsed": parsed}
 
 
-def route_after_parse(state: CVState) -> Literal["log_failure", "__end__"]:
-    return "log_failure" if state.get("failure") else END
+def route_after_parse(state: CVState) -> Literal["check_must_haves", "log_failure"]:
+    return "log_failure" if state.get("failure") else "check_must_haves"
+
+
+def check_must_haves_node(state: CVState) -> dict:
+    """Check the minimum experience and every must-have requirement."""
+    try:
+        reasons = must_haves.check(state["requirements"], state["text"], state["parsed"])
+    except ServiceUnavailableError:
+        return {"failure": AI_UNAVAILABLE}
+    return {"exclusion": reasons}
+
+
+def route_after_check(
+    state: CVState,
+) -> Literal["exclude_candidate", "log_failure", "__end__"]:
+    if state.get("failure"):
+        return "log_failure"
+    return "exclude_candidate" if state["exclusion"] else END
+
+
+def exclude_candidate(state: CVState) -> dict:
+    """Record why the candidate is excluded. They are not matched or scored."""
+    store.save_exclusion(state["candidate_id"], state["exclusion"])
+    return {}
 
 
 def log_failure(state: CVState) -> dict:
@@ -157,12 +198,16 @@ def build_cv_pipeline() -> CompiledStateGraph:
     graph.add_node("extract_text", extract_text_node)
     graph.add_node("run_ocr", run_ocr)
     graph.add_node("parse_cv", parse_cv_node)
+    graph.add_node("check_must_haves", check_must_haves_node)
+    graph.add_node("exclude_candidate", exclude_candidate)
     graph.add_node("log_failure", log_failure)
 
-    graph.add_edge(START, "extract_text")
+    graph.add_conditional_edges(START, route_start)
     graph.add_conditional_edges("extract_text", route_after_extract)
     graph.add_conditional_edges("run_ocr", route_after_ocr)
     graph.add_conditional_edges("parse_cv", route_after_parse)
+    graph.add_conditional_edges("check_must_haves", route_after_check)
+    graph.add_edge("exclude_candidate", END)
     graph.add_edge("log_failure", END)
     return graph.compile()
 
@@ -174,15 +219,19 @@ cv_pipeline = build_cv_pipeline()
 
 
 def load_inputs(state: ScreeningState) -> dict:
-    """Find the job's CVs that are waiting to be screened."""
-    return {"cvs": store.load_cvs(state["job_id"])}
+    """Find the job's CVs that are waiting, and the requirements to check."""
+    job_id = state["job_id"]
+    return {"cvs": store.load_cvs(job_id), "requirements": store.load_requirements(job_id)}
 
 
 def send_each_cv(state: ScreeningState) -> list[Send] | Literal["rank_candidates"]:
     """Start one branch per CV, or go straight to the end if there are none."""
     if not state["cvs"]:
         return "rank_candidates"
-    return [Send("screen_cv", cv) for cv in state["cvs"]]
+    return [
+        Send("screen_cv", {**cv, "requirements": state["requirements"]})
+        for cv in state["cvs"]
+    ]
 
 
 def screen_cv(cv: CVState) -> dict:
@@ -192,12 +241,11 @@ def screen_cv(cv: CVState) -> dict:
     CV only and the other branches are not affected.
     """
     candidate_id = cv["candidate_id"]
+    was_read_before = bool(cv.get("parsed"))
     try:
         result = cv_pipeline.invoke(cv)
-        if not result.get("failure"):
-            store.save_cv(
-                candidate_id, result["text"], result["text_source"], result["parsed"]
-            )
+        if not result.get("failure") and not result.get("exclusion"):
+            store.save_passed(candidate_id)
     except Exception as exc:
         log_event(
             logger,
@@ -209,20 +257,33 @@ def screen_cv(cv: CVState) -> dict:
         store.save_failure(candidate_id, UNEXPECTED)
         result = {"failure": UNEXPECTED}
 
-    outcome = "failed" if result.get("failure") else result["text_source"]
-    return {"outcomes": [{"candidate_id": candidate_id, "outcome": outcome}]}
+    if result.get("failure"):
+        outcome = "failed"
+    elif result.get("exclusion"):
+        outcome = "excluded"
+    else:
+        outcome = "passed"
+    # How the text was read, only for CVs read successfully in this run.
+    read_as = None if was_read_before or outcome == "failed" else result.get("text_source")
+    return {
+        "outcomes": [{"candidate_id": candidate_id, "outcome": outcome, "read_as": read_as}]
+    }
 
 
 def rank_candidates(state: ScreeningState) -> dict:
     """Where every branch meets again. For now it only counts the outcomes;
     ranking is added once the scoring steps exist."""
-    outcomes = [item["outcome"] for item in state.get("outcomes", [])]
+    outcomes = state.get("outcomes", [])
+    results = [item["outcome"] for item in outcomes]
+    read_as = [item["read_as"] for item in outcomes]
     return {
         "summary": {
             "total": len(outcomes),
-            "read": outcomes.count("text"),
-            "read_by_ocr": outcomes.count("ocr"),
-            "failed": outcomes.count("failed"),
+            "read": read_as.count("text"),
+            "read_by_ocr": read_as.count("ocr"),
+            "passed": results.count("passed"),
+            "excluded": results.count("excluded"),
+            "failed": results.count("failed"),
         }
     }
 
