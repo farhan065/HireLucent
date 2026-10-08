@@ -1,8 +1,11 @@
 import { ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { apiFile } from '../../lib/api.js'
+import StatusChip from '../StatusChip.jsx'
 
 export const HEADING = 'px-5 py-2.5 text-left text-xs font-semibold uppercase tracking-wider'
+// The same heading style inside a grid row, which has its own padding.
+export const LABEL = 'text-left text-xs font-semibold uppercase tracking-wider'
 
 // The first letters of a name, in a round badge.
 export function Initials({ name }) {
@@ -70,5 +73,78 @@ export function ListCard({ title, count, note, children }) {
       </div>
       <div className="overflow-x-auto">{children}</div>
     </section>
+  )
+}
+
+// The last cell of a ranking row. On a phone it becomes its own line, with
+// the status on the left, since the status column is hidden there.
+export function RowActions({ chip, children }) {
+  return (
+    <div className="col-span-full flex flex-wrap items-center justify-end gap-x-2 gap-y-1 lg:col-span-1">
+      {chip && (
+        <span className="mr-auto lg:hidden">
+          <StatusChip tone={chip.tone}>{chip.label}</StatusChip>
+        </span>
+      )}
+      {children}
+    </div>
+  )
+}
+
+const UNRANKED = {
+  excluded: { tone: 'warning', label: 'Excluded', color: 'text-warning', tint: 'bg-warning-soft/40' },
+  screening_failed: {
+    tone: 'danger',
+    label: 'Could not be read',
+    color: 'text-danger',
+    tint: 'bg-danger-soft/40',
+  },
+}
+
+// A candidate without a rank in a ranking: excluded, unreadable, or not
+// screened to the end yet. "grid" is the column layout of the ranking.
+export function UnrankedRow({ candidate, grid, actions }) {
+  const status = UNRANKED[candidate.status] ?? {
+    tone: 'info',
+    label: candidate.requirement_matches
+      ? 'Matched'
+      : candidate.must_haves_met
+        ? 'Met the must-haves'
+        : 'CV read',
+    color: '',
+    tint: '',
+  }
+  const notes =
+    candidate.status === 'excluded'
+      ? (candidate.excluded_reason ?? '').split('\n')
+      : candidate.status === 'screening_failed'
+        ? [candidate.screening_error]
+        : [
+            `Not ${candidate.requirement_matches ? 'scored' : 'matched'} yet. Screen the CVs to finish.`,
+          ]
+  return (
+    <li className={`${grid} border-t border-line/60 py-3.5 ${status.tint}`}>
+      <span className="pl-3 text-lg text-line" aria-hidden="true">
+        –
+      </span>
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="w-4.5 shrink-0" />
+        <Initials name={candidate.full_name} />
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold text-navy">{candidate.full_name}</p>
+          {notes.map((note) => (
+            <p key={note} className={`text-[13px] ${status.color}`}>
+              {note}
+            </p>
+          ))}
+        </div>
+      </div>
+      <span className="text-sm">–</span>
+      <span className="hidden text-sm lg:block">–</span>
+      <div className="hidden lg:block">
+        <StatusChip tone={status.tone}>{status.label}</StatusChip>
+      </div>
+      <RowActions chip={status}>{actions}</RowActions>
+    </li>
   )
 }

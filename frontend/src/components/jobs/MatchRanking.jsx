@@ -1,9 +1,18 @@
 import { ChevronDown, ChevronRight, CircleCheck, CircleMinus, CircleX } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import StatusChip from '../StatusChip.jsx'
-import { HEADING, Initials, ViewCvLink } from './candidates.jsx'
+import DeleteCandidateButton from './DeleteCandidateButton.jsx'
+import {
+  HEADING,
+  Initials,
+  LABEL,
+  RowActions,
+  UnrankedRow,
+  ViewCvLink,
+} from './candidates.jsx'
+import { SHORTLISTED_CHIP } from '../../lib/jobs.js'
 
-const ROW = 'grid grid-cols-[3.25rem_minmax(0,1.6fr)_minmax(0,1fr)_auto] items-center gap-4 px-5 lg:grid-cols-[3.25rem_minmax(0,1.6fr)_minmax(9rem,1fr)_minmax(0,1.3fr)_9rem_6.5rem]'
+const ROW = 'grid grid-cols-[3.25rem_minmax(0,1.6fr)_minmax(0,1fr)] items-center gap-x-4 gap-y-2 px-5 lg:grid-cols-[3.25rem_minmax(0,1.6fr)_minmax(9rem,1fr)_minmax(0,1.3fr)_8rem_9.5rem]'
 
 const RESULTS = {
   met: { label: 'Met', tone: 'success', icon: CircleCheck, color: 'text-success', line: 'border-success' },
@@ -50,7 +59,7 @@ function MatchBar({ score }) {
   )
 }
 
-function RankBadge({ rank }) {
+export function RankBadge({ rank }) {
   return (
     <span
       className={`flex size-8 items-center justify-center rounded-[10px] font-display text-sm font-extrabold ${
@@ -107,7 +116,7 @@ function Evidence({ matches }) {
   return (
     <div className="border-t border-line/60 bg-mist/60 px-5 pb-4 pt-1.5 lg:pl-24">
       <div className="flex flex-wrap items-center justify-between gap-2 py-2.5">
-        <span className={HEADING.replace('px-5 py-2.5 ', '')}>Requirements, must-haves first</span>
+        <span className={LABEL}>Requirements, must-haves first</span>
         <span className="text-[13px]">
           Match score: met counts 1, partly met 0.5, must-haves count double
         </span>
@@ -121,10 +130,15 @@ function Evidence({ matches }) {
   )
 }
 
-function RankedRow({ candidate, isOpen, onToggle }) {
+
+function RankedRow({ candidate, isOpen, onToggle, isLocked, onChanged }) {
   const Chevron = isOpen ? ChevronDown : ChevronRight
+  const chip =
+    candidate.status === 'shortlisted'
+      ? SHORTLISTED_CHIP
+      : { tone: 'success', label: candidate.scores ? 'Scored' : 'Matched' }
   return (
-    <li className="border-t border-line/60">
+    <li id={`match-${candidate.id}`} className="scroll-mt-6 border-t border-line/60">
       <div className={`${ROW} py-3.5 ${isOpen ? 'bg-mist/60' : ''}`}>
         <RankBadge rank={candidate.rank} />
         <button
@@ -142,76 +156,34 @@ function RankedRow({ candidate, isOpen, onToggle }) {
           <MatchCounts counts={candidate.match_counts} />
         </div>
         <div className="hidden lg:block">
-          <StatusChip tone="success">{candidate.scores ? 'Scored' : 'Matched'}</StatusChip>
+          <StatusChip tone={chip.tone}>{chip.label}</StatusChip>
         </div>
-        <div className="hidden justify-end lg:flex">
+        <RowActions chip={chip}>
           <ViewCvLink candidateId={candidate.id} />
-        </div>
+          <DeleteCandidateButton candidate={candidate} isLocked={isLocked} onDeleted={onChanged} />
+        </RowActions>
       </div>
       {isOpen && <Evidence matches={candidate.requirement_matches} />}
     </li>
   )
 }
 
-// A candidate who has no rank: excluded, unreadable, or not matched yet.
-function UnrankedRow({ candidate }) {
-  const status = {
-    excluded: { tone: 'warning', label: 'Excluded', color: 'text-warning', tint: 'bg-warning-soft/40' },
-    screening_failed: {
-      tone: 'danger',
-      label: 'Could not be read',
-      color: 'text-danger',
-      tint: 'bg-danger-soft/40',
-    },
-  }[candidate.status] ?? {
-    tone: 'info',
-    label: candidate.must_haves_met ? 'Met the must-haves' : 'CV read',
-    color: '',
-    tint: '',
-  }
-  const notes =
-    candidate.status === 'excluded'
-      ? (candidate.excluded_reason ?? '').split('\n')
-      : candidate.status === 'screening_failed'
-        ? [candidate.screening_error]
-        : ['Not matched yet. Screen the CVs to finish.']
-  return (
-    <li className={`${ROW} border-t border-line/60 py-3.5 ${status.tint}`}>
-      <span className="pl-3 text-lg text-line" aria-hidden="true">
-        –
-      </span>
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="w-4.5 shrink-0" />
-        <Initials name={candidate.full_name} />
-        <div className="min-w-0">
-          <p className="text-[15px] font-semibold text-navy">{candidate.full_name}</p>
-          {notes.map((note) => (
-            <p key={note} className={`text-[13px] ${status.color}`}>
-              {note}
-            </p>
-          ))}
-        </div>
-      </div>
-      <span className="text-sm">–</span>
-      <span className="hidden text-sm lg:block">–</span>
-      <div className="hidden lg:block">
-        <StatusChip tone={status.tone}>{status.label}</StatusChip>
-      </div>
-      <div className="hidden justify-end lg:flex">
-        <ViewCvLink candidateId={candidate.id} />
-      </div>
-    </li>
-  )
-}
-
 // Matched candidates ranked by match score, with the evidence for each
 // requirement one click away. Candidates without a rank are listed below.
-export default function MatchRanking({ candidates }) {
-  const [openId, setOpenId] = useState(null)
+// initialOpenId opens one candidate, for example when the final ranking
+// links here.
+export default function MatchRanking({ candidates, initialOpenId = null, isLocked, onChanged }) {
+  const [openId, setOpenId] = useState(initialOpenId)
   const ranked = candidates
     .filter((item) => item.rank != null)
     .sort((a, b) => a.rank - b.rank)
   const unranked = candidates.filter((item) => item.rank == null)
+
+  useEffect(() => {
+    if (initialOpenId) {
+      document.getElementById(`match-${initialOpenId}`)?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [initialOpenId])
 
   return (
     <section className="overflow-hidden rounded-card border border-line bg-white shadow-card">
@@ -221,18 +193,16 @@ export default function MatchRanking({ candidates }) {
           <span className="font-semibold text-body">{ranked.length}</span>
         </h2>
         <span className="text-[13px]">
-          Ordered by match score for now. Scores from the next step will replace it.
+          Match score: how well each CV meets the requirements, by meaning
         </span>
       </div>
       <div className={`${ROW} bg-mist py-2.5`}>
-        <span className={HEADING.replace('px-5 py-2.5 ', '')}>Rank</span>
-        <span className={HEADING.replace('px-5 py-2.5 ', '')}>Candidate</span>
-        <span className={HEADING.replace('px-5 py-2.5 ', '')}>Match</span>
-        <span className={`${HEADING.replace('px-5 py-2.5 ', '')} hidden lg:block`}>
-          Requirements
-        </span>
-        <span className={`${HEADING.replace('px-5 py-2.5 ', '')} hidden lg:block`}>Status</span>
-        <span className="hidden lg:block" />
+        <span className={LABEL}>Rank</span>
+        <span className={LABEL}>Candidate</span>
+        <span className={LABEL}>Match</span>
+        <span className={`${LABEL} hidden lg:block`}>Requirements</span>
+        <span className={`${LABEL} hidden lg:block`}>Status</span>
+        <span className={`${LABEL} hidden text-right lg:block`}>Actions</span>
       </div>
       <ul>
         {ranked.map((candidate) => (
@@ -241,6 +211,8 @@ export default function MatchRanking({ candidates }) {
             candidate={candidate}
             isOpen={openId === candidate.id}
             onToggle={() => setOpenId(openId === candidate.id ? null : candidate.id)}
+            isLocked={isLocked}
+            onChanged={onChanged}
           />
         ))}
         {ranked.length === 0 && (
@@ -254,7 +226,21 @@ export default function MatchRanking({ candidates }) {
           <div className={`${HEADING} border-t border-line/60 bg-mist`}>Not ranked</div>
           <ul>
             {unranked.map((candidate) => (
-              <UnrankedRow key={candidate.id} candidate={candidate} />
+              <UnrankedRow
+                key={candidate.id}
+                candidate={candidate}
+                grid={ROW}
+                actions={
+                  <>
+                    <ViewCvLink candidateId={candidate.id} />
+                    <DeleteCandidateButton
+                      candidate={candidate}
+                      isLocked={isLocked}
+                      onDeleted={onChanged}
+                    />
+                  </>
+                }
+              />
             ))}
           </ul>
         </>

@@ -46,6 +46,12 @@ export default function JobPage() {
   }, [reload])
   const run = useJobActivity(jobId, handleFinished)
 
+  // After a shortlist change or a deletion, the same as after a run.
+  function handleChanged() {
+    handleFinished()
+    run.reload()
+  }
+
   if (error) {
     return (
       <p role="alert" className="font-semibold text-danger">
@@ -102,7 +108,9 @@ export default function JobPage() {
 
           <JobTabs job={job} threadId={threadId} waiting={waiting} current={current} />
 
-          <Outlet context={{ job, threadId, waiting, run, listVersion }} />
+          <Outlet
+            context={{ job, threadId, waiting, run, listVersion, onChanged: handleChanged }}
+          />
         </>
       )}
     </div>

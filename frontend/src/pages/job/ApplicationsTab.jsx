@@ -1,12 +1,18 @@
 import { CircleAlert, Download } from 'lucide-react'
 import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
-import { HEADING, Initials, ListCard, ViewCvLink } from '../../components/jobs/candidates.jsx'
+import DeleteCandidateButton from '../../components/jobs/DeleteCandidateButton.jsx'
+import {
+  HEADING,
+  Initials,
+  ListCard,
+  ViewCvLink,
+} from '../../components/jobs/candidates.jsx'
 import RunPanel from '../../components/jobs/RunPanel.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import StatusChip from '../../components/StatusChip.jsx'
 import { useCandidates } from '../../hooks/useCandidates.js'
-import { formatDateTime } from '../../lib/jobs.js'
+import { formatDateTime, SHORTLISTED_CHIP } from '../../lib/jobs.js'
 
 const INTAKE = 'cv_intake'
 
@@ -14,6 +20,7 @@ const STATUS_CHIPS = {
   applied: { tone: 'neutral', label: 'Applied' },
   screening_failed: { tone: 'danger', label: 'Could not be read' },
   excluded: { tone: 'warning', label: 'Excluded' },
+  shortlisted: SHORTLISTED_CHIP,
 }
 const SCREENED_CHIP = { tone: 'success', label: 'Screened' }
 
@@ -83,7 +90,7 @@ function NotCollected({ items }) {
   )
 }
 
-function Applicants({ candidates }) {
+function Applicants({ candidates, isLocked, onChanged }) {
   return (
     <ListCard title="Applicants" count={candidates.length} note="Newest first">
       <table className="w-full">
@@ -93,7 +100,7 @@ function Applicants({ candidates }) {
             <th scope="col" className={`${HEADING} hidden md:table-cell`}>Applied</th>
             <th scope="col" className={HEADING}>Status</th>
             <th scope="col" className={HEADING}>
-              <span className="sr-only">CV</span>
+              <span className="sr-only">Actions</span>
             </th>
           </tr>
         </thead>
@@ -118,8 +125,13 @@ function Applicants({ candidates }) {
                   <StatusChip tone={chip.tone}>{chip.label}</StatusChip>
                 </td>
                 <td className="px-5 py-3.5">
-                  <div className="flex justify-end">
+                  <div className="flex items-center justify-end gap-2">
                     <ViewCvLink candidateId={candidate.id} />
+                    <DeleteCandidateButton
+                      candidate={candidate}
+                      isLocked={isLocked}
+                      onDeleted={onChanged}
+                    />
                   </div>
                 </td>
               </tr>
@@ -133,7 +145,7 @@ function Applicants({ candidates }) {
 
 // The Applications tab of a job: collect the CVs and see who applied.
 export default function ApplicationsTab() {
-  const { job, threadId, waiting, run, listVersion } = useOutletContext()
+  const { job, threadId, waiting, run, listVersion, onChanged } = useOutletContext()
   const { candidates, error } = useCandidates(job.id, listVersion)
   const isPublished = job.status === 'published'
   const fetching = run.running?.kind === INTAKE ? run.running : null
@@ -197,7 +209,11 @@ export default function ApplicationsTab() {
       )}
       {candidates?.length > 0 && (
         <>
-          <Applicants candidates={candidates} />
+          <Applicants
+            candidates={candidates}
+            isLocked={Boolean(run.running)}
+            onChanged={onChanged}
+          />
           <div className="flex justify-end">
             <Button variant="outline" to="../screening" relative="path">
               Next: Screening

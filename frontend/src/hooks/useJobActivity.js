@@ -6,6 +6,7 @@ const POLL_MS = 2000
 // What is running for a job (a fetch or a screening) and how the last runs
 // ended. While something runs it is asked again every two seconds, so the
 // progress also shows after a page reload. onFinished is called when a run ends.
+// reload asks again at once, for example after a candidate is deleted.
 export function useJobActivity(jobId, onFinished) {
   const [activity, setActivity] = useState(null)
   const [error, setError] = useState('')
@@ -46,5 +47,5 @@ export function useJobActivity(jobId, onFinished) {
     }
   }
 
-  return { ...activity, isLoaded: activity !== null, error, start }
+  return { ...activity, isLoaded: activity !== null, error, start, reload: load }
 }

@@ -1,6 +1,8 @@
 import { ScanSearch } from 'lucide-react'
+import { useState } from 'react'
 import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
+import FinalRanking from '../../components/jobs/FinalRanking.jsx'
 import MatchRanking from '../../components/jobs/MatchRanking.jsx'
 import RunPanel from '../../components/jobs/RunPanel.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
@@ -49,31 +51,35 @@ function LastScreening({ task }) {
 }
 
 const SUB_TABS = [
-  { key: 'match', label: 'Requirement match' },
   { key: 'final', label: 'Final ranking', note: 'after scoring' },
+  { key: 'match', label: 'Requirement match' },
 ]
 
-// The two rankings of a job. The final ranking opens once scoring exists.
-function SubTabs() {
+// The two rankings of a job. The final ranking opens once someone is scored.
+function SubTabs({ view, hasScores, onChange }) {
   return (
     <div role="tablist" aria-label="Rankings" className="flex flex-wrap gap-2">
       {SUB_TABS.map((tab) => {
-        const isActive = tab.key === 'match'
+        const isActive = tab.key === view
+        const isDisabled = tab.key === 'final' && !hasScores
         return (
           <button
             key={tab.key}
             type="button"
             role="tab"
             aria-selected={isActive}
-            disabled={!isActive}
+            disabled={isDisabled}
+            onClick={() => onChange(tab.key)}
             className={`flex min-h-10 items-center gap-2 rounded-full border-[1.5px] px-4 text-sm font-semibold ${
               isActive
                 ? 'border-brand bg-brand text-white'
-                : 'cursor-not-allowed border-line bg-white text-body/60'
+                : isDisabled
+                  ? 'cursor-not-allowed border-line bg-white text-body/60'
+                  : 'border-line bg-white text-navy hover:border-brand/40 hover:bg-tint'
             }`}
           >
             {tab.label}
-            {tab.note && <span className="text-xs font-medium">{tab.note}</span>}
+            {isDisabled && <span className="text-xs font-medium">{tab.note}</span>}
           </button>
         )
       })}
@@ -83,8 +89,12 @@ function SubTabs() {
 
 // The Screening tab of a job: run the screening and see what was read.
 export default function ScreeningTab() {
-  const { job, run, listVersion } = useOutletContext()
+  const { job, run, listVersion, onChanged } = useOutletContext()
   const { candidates, error } = useCandidates(job.id, listVersion)
+  // The final ranking is shown first once anyone is scored, unless the
+  // interviewer picks the other view. evidenceFor opens one candidate there.
+  const [chosenView, setChosenView] = useState(null)
+  const [evidenceFor, setEvidenceFor] = useState(null)
   const screening = run.running?.kind === SCREENING ? run.running : null
   const ready = run.ready_to_screen ?? 0
   const screened = (candidates ?? []).filter(
@@ -92,6 +102,19 @@ export default function ScreeningTab() {
       item.cv_text_source || item.status === 'screening_failed' || item.status === 'excluded',
   )
   const hasNone = candidates?.length === 0
+  const hasScores = screened.some((item) => item.scores)
+  const view = hasScores ? (chosenView ?? 'final') : 'match'
+  const isLocked = Boolean(run.running)
+
+  function changeView(next) {
+    setEvidenceFor(null)
+    setChosenView(next)
+  }
+
+  function showEvidence(candidateId) {
+    setEvidenceFor(candidateId)
+    setChosenView('match')
+  }
 
   return (
     <>
@@ -141,8 +164,24 @@ export default function ScreeningTab() {
       {!candidates && !error && <Skeleton className="h-48 w-full rounded-card" />}
       {screened.length > 0 && (
         <>
-          <SubTabs />
-          <MatchRanking candidates={screened} />
+          <SubTabs view={view} hasScores={hasScores} onChange={changeView} />
+          {view === 'final' ? (
+            <FinalRanking
+              jobId={job.id}
+              candidates={screened}
+              isLocked={isLocked}
+              onChanged={onChanged}
+              onShowEvidence={showEvidence}
+            />
+          ) : (
+            <MatchRanking
+              key={evidenceFor ?? 'all'}
+              candidates={screened}
+              initialOpenId={evidenceFor}
+              isLocked={isLocked}
+              onChanged={onChanged}
+            />
+          )}
         </>
       )}
     </>

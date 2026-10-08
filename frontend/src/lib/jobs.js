@@ -103,3 +103,6 @@ export function formatDate(value) {
     year: 'numeric',
   })
 }
+
+// How a shortlisted candidate is marked in every list.
+export const SHORTLISTED_CHIP = { tone: 'teal', label: 'Shortlisted' }

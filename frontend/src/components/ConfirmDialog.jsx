@@ -1,10 +1,13 @@
 import { useEffect } from 'react'
 import Button from './Button.jsx'
 
-// Asks the interviewer to confirm an action that cannot be undone.
+// Asks the interviewer to confirm an action that cannot be undone, or one
+// that changes many candidates at once.
 export default function ConfirmDialog({
   title,
   confirmLabel,
+  busyLabel = 'Deleting…',
+  confirmVariant = 'danger',
   isBusy = false,
   error = '',
   onConfirm,
@@ -42,8 +45,8 @@ export default function ConfirmDialog({
           <Button variant="soft" onClick={onCancel} disabled={isBusy}>
             Cancel
           </Button>
-          <Button variant="danger" onClick={onConfirm} disabled={isBusy}>
-            {isBusy ? 'Deleting…' : confirmLabel}
+          <Button variant={confirmVariant} onClick={onConfirm} disabled={isBusy}>
+            {isBusy ? busyLabel : confirmLabel}
           </Button>
         </div>
       </section>
