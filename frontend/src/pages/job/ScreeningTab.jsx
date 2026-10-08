@@ -11,6 +11,25 @@ import { formatDateTime } from '../../lib/jobs.js'
 const SCREENING = 'cv_screening'
 const READ_AS = { text: 'Text', ocr: 'Scanned (OCR)' }
 
+// The requirement match of one candidate as three small counts.
+function MatchCounts({ counts }) {
+  if (!counts) return <span className="text-sm">–</span>
+  const parts = [
+    ['met', 'met', 'bg-success-soft text-success'],
+    ['partially_met', 'partly', 'bg-warning-soft text-warning'],
+    ['unmet', 'not met', 'bg-danger-soft text-danger'],
+  ]
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {parts.map(([key, label, style]) => (
+        <span key={key} className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${style}`}>
+          {counts[key]} {label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 // How the last screening ended, in one line.
 function LastScreening({ task }) {
   if (!task) return null
@@ -31,7 +50,7 @@ function LastScreening({ task }) {
       {passed > 0 && (
         <>
           {' · '}
-          <strong className="font-semibold text-success">{passed} met the must-haves</strong>
+          <strong className="font-semibold text-success">{passed} matched</strong>
         </>
       )}
       {excluded > 0 && (
@@ -61,7 +80,8 @@ function ScreenedList({ candidates }) {
         <thead className="bg-mist">
           <tr>
             <th scope="col" className={HEADING}>Candidate</th>
-            <th scope="col" className={`${HEADING} hidden md:table-cell`}>CV read as</th>
+            <th scope="col" className={`${HEADING} hidden lg:table-cell`}>CV read as</th>
+            <th scope="col" className={HEADING}>Requirements</th>
             <th scope="col" className={HEADING}>Status</th>
             <th scope="col" className={HEADING}>
               <span className="sr-only">CV</span>
@@ -94,16 +114,21 @@ function ScreenedList({ candidates }) {
                     </div>
                   </div>
                 </td>
-                <td className="hidden px-5 py-3.5 text-sm text-navy md:table-cell">
+                <td className="hidden px-5 py-3.5 text-sm text-navy lg:table-cell">
                   {hasFailed ? '–' : READ_AS[candidate.cv_text_source]}
+                </td>
+                <td className="px-5 py-3.5">
+                  <MatchCounts counts={candidate.match_counts} />
                 </td>
                 <td className="px-5 py-3.5">
                   {hasFailed ? (
                     <StatusChip tone="danger">Could not be read</StatusChip>
                   ) : isExcluded ? (
                     <StatusChip tone="warning">Excluded</StatusChip>
+                  ) : candidate.match_counts ? (
+                    <StatusChip tone="success">Matched</StatusChip>
                   ) : candidate.must_haves_met ? (
-                    <StatusChip tone="success">Met the must-haves</StatusChip>
+                    <StatusChip tone="info">Met the must-haves</StatusChip>
                   ) : (
                     <StatusChip tone="info">CV read</StatusChip>
                   )}
@@ -146,8 +171,8 @@ export default function ScreeningTab() {
               <strong className="font-semibold text-navy">
                 {ready} {ready === 1 ? 'CV is' : 'CVs are'} ready to screen.
               </strong>{' '}
-              Each CV is read and checked against the job&apos;s must-have requirements.
-              CVs already screened are skipped.
+              Each CV is read, checked against the must-haves, and matched with every
+              requirement by meaning. CVs already screened are skipped.
             </>
           ) : (
             'All collected CVs are screened. Fetch new applications to screen more.'
