@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react'
 import StatusChip from '../StatusChip.jsx'
 import DeleteCandidateButton from './DeleteCandidateButton.jsx'
 import {
+  FilterNote,
   HEADING,
   Initials,
   LABEL,
+  NoMatches,
   RowActions,
   UnrankedRow,
   ViewCvLink,
@@ -168,16 +170,29 @@ function RankedRow({ candidate, isOpen, onToggle, isLocked, onChanged }) {
   )
 }
 
+function byMatchRank(list) {
+  return list.filter((item) => item.rank != null).sort((a, b) => a.rank - b.rank)
+}
+
 // Matched candidates ranked by match score, with the evidence for each
 // requirement one click away. Candidates without a rank are listed below.
 // initialOpenId opens one candidate, for example when the final ranking
-// links here.
-export default function MatchRanking({ candidates, initialOpenId = null, isLocked, onChanged }) {
+// links here. "visible" is the part the Show filter and the search leave;
+// ranks keep their real numbers.
+export default function MatchRanking({
+  candidates,
+  visible = candidates,
+  isFiltered = false,
+  onShowAll,
+  initialOpenId = null,
+  isLocked,
+  onChanged,
+}) {
   const [openId, setOpenId] = useState(initialOpenId)
-  const ranked = candidates
-    .filter((item) => item.rank != null)
-    .sort((a, b) => a.rank - b.rank)
-  const unranked = candidates.filter((item) => item.rank == null)
+  const rankedCount = byMatchRank(candidates).length
+  const ranked = byMatchRank(visible)
+  const unranked = visible.filter((item) => item.rank == null)
+  const isEmpty = isFiltered && visible.length === 0
 
   useEffect(() => {
     if (initialOpenId) {
@@ -188,9 +203,14 @@ export default function MatchRanking({ candidates, initialOpenId = null, isLocke
   return (
     <section className="overflow-hidden rounded-card border border-line bg-white shadow-card">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-        <h2 className="text-lg font-bold">
-          Ranking by requirement match{' '}
-          <span className="font-semibold text-body">{ranked.length}</span>
+        <h2 className="flex flex-wrap items-center gap-3 text-lg font-bold">
+          <span>
+            Ranking by requirement match{' '}
+            <span className="font-semibold text-body">{rankedCount}</span>
+          </span>
+          {isFiltered && (
+            <FilterNote shown={visible.length} total={candidates.length} onShowAll={onShowAll} />
+          )}
         </h2>
         <span className="text-[13px]">
           Match score: how well each CV meets the requirements, by meaning
@@ -215,7 +235,8 @@ export default function MatchRanking({ candidates, initialOpenId = null, isLocke
             onChanged={onChanged}
           />
         ))}
-        {ranked.length === 0 && (
+        {isEmpty && <NoMatches onShowAll={onShowAll} />}
+        {ranked.length === 0 && !isFiltered && (
           <li className="border-t border-line/60 px-5 py-6 text-center text-[15px]">
             No candidate has been matched yet.
           </li>

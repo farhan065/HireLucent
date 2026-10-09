@@ -7,9 +7,11 @@ import StatusChip from '../StatusChip.jsx'
 import DeleteCandidateButton from './DeleteCandidateButton.jsx'
 import { MatchCounts, RankBadge } from './MatchRanking.jsx'
 import {
+  FilterNote,
   HEADING,
   Initials,
   LABEL,
+  NoMatches,
   RowActions,
   UnrankedRow,
   ViewCvLink,
@@ -418,36 +420,57 @@ function RankedRow({ candidate, isOpen, onToggle, isLocked, onChanged, onShowEvi
   )
 }
 
-// Scored candidates ranked by final score. The interviewer shortlists them
-// one by one or by a rule; the ranking itself never changes because of it.
-export default function FinalRanking({ jobId, candidates, isLocked, onChanged, onShowEvidence }) {
-  const [openId, setOpenId] = useState(null)
-  const ranked = candidates
+function byFinalRank(list) {
+  return list
     .filter((item) => item.scores?.final_rank != null)
     .sort((a, b) => a.scores.final_rank - b.scores.final_rank)
-  const unranked = candidates.filter((item) => item.scores?.final_rank == null)
+}
+
+// Scored candidates ranked by final score. The interviewer shortlists them
+// one by one or by a rule; the ranking itself never changes because of it.
+// "visible" is the part the Show filter and the search leave; ranks keep
+// their real numbers, and the shortlist bar is hidden while filtering
+// because its rules always apply to the whole ranking.
+export default function FinalRanking({
+  jobId,
+  candidates,
+  visible = candidates,
+  isFiltered = false,
+  onShowAll,
+  isLocked,
+  onChanged,
+  onShowEvidence,
+}) {
+  const [openId, setOpenId] = useState(null)
+  const rankedCount = byFinalRank(candidates).length
+  const ranked = byFinalRank(visible)
+  const unranked = visible.filter((item) => item.scores?.final_rank == null)
   const shortlisted = candidates.filter((item) => item.status === 'shortlisted').length
+  const isEmpty = isFiltered && visible.length === 0
 
   return (
     <section className="overflow-hidden rounded-card border border-line bg-white shadow-card">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
         <h2 className="flex flex-wrap items-center gap-3 text-lg font-bold">
           <span>
-            Final ranking <span className="font-semibold text-body">{ranked.length}</span>
+            Final ranking <span className="font-semibold text-body">{rankedCount}</span>
           </span>
           {shortlisted > 0 && (
             <StatusChip tone={SHORTLISTED_CHIP.tone}>{shortlisted} shortlisted</StatusChip>
+          )}
+          {isFiltered && (
+            <FilterNote shown={visible.length} total={candidates.length} onShowAll={onShowAll} />
           )}
         </h2>
         <span className="text-[13px]">
           Final score = {percent(CRITERIA_SHARE)} criteria score + {percent(ATS_SHARE)} ATS score
         </span>
       </div>
-      {ranked.length > 0 && (
+      {rankedCount > 0 && !isFiltered && (
         <ShortlistBar
-          key={ranked.length}
+          key={rankedCount}
           jobId={jobId}
-          rankedCount={ranked.length}
+          rankedCount={rankedCount}
           shortlistedCount={shortlisted}
           onChanged={onChanged}
         />
@@ -472,7 +495,8 @@ export default function FinalRanking({ jobId, candidates, isLocked, onChanged, o
             onShowEvidence={onShowEvidence}
           />
         ))}
-        {ranked.length === 0 && (
+        {isEmpty && <NoMatches onShowAll={onShowAll} />}
+        {ranked.length === 0 && !isFiltered && (
           <li className="border-t border-line/60 px-5 py-6 text-center text-[15px]">
             No candidate has been scored yet.
           </li>

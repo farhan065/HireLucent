@@ -1,13 +1,15 @@
-import { ScanSearch } from 'lucide-react'
+import { ScanSearch, Search } from 'lucide-react'
 import { useState } from 'react'
 import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
 import FinalRanking from '../../components/jobs/FinalRanking.jsx'
 import MatchRanking from '../../components/jobs/MatchRanking.jsx'
+import ResultFilter from '../../components/jobs/ResultFilter.jsx'
 import RunPanel from '../../components/jobs/RunPanel.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import { useCandidates } from '../../hooks/useCandidates.js'
 import { formatDateTime } from '../../lib/jobs.js'
+import { countGroups, filterCandidates } from '../../lib/results.js'
 
 const SCREENING = 'cv_screening'
 
@@ -87,24 +89,36 @@ function SubTabs({ view, hasScores, onChange }) {
   )
 }
 
-// The Screening tab of a job: run the screening and see what was read.
-export default function ScreeningTab() {
-  const { job, run, listVersion, onChanged } = useOutletContext()
-  const { candidates, error } = useCandidates(job.id, listVersion)
+function SearchBox({ value, onChange }) {
+  return (
+    <label className="flex min-h-11 w-full items-center gap-2.5 rounded-full border-[1.5px] border-line bg-white px-3.5 focus-within:border-brand sm:w-72">
+      <Search className="size-4.5 shrink-0 text-body" aria-hidden="true" />
+      <span className="sr-only">Search candidates by name</span>
+      <input
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Search by name"
+        className="min-w-0 flex-1 bg-transparent text-[15px] text-navy placeholder:text-body/70 focus:outline-none"
+      />
+    </label>
+  )
+}
+
+// The rankings with their sub-tabs, the Show filter and the search. Kept in
+// its own component so every choice starts afresh for another job.
+function Results({ job, candidates, isLocked, onChanged }) {
   // The final ranking is shown first once anyone is scored, unless the
   // interviewer picks the other view. evidenceFor opens one candidate there.
   const [chosenView, setChosenView] = useState(null)
   const [evidenceFor, setEvidenceFor] = useState(null)
-  const screening = run.running?.kind === SCREENING ? run.running : null
-  const ready = run.ready_to_screen ?? 0
-  const screened = (candidates ?? []).filter(
-    (item) =>
-      item.cv_text_source || item.status === 'screening_failed' || item.status === 'excluded',
-  )
-  const hasNone = candidates?.length === 0
-  const hasScores = screened.some((item) => item.scores)
+  const [group, setGroup] = useState('all')
+  const [query, setQuery] = useState('')
+  const hasScores = candidates.some((item) => item.scores)
   const view = hasScores ? (chosenView ?? 'final') : 'match'
-  const isLocked = Boolean(run.running)
+  const counts = countGroups(candidates)
+  const visible = filterCandidates(candidates, group, query)
+  const isFiltered = group !== 'all' || query.trim() !== ''
 
   function changeView(next) {
     setEvidenceFor(null)
@@ -115,6 +129,42 @@ export default function ScreeningTab() {
     setEvidenceFor(candidateId)
     setChosenView('match')
   }
+
+  function showAll() {
+    setGroup('all')
+    setQuery('')
+  }
+
+  const shared = { candidates, visible, isFiltered, onShowAll: showAll, isLocked, onChanged }
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SubTabs view={view} hasScores={hasScores} onChange={changeView} />
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+          <ResultFilter value={group} counts={counts} onChange={setGroup} />
+          <SearchBox value={query} onChange={setQuery} />
+        </div>
+      </div>
+      {view === 'final' ? (
+        <FinalRanking jobId={job.id} onShowEvidence={showEvidence} {...shared} />
+      ) : (
+        <MatchRanking key={evidenceFor ?? 'all'} initialOpenId={evidenceFor} {...shared} />
+      )}
+    </>
+  )
+}
+
+// The Screening tab of a job: run the screening and see the results.
+export default function ScreeningTab() {
+  const { job, run, listVersion, onChanged } = useOutletContext()
+  const { candidates, error } = useCandidates(job.id, listVersion)
+  const screening = run.running?.kind === SCREENING ? run.running : null
+  const ready = run.ready_to_screen ?? 0
+  const screened = (candidates ?? []).filter(
+    (item) =>
+      item.cv_text_source || item.status === 'screening_failed' || item.status === 'excluded',
+  )
+  const hasNone = candidates?.length === 0
 
   return (
     <>
@@ -163,26 +213,13 @@ export default function ScreeningTab() {
       )}
       {!candidates && !error && <Skeleton className="h-48 w-full rounded-card" />}
       {screened.length > 0 && (
-        <>
-          <SubTabs view={view} hasScores={hasScores} onChange={changeView} />
-          {view === 'final' ? (
-            <FinalRanking
-              jobId={job.id}
-              candidates={screened}
-              isLocked={isLocked}
-              onChanged={onChanged}
-              onShowEvidence={showEvidence}
-            />
-          ) : (
-            <MatchRanking
-              key={evidenceFor ?? 'all'}
-              candidates={screened}
-              initialOpenId={evidenceFor}
-              isLocked={isLocked}
-              onChanged={onChanged}
-            />
-          )}
-        </>
+        <Results
+          key={job.id}
+          job={job}
+          candidates={screened}
+          isLocked={Boolean(run.running)}
+          onChanged={onChanged}
+        />
       )}
     </>
   )
