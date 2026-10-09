@@ -4,6 +4,7 @@ import { apiRequest } from '../../lib/api.js'
 import Button from '../Button.jsx'
 import ConfirmDialog from '../ConfirmDialog.jsx'
 import StatusChip from '../StatusChip.jsx'
+import CvFacts from './CvFacts.jsx'
 import DeleteCandidateButton from './DeleteCandidateButton.jsx'
 import { MatchCounts, RankBadge } from './MatchRanking.jsx'
 import {
@@ -350,8 +351,8 @@ function AtsPanel({ ats }) {
   )
 }
 
-// Why the candidate ranks where they do: the summary, then how the final
-// score was made.
+// Why the candidate ranks where they do: the summary, how the final score
+// was made, and what was read from the CV.
 function Breakdown({ candidate, onShowEvidence }) {
   const { scores } = candidate
   return (
@@ -381,6 +382,7 @@ function Breakdown({ candidate, onShowEvidence }) {
           See the evidence for each requirement
         </button>
       </div>
+      {candidate.cv_facts && <CvFacts facts={candidate.cv_facts} />}
     </div>
   )
 }
