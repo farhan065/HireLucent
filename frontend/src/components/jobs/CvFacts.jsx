@@ -161,3 +161,29 @@ export default function CvFacts({ facts }) {
     </section>
   )
 }
+
+// What an opened row under "Not ranked" shows: for an excluded candidate
+// every reason first, then the CV facts, so the two can be compared.
+export function UnrankedDetails({ candidate }) {
+  const reasons =
+    candidate.status === 'excluded' ? (candidate.excluded_reason ?? '').split('\n').filter(Boolean) : []
+  return (
+    <>
+      {reasons.length > 0 && (
+        <section className="rounded-2xl border-l-[3px] border-warning bg-white px-4 py-3.5">
+          <h3 className={`${LABEL} text-warning`}>Why excluded</h3>
+          <ul className="mt-1.5 list-disc pl-5 text-[15px] leading-relaxed text-navy">
+            {reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[13px] text-body/80">
+            Excluded candidates are not matched or scored. Compare the reasons with the CV facts
+            below.
+          </p>
+        </section>
+      )}
+      <CvFacts facts={candidate.cv_facts} />
+    </>
+  )
+}

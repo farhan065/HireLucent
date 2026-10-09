@@ -1,10 +1,11 @@
 import { ChevronDown, ChevronRight, Star } from 'lucide-react'
 import { useState } from 'react'
 import { apiRequest } from '../../lib/api.js'
+import { canOpenUnranked } from '../../lib/results.js'
 import Button from '../Button.jsx'
 import ConfirmDialog from '../ConfirmDialog.jsx'
 import StatusChip from '../StatusChip.jsx'
-import CvFacts from './CvFacts.jsx'
+import CvFacts, { UnrankedDetails } from './CvFacts.jsx'
 import DeleteCandidateButton from './DeleteCandidateButton.jsx'
 import { MatchCounts, RankBadge } from './MatchRanking.jsx'
 import {
@@ -513,6 +514,11 @@ export default function FinalRanking({
                 key={candidate.id}
                 candidate={candidate}
                 grid={ROW}
+                details={
+                  canOpenUnranked(candidate) ? <UnrankedDetails candidate={candidate} /> : null
+                }
+                isOpen={openId === candidate.id}
+                onToggle={() => setOpenId(openId === candidate.id ? null : candidate.id)}
                 actions={
                   <>
                     <ViewCvLink candidateId={candidate.id} />

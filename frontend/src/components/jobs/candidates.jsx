@@ -1,4 +1,4 @@
-import { ExternalLink } from 'lucide-react'
+import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { apiFile } from '../../lib/api.js'
 import StatusChip from '../StatusChip.jsx'
@@ -103,7 +103,8 @@ const UNRANKED = {
 
 // A candidate without a rank in a ranking: excluded, unreadable, or not
 // screened to the end yet. "grid" is the column layout of the ranking.
-export function UnrankedRow({ candidate, grid, actions }) {
+// With "details", the row opens like a ranked row to show them.
+export function UnrankedRow({ candidate, grid, actions, details = null, isOpen = false, onToggle }) {
   const status = UNRANKED[candidate.status] ?? {
     tone: 'info',
     label: candidate.requirement_matches
@@ -122,29 +123,54 @@ export function UnrankedRow({ candidate, grid, actions }) {
         : [
             `Not ${candidate.requirement_matches ? 'scored' : 'matched'} yet. Screen the CVs to finish.`,
           ]
+  const Chevron = isOpen ? ChevronDown : ChevronRight
+  const who = (
+    <>
+      <Initials name={candidate.full_name} />
+      <div className="min-w-0">
+        <p className="text-[15px] font-semibold text-navy">{candidate.full_name}</p>
+        {notes.map((note) => (
+          <p key={note} className={`text-[13px] ${status.color}`}>
+            {note}
+          </p>
+        ))}
+      </div>
+    </>
+  )
   return (
-    <li className={`${grid} border-t border-line/60 py-3.5 ${status.tint}`}>
-      <span className="pl-3 text-lg text-line" aria-hidden="true">
-        –
-      </span>
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="w-4.5 shrink-0" />
-        <Initials name={candidate.full_name} />
-        <div className="min-w-0">
-          <p className="text-[15px] font-semibold text-navy">{candidate.full_name}</p>
-          {notes.map((note) => (
-            <p key={note} className={`text-[13px] ${status.color}`}>
-              {note}
-            </p>
-          ))}
+    <li className={`border-t border-line/60 ${status.tint}`}>
+      <div className={`${grid} py-3.5`}>
+        <span className="pl-3 text-lg text-line" aria-hidden="true">
+          –
+        </span>
+        {details ? (
+          <button
+            type="button"
+            aria-expanded={isOpen}
+            onClick={onToggle}
+            className="flex min-h-10 min-w-0 items-center gap-3 text-left"
+          >
+            <Chevron className="size-4.5 shrink-0 text-body" aria-hidden="true" />
+            {who}
+          </button>
+        ) : (
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="w-4.5 shrink-0" />
+            {who}
+          </div>
+        )}
+        <span className="text-sm">–</span>
+        <span className="hidden text-sm lg:block">–</span>
+        <div className="hidden lg:block">
+          <StatusChip tone={status.tone}>{status.label}</StatusChip>
         </div>
+        <RowActions chip={status}>{actions}</RowActions>
       </div>
-      <span className="text-sm">–</span>
-      <span className="hidden text-sm lg:block">–</span>
-      <div className="hidden lg:block">
-        <StatusChip tone={status.tone}>{status.label}</StatusChip>
-      </div>
-      <RowActions chip={status}>{actions}</RowActions>
+      {details && isOpen && (
+        <div className="flex flex-col gap-3 border-t border-line/60 px-5 pb-4 pt-3 lg:pl-24">
+          {details}
+        </div>
+      )}
     </li>
   )
 }

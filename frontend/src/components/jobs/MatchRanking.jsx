@@ -1,6 +1,8 @@
 import { ChevronDown, ChevronRight, CircleCheck, CircleMinus, CircleX } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import StatusChip from '../StatusChip.jsx'
+import { canOpenUnranked } from '../../lib/results.js'
+import { UnrankedDetails } from './CvFacts.jsx'
 import DeleteCandidateButton from './DeleteCandidateButton.jsx'
 import {
   FilterNote,
@@ -251,6 +253,11 @@ export default function MatchRanking({
                 key={candidate.id}
                 candidate={candidate}
                 grid={ROW}
+                details={
+                  canOpenUnranked(candidate) ? <UnrankedDetails candidate={candidate} /> : null
+                }
+                isOpen={openId === candidate.id}
+                onToggle={() => setOpenId(openId === candidate.id ? null : candidate.id)}
                 actions={
                   <>
                     <ViewCvLink candidateId={candidate.id} />
