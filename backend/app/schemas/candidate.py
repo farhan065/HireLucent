@@ -48,6 +48,14 @@ class CandidateSummary(BaseModel):
     must_haves_met: bool | None = Field(
         default=None, description="Whether the must-have check passed. Empty until it has run."
     )
+    cv_facts: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "What was read from the CV: summary, skills, work history, education, "
+            "certifications, projects, total years and links. No email addresses "
+            "or phone numbers. Empty until the CV is read."
+        ),
+    )
     created_at: datetime
 
 

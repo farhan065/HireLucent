@@ -90,6 +90,17 @@ class Candidate(TimestampMixin, Base):
         }
 
     @property
+    def cv_facts(self) -> dict[str, Any] | None:
+        """What was read from the CV, for showing to the interviewer. Email
+        addresses and phone numbers are left out: the form's email is shown
+        already, and phone numbers are not needed for screening."""
+        if not self.cv_parsed:
+            return None
+        facts = {key: value for key, value in self.cv_parsed.items() if key != "contact"}
+        facts["links"] = (self.cv_parsed.get("contact") or {}).get("links", [])
+        return facts
+
+    @property
     def match_counts(self) -> dict[str, int] | None:
         """How many requirements are met, partly met and unmet."""
         matches = self.screening_result.requirement_matches if self.screening_result else None

@@ -90,3 +90,29 @@ def test_a_very_long_cv_is_cut_before_it_is_sent(prompts: list[str]) -> None:
     parsing.parse_cv("Python developer. " * 5000)
 
     assert len(prompts[0]) < parsing.MAX_CV_CHARS + len(parsing.PROMPT)
+
+
+def test_cv_facts_shown_to_the_interviewer_leave_out_emails_and_phones() -> None:
+    from app.models import Candidate
+
+    parsed = CONTENT.model_dump() | {
+        "contact": {
+            "emails": ["sample.person@example.com"],
+            "phones": ["+880 1712-345678"],
+            "links": ["https://github.com/sample-person"],
+        }
+    }
+
+    facts = Candidate(cv_parsed=parsed).cv_facts
+
+    assert facts["skills"] == ["Python", "FastAPI"]
+    assert facts["links"] == ["https://github.com/sample-person"]
+    assert "contact" not in facts
+    assert "sample.person@example.com" not in str(facts)
+    assert "1712" not in str(facts)
+
+
+def test_a_cv_not_read_yet_has_no_facts() -> None:
+    from app.models import Candidate
+
+    assert Candidate(cv_parsed=None).cv_facts is None
