@@ -148,3 +148,35 @@ export function UnrankedRow({ candidate, grid, actions }) {
     </li>
   )
 }
+
+// Shown beside a ranking's title while the Show filter or the search is on.
+export function FilterNote({ shown, total, onShowAll }) {
+  return (
+    <span className="text-[13px] font-normal">
+      Showing {shown} of {total} ·{' '}
+      <button
+        type="button"
+        onClick={onShowAll}
+        className="font-semibold text-brand hover:text-brand-dark"
+      >
+        Show all
+      </button>
+    </span>
+  )
+}
+
+// The single line a ranking shows when the filter leaves nobody.
+export function NoMatches({ onShowAll }) {
+  return (
+    <li className="border-t border-line/60 px-5 py-6 text-center text-[15px]">
+      No candidate matches this filter.{' '}
+      <button
+        type="button"
+        onClick={onShowAll}
+        className="font-semibold text-brand hover:text-brand-dark"
+      >
+        Show all
+      </button>
+    </li>
+  )
+}
