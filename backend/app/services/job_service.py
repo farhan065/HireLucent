@@ -3,22 +3,26 @@
 import re
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.models import Candidate, Job, ScreeningResult
-from app.models.enums import JobStatus
+from app.models.enums import CandidateStatus, JobStatus
 from app.schemas.job import JobRequirements, ScoringWeights
+from app.services import task_service
 
 logger = get_logger(__name__)
 
 JOB_CODE_PREFIX = "HL"
-LOCKED_MESSAGE = (
-    "This job's requirements can no longer be changed because CVs have "
-    "already been screened against them."
+# Statuses that only exist because of screening. They go back to "applied"
+# when the requirements change, so the candidate is screened again.
+SCREENED_STATUSES = (
+    CandidateStatus.SCREENED,
+    CandidateStatus.EXCLUDED,
+    CandidateStatus.SHORTLISTED,
 )
 
 
@@ -96,7 +100,8 @@ def list_jobs(db: Session) -> list[Job]:
 
 
 def get_job(db: Session, job_id: int) -> Job:
-    """One job with its candidate counts and lock state, or a 404 error."""
+    """One job with its candidate counts and how many have been screened,
+    or a 404 error."""
     job = db.get(Job, job_id)
     if job is None:
         raise NotFoundError("This job does not exist.")
@@ -106,19 +111,18 @@ def get_job(db: Session, job_id: int) -> Job:
         .group_by(Candidate.status)
     )
     job.candidate_counts = {status: count for status, count in counts}
-    job.is_locked = is_locked(db, job_id)
+    job.screened_count = screened_count(db, job_id)
     return job
 
 
-def is_locked(db: Session, job_id: int) -> bool:
-    """True once any CV of this job has been screened."""
-    screened = db.scalar(
+def screened_count(db: Session, job_id: int) -> int:
+    """How many of the job's candidates have screening results."""
+    return db.scalar(
         select(func.count())
         .select_from(ScreeningResult)
         .join(Candidate)
         .where(Candidate.job_id == job_id)
     )
-    return bool(screened)
 
 
 def update_profile(
@@ -127,15 +131,43 @@ def update_profile(
     requirements: JobRequirements,
     scoring_weights: ScoringWeights,
 ) -> Job:
-    """Change the requirements and weights, unless screening has started."""
-    job = get_job(db, job_id)
-    if job.is_locked:
-        raise ConflictError(LOCKED_MESSAGE)
+    """Change the requirements and weights.
+
+    Screening results made with the old rules are cleared, so every
+    candidate of the job is screened again with the same rules. Refused
+    while a fetch or a screening is running for the job.
+    """
+    get_job(db, job_id)
+    task_service.ensure_idle(db, job_id)
+    job = db.get(Job, job_id)
     job.requirements = requirements.model_dump()
     job.scoring_weights = scoring_weights.model_dump()
+    reset = reset_screening(db, job_id)
     db.commit()
-    log_event(logger, "job_profile_updated", job_id=job.id)
+    log_event(logger, "job_profile_updated", job_id=job.id, screening_reset=reset)
     return get_job(db, job_id)
+
+
+def reset_screening(db: Session, job_id: int) -> int:
+    """Clear the job's screening results and put screened, excluded and
+    shortlisted candidates back to "applied", ready to screen again.
+
+    The text and facts read from each CV are kept, so screening starts at
+    the must-have check without reading the CVs again. Candidates whose CV
+    could not be read keep that status; screening retries them anyway.
+    Returns how many candidates had results. The caller commits.
+    """
+    candidate_ids = select(Candidate.id).where(Candidate.job_id == job_id)
+    reset = db.execute(
+        delete(ScreeningResult).where(ScreeningResult.candidate_id.in_(candidate_ids))
+    ).rowcount
+    for candidate in db.scalars(
+        select(Candidate).where(
+            Candidate.job_id == job_id, Candidate.status.in_(SCREENED_STATUSES)
+        )
+    ):
+        candidate.status = CandidateStatus.APPLIED
+    return reset
 
 
 def mark_published(

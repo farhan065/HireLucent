@@ -46,13 +46,15 @@ def read_job(job_id: int, db: Session = Depends(get_db)) -> Job:
     summary="Change a job's requirements and scoring weights",
     responses={
         **NOT_FOUND,
-        409: {"model": ErrorResponse, "description": "Screening has started"},
+        409: {"model": ErrorResponse, "description": "A fetch or screening is running"},
     },
 )
 def update_job_profile(
     job_id: int, payload: JobProfileUpdate, db: Session = Depends(get_db)
 ) -> Job:
-    """Allowed until the first CV of this job has been screened."""
+    """Screening results made with the old rules are cleared, so every
+    candidate is screened again with the new ones. The public post and the
+    description do not change."""
     return job_service.update_profile(
         db, job_id, payload.requirements, payload.scoring_weights
     )

@@ -120,7 +120,10 @@ class JobDetail(JobSummary):
     jd_text: str
     requirements: JobRequirements
     scoring_weights: ScoringWeights
-    is_locked: bool = Field(
-        default=False,
-        description="True once a CV has been screened; the profile cannot change.",
+    screened_count: int = Field(
+        default=0,
+        description=(
+            "How many candidates have screening results. Changing the profile "
+            "clears them, so they are screened again."
+        ),
     )
