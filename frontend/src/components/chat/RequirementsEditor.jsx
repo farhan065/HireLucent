@@ -1,5 +1,5 @@
 import { Plus, X } from 'lucide-react'
-import { useState } from 'react'
+import { useRequirementsForm } from '../../hooks/useRequirementsForm.js'
 import { WEIGHT_LABELS } from '../../lib/stages.js'
 import Button from '../Button.jsx'
 
@@ -10,80 +10,12 @@ const CATEGORIES = [
   ['qualifications', 'Qualifications'],
 ]
 
-// Turn the saved shape into what the form edits: keywords as one text
-// field, weights as whole percentages.
-function toForm({ requirements, scoring_weights: weights }) {
-  return {
-    minExperience: requirements.min_experience_years,
-    items: requirements.items.map((item) => ({ ...item, keywords: item.keywords.join(', ') })),
-    weights: Object.fromEntries(
-      Object.keys(WEIGHT_LABELS).map((key) => [key, Math.round(weights[key] * 100)]),
-    ),
-  }
-}
-
-function fromForm(form) {
-  return {
-    requirements: {
-      min_experience_years: Number(form.minExperience) || 0,
-      items: form.items.map((item) => ({
-        ...item,
-        text: item.text.trim(),
-        keywords: item.keywords.split(',').map((keyword) => keyword.trim()).filter(Boolean),
-      })),
-    },
-    scoring_weights: Object.fromEntries(
-      Object.keys(WEIGHT_LABELS).map((key) => [key, Number(form.weights[key]) / 100]),
-    ),
-  }
-}
-
-function nextId(items) {
-  const numbers = items.map((item) => Number(item.id.slice(1)) || 0)
-  return `R${Math.max(0, ...numbers) + 1}`
-}
-
-// The form shown when the interviewer edits the requirements directly.
-export default function RequirementsEditor({ initial, onSave, onCancel }) {
-  const [form, setForm] = useState(() => toForm(initial))
-  const total = Object.values(form.weights).reduce((sum, value) => sum + Number(value), 0)
-  const isValid =
-    total === 100 &&
-    form.items.length > 0 &&
-    form.items.every((item) => item.text.trim().length >= 3)
-
-  function updateItem(id, changes) {
-    setForm((current) => ({
-      ...current,
-      items: current.items.map((item) => (item.id === id ? { ...item, ...changes } : item)),
-    }))
-  }
-
-  function addItem() {
-    setForm((current) => ({
-      ...current,
-      items: [
-        ...current.items,
-        {
-          id: nextId(current.items),
-          text: '',
-          category: 'technical_skills',
-          priority: 'preferred',
-          keywords: '',
-        },
-      ],
-    }))
-  }
-
-  function removeItem(id) {
-    setForm((current) => ({
-      ...current,
-      items: current.items.filter((item) => item.id !== id),
-    }))
-  }
-
+// The fields of the requirements and weights form. "editor" is the state
+// from useRequirementsForm, so the buttons can be placed where they fit.
+export function RequirementsFields({ editor }) {
+  const { form, total, updateItem, addItem, removeItem, setMinExperience, setWeight } = editor
   return (
-    <div className="flex flex-col gap-3.5 px-4 py-3.5">
+    <>
       <label className="flex flex-wrap items-center gap-3 text-sm font-semibold text-navy">
         Minimum experience (years)
         <input
@@ -91,7 +23,7 @@ export default function RequirementsEditor({ initial, onSave, onCancel }) {
           min="0"
           max="50"
           value={form.minExperience}
-          onChange={(event) => setForm({ ...form, minExperience: event.target.value })}
+          onChange={(event) => setMinExperience(event.target.value)}
           className={`${FIELD_CLASS} h-10 w-24 font-normal`}
         />
       </label>
@@ -190,21 +122,28 @@ export default function RequirementsEditor({ initial, onSave, onCancel }) {
                 min="0"
                 max="100"
                 value={form.weights[key]}
-                onChange={(event) =>
-                  setForm({ ...form, weights: { ...form.weights, [key]: event.target.value } })
-                }
+                onChange={(event) => setWeight(key, event.target.value)}
                 className={`${FIELD_CLASS} h-10 w-full font-normal`}
               />
             </label>
           ))}
         </div>
       </div>
+    </>
+  )
+}
 
+// The form shown when the interviewer edits the requirements directly.
+export default function RequirementsEditor({ initial, onSave, onCancel }) {
+  const editor = useRequirementsForm(initial)
+  return (
+    <div className="flex flex-col gap-3.5 px-4 py-3.5">
+      <RequirementsFields editor={editor} />
       <div className="flex flex-wrap justify-end gap-2.5">
         <Button variant="soft" onClick={onCancel}>
           Cancel
         </Button>
-        <Button disabled={!isValid} onClick={() => onSave(fromForm(form))}>
+        <Button disabled={!editor.isValid} onClick={() => onSave(editor.value())}>
           Save changes
         </Button>
       </div>

@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 
 // A panel that slides in from the right over the page. It closes with the
 // X button, the Escape key or a click outside it.
-export default function SidePanel({ title, onClose, children, footer }) {
+export default function SidePanel({ title, subtitle, onClose, children, footer }) {
   useEffect(() => {
     function handleKey(event) {
       if (event.key === 'Escape') onClose()
@@ -22,7 +22,10 @@ export default function SidePanel({ title, onClose, children, footer }) {
         className="flex h-full w-full max-w-xl animate-slide-in flex-col bg-white shadow-card"
       >
         <header className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
-          <h2 className="text-xl font-extrabold tracking-tight">{title}</h2>
+          <div className="min-w-0">
+            <h2 className="text-xl font-extrabold tracking-tight">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-[13px]">{subtitle}</p>}
+          </div>
           <button
             type="button"
             aria-label="Close"

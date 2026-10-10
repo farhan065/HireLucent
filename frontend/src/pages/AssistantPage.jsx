@@ -157,7 +157,13 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
           </div>
         </div>
 
-        <JobBrief view={view ?? EMPTY_VIEW} />
+        <JobBrief
+          view={view ?? EMPTY_VIEW}
+          onProfileSaved={() => {
+            conversation.reloadView()
+            saved.reload()
+          }}
+        />
       </div>
     </div>
   )

@@ -1,9 +1,10 @@
-import { Check, ExternalLink, Link2 } from 'lucide-react'
+import { Check, ExternalLink, Link2, Pencil } from 'lucide-react'
 import { useState } from 'react'
 import RequirementList from '../RequirementList.jsx'
 import SidePanel from '../SidePanel.jsx'
 import StatusChip from '../StatusChip.jsx'
 import WeightsBar from '../WeightsBar.jsx'
+import EditProfilePanel from './EditProfilePanel.jsx'
 import Markdown from './Markdown.jsx'
 
 function journeySteps(view) {
@@ -90,12 +91,28 @@ function Section({ title, chip, watch, children }) {
   )
 }
 
-// The current state of the job, beside the conversation. It only displays:
-// every change is made in the conversation.
-export default function JobBrief({ view }) {
+function EditButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex min-h-[34px] items-center gap-1.5 rounded-full border-[1.5px] border-brand/35 bg-white px-3 text-[13.5px] font-semibold text-brand-dark hover:bg-tint"
+    >
+      <Pencil className="size-3.5" aria-hidden="true" />
+      Edit
+    </button>
+  )
+}
+
+// The current state of the job, beside the conversation. Changes are made in
+// the conversation, except the requirements and weights of a saved job,
+// which can also be edited here. "onProfileSaved" runs after such an edit.
+export default function JobBrief({ view, onProfileSaved }) {
   const [isReading, setIsReading] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
   const { brief } = view
   const description = brief.description
+  const canEdit = Boolean(brief.job_id) && brief.requirements_status === 'confirmed'
 
   return (
     <aside
@@ -141,9 +158,12 @@ export default function JobBrief({ view }) {
         watch={brief.requirements && [brief.requirements, brief.requirements_status]}
         chip={
           brief.requirements && (
-            <StatusChip tone={brief.requirements_status === 'confirmed' ? 'success' : 'info'}>
-              {brief.requirements_status === 'confirmed' ? 'Confirmed' : 'Proposed'}
-            </StatusChip>
+            <div className="flex items-center gap-2">
+              <StatusChip tone={brief.requirements_status === 'confirmed' ? 'success' : 'info'}>
+                {brief.requirements_status === 'confirmed' ? 'Confirmed' : 'Proposed'}
+              </StatusChip>
+              {canEdit && <EditButton onClick={() => setIsEditing(true)} />}
+            </div>
           )
         }
       >
@@ -157,6 +177,11 @@ export default function JobBrief({ view }) {
                 : 'none'}
               .
             </p>
+            {canEdit && (
+              <p className="text-[12.5px] text-body/70">
+                Changing these after screening means screening every CV again.
+              </p>
+            )}
           </>
         ) : (
           <p className="text-sm">Proposed after you approve the description.</p>
@@ -203,6 +228,19 @@ export default function JobBrief({ view }) {
             <Markdown>{description.text}</Markdown>
           </div>
         </SidePanel>
+      )}
+
+      {isEditing && (
+        <EditProfilePanel
+          jobId={brief.job_id}
+          subtitle={`${view.title} · ${brief.job_code}`}
+          brief={brief}
+          onClose={() => setIsEditing(false)}
+          onSaved={() => {
+            setIsEditing(false)
+            onProfileSaved?.()
+          }}
+        />
       )}
     </aside>
   )

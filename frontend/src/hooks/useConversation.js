@@ -77,6 +77,15 @@ export function useConversation(threadId, onStarted, firstMessage) {
     }
   }, [initialThreadId])
 
+  // Load the view again after a change made outside the conversation, such
+  // as editing the requirements from the job brief.
+  const reloadView = useCallback(() => {
+    if (!threadIdRef.current) return
+    apiRequest(`/chat/${threadIdRef.current}`)
+      .then(setView)
+      .catch((loadError) => setError(loadError.message))
+  }, [])
+
   const send = useCallback((payload, shownText = '') => {
     setError('')
     const sent = socketRef.current.send({ thread_id: threadIdRef.current, ...payload })
@@ -113,5 +122,6 @@ export function useConversation(threadId, onStarted, firstMessage) {
     sendMessage,
     submitApproval,
     editDescription,
+    reloadView,
   }
 }
