@@ -195,7 +195,12 @@ def _view(graph: CompiledStateGraph, thread_id: str) -> ConversationView:
     snapshot = graph.get_state(thread_config(thread_id))
     job_code = conversation_store.job_code_for(snapshot.values.get("saved_job_id"))
     pending = snapshot.tasks[0].interrupts[0].value if snapshot.next else None
-    return build_view(thread_id, snapshot.values, pending, job_code)
+    view = build_view(thread_id, snapshot.values, pending, job_code)
+    profile = conversation_store.job_profile_for(snapshot.values.get("saved_job_id"))
+    if profile is not None:
+        view.brief.requirements, view.brief.scoring_weights = profile
+        view.brief.requirements_status = "confirmed"
+    return view
 
 
 def _is_waiting(graph: CompiledStateGraph, thread_id: str) -> bool:

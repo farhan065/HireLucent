@@ -41,3 +41,16 @@ def job_code_for(job_id: int | None) -> str | None:
         return None
     with SessionLocal() as db:
         return db.scalar(select(Job.job_code).where(Job.id == job_id))
+
+
+def job_profile_for(job_id: int | None) -> tuple[dict, dict] | None:
+    """The saved job's current requirements and weights. They can be edited
+    after saving, so the job brief shows these rather than the card that
+    was approved in the conversation."""
+    if job_id is None:
+        return None
+    with SessionLocal() as db:
+        row = db.execute(
+            select(Job.requirements, Job.scoring_weights).where(Job.id == job_id)
+        ).first()
+    return (row.requirements, row.scoring_weights) if row else None

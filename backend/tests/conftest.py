@@ -15,3 +15,4 @@ def no_database_for_conversations(monkeypatch: pytest.MonkeyPatch) -> None:
         "job_code_for",
         lambda job_id: "HL-BE-01" if job_id else None,
     )
+    monkeypatch.setattr(conversation_store, "job_profile_for", lambda job_id: None)

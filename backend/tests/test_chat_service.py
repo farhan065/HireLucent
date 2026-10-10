@@ -104,6 +104,34 @@ def test_approval_flow_saves_the_job(monkeypatch) -> None:
     assert len(saved) == 1
 
 
+def test_the_brief_shows_the_saved_jobs_current_rules(monkeypatch) -> None:
+    # After saving, the rules can be edited outside the conversation, so the
+    # brief must show the saved job's rules, not the approved card.
+    edited_requirements = {"min_experience_years": 5, "items": []}
+    edited_weights = {"technical_skills": 0.4, "experience": 0.4, "qualifications": 0.2}
+    graph = graph_with_replies(
+        monkeypatch,
+        [AIMessage(DRAFT_ONE), save_call(VALID_ARGS), AIMessage("Saved as HL-BE-01.")],
+        [],
+    )
+    first = chat_service.send_message(graph, 1, None, "I need a backend engineer")
+    chat_service.send_message(graph, 1, first.thread_id, "I approve this.")
+    chat_service.submit_approval(graph, 1, first.thread_id, True, None, None)
+    monkeypatch.setattr(
+        chat_service.conversation_store,
+        "job_profile_for",
+        lambda job_id: (edited_requirements, edited_weights) if job_id == 7 else None,
+    )
+
+    view = chat_service.get_conversation(graph, 1, first.thread_id)
+
+    assert view.brief.requirements == edited_requirements
+    assert view.brief.scoring_weights == edited_weights
+    # The approved card in the conversation keeps what was approved then.
+    card = next(item for item in view.items if item.kind == "requirements")
+    assert card.arguments["requirements"] != edited_requirements
+
+
 def test_typing_a_clear_yes_confirms(monkeypatch) -> None:
     saved: list[dict] = []
     graph = graph_with_replies(
