@@ -1,12 +1,15 @@
-import { BookOpen, LayoutDashboard, LogOut } from 'lucide-react'
+import { BookOpen, BriefcaseBusiness, LayoutDashboard, LogOut } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router'
 import { useAuth } from '../auth/AuthContext.js'
+import AgentAvatar from '../components/AgentAvatar.jsx'
 import Logo from '../components/Logo.jsx'
 
-const NAV_ITEMS = [{ to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true }]
-
-// Screens that are built in later tasks. Shown so the layout is complete.
-const UPCOMING_ITEMS = [{ label: 'Knowledge Base', icon: BookOpen }]
+const NAV_ITEMS = [
+  { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/app/jobs', label: 'Jobs', icon: BriefcaseBusiness },
+  { to: '/app/assistant', label: 'AI Agent', icon: AgentAvatar },
+  { to: '/app/knowledge', label: 'Knowledge Base', icon: BookOpen },
+]
 
 function navClass({ isActive }) {
   const base = 'flex min-h-11 items-center gap-3 rounded-xl px-3.5 text-[15px] font-semibold'
@@ -56,20 +59,10 @@ export default function AppLayout() {
               {label}
             </NavLink>
           ))}
-          {UPCOMING_ITEMS.map(({ label, icon: Icon }) => (
-            <span
-              key={label}
-              className="flex min-h-11 items-center gap-3 rounded-xl px-3.5 text-[15px] font-semibold text-body/60"
-            >
-              <Icon className="size-5" aria-hidden="true" />
-              {label}
-              <span className="ml-auto hidden text-xs font-medium md:inline">Soon</span>
-            </span>
-          ))}
         </nav>
         <UserPanel />
       </aside>
-      <main className="flex-1 p-6 md:p-10">
+      <main className="min-w-0 flex-1 p-6 md:p-10">
         <Outlet />
       </main>
     </div>

@@ -18,6 +18,10 @@ class Task(TimestampMixin, Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     # What the task does, for example "cv_intake" or "cv_screening".
     kind: Mapped[str] = mapped_column(String(50), index=True)
+    # The job the task works on, if any. Its tasks are deleted with the job.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), index=True
+    )
     status: Mapped[str] = mapped_column(String(30), default=TaskStatus.PENDING)
     progress_current: Mapped[int] = mapped_column(Integer, default=0)
     progress_total: Mapped[int] = mapped_column(Integer, default=0)

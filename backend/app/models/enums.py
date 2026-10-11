@@ -68,10 +68,17 @@ class DocumentStatus(StrEnum):
     FAILED = "failed"
 
 
-
-
 class TaskStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class ConversationStage(StrEnum):
+    DESCRIBING = "describing"
+    REVIEWING_DESCRIPTION = "reviewing_description"
+    CONFIRMING_REQUIREMENTS = "confirming_requirements"
+    SAVED = "saved"
+    CONFIRMING_POST = "confirming_post"
+    PUBLISHED = "published"

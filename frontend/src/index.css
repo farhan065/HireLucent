@@ -24,6 +24,13 @@
   --color-warning-soft: #fff4dc;
   --color-danger: #b42318;
   --color-danger-soft: #fdecea;
+  /* Where a draft came from, kept apart from status colours. */
+  --color-violet: #4b32c3;
+  --color-violet-soft: #f1eeff;
+  --color-teal: #0b5f80;
+  --color-teal-soft: #e4f4fb;
+  --color-amber: #8a4300;
+  --color-amber-soft: #fff1e6;
 
   --radius-card: 1.375rem;
   --shadow-card: 0 10px 30px rgb(11 31 75 / 0.06);
@@ -55,5 +62,108 @@
     html {
       scroll-behavior: auto;
     }
+  }
+}
+
+/* Motion for the AI Agent. All of it is switched off below for
+   people who ask their device to reduce motion. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes dot-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@utility animate-rise-in {
+  animation: rise-in 0.25s ease-out both;
+}
+
+@utility animate-blink {
+  animation: blink 1s steps(1) infinite;
+}
+
+@utility animate-dot {
+  animation: dot-pulse 1.2s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise-in,
+  .animate-blink,
+  .animate-dot {
+    animation: none;
+  }
+}
+
+/* A soft light moving across a placeholder while content loads. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@utility animate-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-line) 25%,
+    var(--color-mist) 50%,
+    var(--color-line) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer {
+    animation: none;
+  }
+}
+
+/* A brief light-blue outline on a part of the job brief that just changed. */
+@keyframes highlight {
+  from {
+    background-color: var(--color-tint);
+    box-shadow: 0 0 0 2px #a9c8ff;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@utility animate-highlight {
+  animation: highlight 2s ease-out both;
+}
+
+@utility animate-slide-in {
+  animation: slide-in 0.2s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-highlight,
+  .animate-slide-in {
+    animation: none;
   }
 }

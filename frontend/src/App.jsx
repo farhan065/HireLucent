@@ -1,7 +1,13 @@
 import { Route, Routes } from 'react-router'
 import RequireInterviewer from './auth/RequireInterviewer.jsx'
 import AppLayout from './layouts/AppLayout.jsx'
+import AssistantPage from './pages/AssistantPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
+import ApplicationsTab from './pages/job/ApplicationsTab.jsx'
+import ScreeningTab from './pages/job/ScreeningTab.jsx'
+import JobPage, { JobIndex } from './pages/JobPage.jsx'
+import JobsPage from './pages/JobsPage.jsx'
+import KnowledgeBasePage from './pages/KnowledgeBasePage.jsx'
 import LandingPage from './pages/LandingPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
@@ -15,6 +21,14 @@ export default function App() {
       <Route element={<RequireInterviewer />}>
         <Route path="/app" element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
+          <Route path="jobs" element={<JobsPage />} />
+          <Route path="jobs/:jobId" element={<JobPage />}>
+            <Route index element={<JobIndex />} />
+            <Route path="applications" element={<ApplicationsTab />} />
+            <Route path="screening" element={<ScreeningTab />} />
+          </Route>
+          <Route path="assistant/:threadId?" element={<AssistantPage />} />
+          <Route path="knowledge" element={<KnowledgeBasePage />} />
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />

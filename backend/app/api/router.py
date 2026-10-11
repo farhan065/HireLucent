@@ -2,7 +2,20 @@
 
 from fastapi import APIRouter
 
-from app.api.routes import ai, auth, graphs, health, tasks
+from app.api.routes import (
+    ai,
+    auth,
+    candidates,
+    chat,
+    chat_ws,
+    graphs,
+    health,
+    intake,
+    jobs,
+    knowledge,
+    screening,
+    tasks,
+)
 
 api_router = APIRouter()
 api_router.include_router(health.router)
@@ -10,3 +23,10 @@ api_router.include_router(auth.router)
 api_router.include_router(ai.router)
 api_router.include_router(graphs.router)
 api_router.include_router(tasks.router)
+api_router.include_router(jobs.router)
+api_router.include_router(intake.router)
+api_router.include_router(candidates.router)
+api_router.include_router(screening.router)
+api_router.include_router(chat.router)
+api_router.include_router(chat_ws.router)
+api_router.include_router(knowledge.router)

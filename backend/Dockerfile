@@ -5,6 +5,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Tesseract reads the text of scanned CVs (OCR).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -14,8 +19,8 @@ COPY app ./app
 COPY scripts ./scripts
 
 RUN useradd --create-home appuser \
-    && mkdir -p /app/logs \
-    && chown -R appuser /app
+    && mkdir -p /app/logs /data/cv_intake \
+    && chown -R appuser /app /data
 USER appuser
 
 EXPOSE 8000

@@ -30,6 +30,15 @@ class TaskResponse(BaseModel):
         return min(100, round(100 * self.progress_current / self.progress_total))
 
 
+class JobActivity(BaseModel):
+    """What is running for a job now, and how its last runs ended."""
+
+    running: TaskResponse | None
+    last_intake: TaskResponse | None
+    last_screening: TaskResponse | None
+    ready_to_screen: int = Field(description="CVs with screening steps still to run.")
+
+
 class DemoTaskRequest(BaseModel):
     steps: int = Field(default=5, ge=1, le=20)
     fail_at: int | None = Field(

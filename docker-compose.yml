@@ -26,6 +26,8 @@ services:
       - "8000:8000"
     volumes:
       - ./logs:/app/logs
+      - ./secrets:/secrets:ro
+      - cv_data:/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,6 +57,49 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    networks:
+      - hirelucent
+
+  mcp-rag:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.mcp_servers.rag_server"]
+    env_file: .env
+    environment:
+      LOG_SERVICE_NAME: mcp-rag
+    depends_on:
+      chromadb:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('localhost', 8001), timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - hirelucent
+
+  mcp-blogger:
+    build: ./mcp-blogger
+    restart: unless-stopped
+    environment:
+      BLOGGER_API_KEY: ${BLOGGER_API_KEY:-}
+      BLOGGER_ID: ${BLOGGER_BLOG_ID:-}
+    volumes:
+      # Read and write: the server saves its refreshed sign-in here.
+      - ./secrets:/secrets
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8002/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - hirelucent
 
@@ -102,6 +147,7 @@ volumes:
   postgres_data:
   chroma_data:
   ollama_data:
+  cv_data:
 
 networks:
   hirelucent:

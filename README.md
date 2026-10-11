@@ -12,27 +12,111 @@ An AI-powered recruitment and interview intelligence platform that helps hiring 
 
 The name reflects the platform's purpose of bringing clarity to candidate evaluation by connecting CV analysis, interview insights and supporting evidence. It represents informed hiring decisions while keeping human judgment central.
 
-## Running with Docker
+**Core principle:** AI assists, people decide. Every score is traceable to evidence from the CV, and every external or consequential action (saving a job, publishing a post) waits for the interviewer's approval.
 
-**Prerequisites:** Docker Desktop (or Docker Engine with the Compose plugin).
+## Features
 
-1. Create your environment file and fill in the values:
+| Feature | Status |
+|---|---|
+| **F1** CV screening and semantic, requirement-based ranking with met / partially met / unmet evidence; candidates failing a must-have are excluded with the reason | Done |
+| **F2** AI-based candidate scoring: 0–100 per dimension with justification, combined with an ATS-style match score | Done |
+| **F3** Browser video interview between interviewer and candidate | Planned (Module 4) |
+| **F4** Live, speaker-attributed, timestamped transcription | Planned (Module 5) |
+| **F5** Interview Q&A analysis | Planned (Module 6) |
+| **F6** Consolidated candidate assessment, comparison and export | Planned (Module 6) |
+| **F11** Innovation feature: Candidate Feedback Composer | Planned (Module 7) |
 
-```bash
+**What works today (pre-interview stage):**
+
+1. **AI Agent for job creation.** The interviewer describes the role in a chat. The agent drafts the job description, using similar job description templates from the Knowledge Base as references when they exist. The interviewer approves or edits the draft.
+2. **Requirements and weights.** The agent proposes a requirements checklist (must-have and preferred items with keywords, and a minimum experience) and scoring weights for technical skills, experience and qualifications. The interviewer confirms or edits them, then saves the job, which gets a code such as `HL-BE-01`.
+3. **Publishing.** The agent asks for the job's Google Form, checks it, and after approval publishes the job to the HireLucent Careers blog.
+4. **Fetch CVs.** CVs submitted through the Google Form are collected with one click, with progress and a reason for each CV that could not be collected.
+5. **Screen CVs.** Each CV is read (with OCR for scanned PDFs), its facts are extracted, must-haves are checked, every requirement is matched by meaning with quoted CV evidence, and the candidate is scored and ranked.
+6. **Review and shortlist.** Two rankings (requirement match and final score), filters and search, the evidence and score breakdown for each candidate, the reasons for every exclusion, and a shortlist made by the interviewer (one by one, top N or minimum score).
+7. **Change the rules safely.** Requirements and weights can be edited after screening; saving resets the screening so every candidate is scored with the same rules.
+8. **Knowledge Base.** Job description templates, reference documents and starter questions are uploaded once and reused.
+
+## Architecture
+
+The diagrams are in [`docs/`](docs):
+
+- [High-level architecture](docs/High_Level_Architecture_30221_Farhan.drawio.pdf)
+- [Detailed architecture](docs/Detailed_Architecture_30221_Farhan.drawio.pdf)
+- LangGraph workflows: [1 Recruiter Agent](docs/LangGraph_1_Recruiter_Agent_Farahn_30221.drawio.pdf), [2 CV Screening](docs/LangGraph_2_CV_Screening_Farhan_30221.drawio.pdf), [3 Q&A Analysis](docs/LangGraph_3_QA_Analysis_30221_Farhan.pdf), [4 Final Assessment](docs/LangGraph_4_Final_Assessment_Farhan_30221.drawio.pdf)
+
+The two architecture diagrams still show the original plan for job posting (LinkedIn/BdJobs) and email intake; they are updated before the final submission. LangGraph 2 shows the screening graph as built.
+
+| Part | Technology | Role |
+|---|---|---|
+| Frontend | React 19, Vite, Tailwind CSS v4, served by nginx | Interviewer workspace |
+| Backend | FastAPI, Pydantic v2, SQLAlchemy 2, Alembic | REST and WebSocket API, background tasks, role checks |
+| AI workflows | LangGraph with PostgreSQL checkpoints | **Recruiter Agent** (chat, tools, human approval) and **CV Screening** graph (one branch per CV, at most 4 at a time) |
+| LLM | Google Gemini 3.5 Flash-Lite (configurable; OpenAI supported) | Drafting, CV parsing, requirement matching, scoring |
+| Embeddings | `qwen3-embedding:0.6b` on Ollama, in a local container | Knowledge Base search and CV matching |
+| Vector store | ChromaDB | `jd_references`, `cv_embeddings`, `question_bank`, `rag_documents` |
+| Database | PostgreSQL 16 | Jobs, candidates, screening results, conversations, tasks, checkpoints |
+| MCP servers | Custom **RAG MCP** server; community **Blogger MCP** server | Knowledge Base search for the agent; publishing job posts |
+| OCR | Tesseract (through PyMuPDF) | Scanned CVs |
+
+### LangGraph workflows built so far
+
+- **Recruiter Agent** (`backend/app/graphs/recruiter/`): `load_context → agent → (call_tools | human_approval) → … → respond`. Read-only tools (Knowledge Base search) run directly; saving a job and publishing a post always pause for the interviewer's approval.
+- **CV Screening** (`backend/app/graphs/screening/`): `load_inputs →` one branch per CV: `extract_text → (run_ocr) → parse_cv → check_must_haves → (exclude_candidate | match_requirements → compute_ats_score → score_candidate → save_result)`, then `rank_candidates`. A CV that fails is recorded with its reason and never stops the batch. A run that is stopped or restarted continues from each CV's saved step.
+
+### How a candidate is scored
+
+| Score | How it is calculated |
+|---|---|
+| Requirement match (0–100) | Each requirement met = 1, partially met = 0.5, unmet = 0; must-haves count double |
+| Dimension scores (0–100) | The AI scores technical skills, experience and qualifications from the matched evidence, each with a justification |
+| Criteria score | Sum of each dimension score × its weight (the job's weights total 100%) |
+| ATS score (0–100) | (Keyword coverage of the requirements + CV-to-job-description similarity) ÷ 2 |
+| **Final score** | **0.8 × criteria score + 0.2 × ATS score**; ties go to the higher criteria score |
+
+Candidates who miss a must-have, or have less than the minimum experience, are excluded and not scored. The reasons are saved and shown.
+
+## Technology choices
+
+- **FastAPI and Pydantic:** typed request and response models, validation, and automatic API documentation at `/docs`.
+- **LangGraph:** real multi-step workflows with branching, human approval (`interrupt`), parallel branches (`Send`) and checkpoints in PostgreSQL, so work survives a restart.
+- **MCP:** tools are separate services. The agent discovers the Knowledge Base search tool from the RAG MCP server. The Blogger MCP server is called only by the backend, after approval, so the AI can never publish on its own.
+- **Gemini Flash-Lite:** a free tier that is fast enough for drafting and screening. The provider is a configuration switch.
+- **Ollama embeddings:** run locally, so no CV text leaves the machine for embedding.
+- **React, Vite and Tailwind CSS:**
+  - React suits a screen-heavy app with live updates (chat, progress bars, and later the interview room).
+  - Vite gives a fast development server and a small production build.
+  - Tailwind CSS keeps the design consistent, because the colours, fonts, radius and shadows are defined once as design tokens.
+- **nginx:** serves the built frontend and forwards `/api` to the backend, so the browser talks to one address.
+
+## Prerequisites
+
+- Docker Desktop (or Docker Engine with the Compose plugin)
+- A Google Gemini API key
+- An internet connection on the first start, to download the embedding model (about 640 MB)
+- For publishing and CV collection only: a Google account, see [Google setup](#google-setup-publishing-and-cv-collection)
+- For the one-time Google sign-in only: Python 3.11 on your own computer
+
+## Setup and running
+
+1. Create your environment file and fill in the values (see [Configuration](#configuration)):
+
+   ```bash
    cp .env.example .env
-```
+   ```
 
-2. Build and start everything:
+2. Build and start everything with one command:
 
-```bash
+   ```bash
    docker compose up --build -d
-```
+   ```
 
 | Action | Command |
 |---|---|
 | Build and start | `docker compose up --build -d` |
 | Check service status | `docker compose ps` |
 | View logs | `docker compose logs -f backend` |
+| Restart one service | `docker compose restart backend` |
 | Stop (data is kept) | `docker compose down` |
 | Reset (deletes all data) | `docker compose down -v` |
 
@@ -41,12 +125,9 @@ The name reflects the platform's purpose of bringing clarity to candidate evalua
 | Application | http://localhost:3000 |
 | API documentation | http://localhost:8000/docs |
 
-**First start:** the embedding model (`qwen3-embedding:0.6b`, about 640 MB) is
-downloaded automatically into a Docker volume. This needs an internet connection
-and can take a few minutes. Later starts reuse the downloaded model.
+**On startup** the backend applies the database migrations and creates the first interviewer account from the `SEED_INTERVIEWER_*` values in `.env`. Sign in with that email and password.
 
-**First interviewer account:** created automatically at startup from the
-`SEED_INTERVIEWER_*` values in `.env`.
+**First start:** the embedding model is downloaded automatically into a Docker volume and can take a few minutes. Later starts reuse it.
 
 **Sample job (optional):**
 
@@ -54,27 +135,159 @@ and can take a few minutes. Later starts reuse the downloaded model.
 docker compose exec backend python -m scripts.seed --sample-data
 ```
 
-## Frontend
+**Sample Knowledge Base file:** `test-data/knowledge/backend_engineer_jd_template.txt` can be uploaded as a job description template.
 
-The interface is built with **React**, **Vite** and **Tailwind CSS**.
+## Configuration
 
-- **React** suits a screen-heavy application with live updates, such as chat,
-  progress indicators and the interview room, and has mature libraries for
-  video (LiveKit) that the interview stage needs.
-- **Vite** gives a fast development server and a small production build.
-- **Tailwind CSS** keeps the design consistent: the colours, fonts, radius and
-  shadows are defined once as design tokens and reused on every screen.
+All configuration comes from environment variables in `.env`. `.env.example` lists them with placeholder values; never commit `.env`.
 
-In Docker, the built files are served by **nginx**, which also forwards `/api`
-requests to the backend, so the browser talks to a single address.
+| Variable | Purpose |
+|---|---|
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_HOST`, `POSTGRES_PORT` | Database connection |
+| `JWT_SECRET`, `JWT_EXPIRE_MINUTES` | Signing key (at least 32 characters) and lifetime of sign-in tokens |
+| `SEED_INTERVIEWER_EMAIL`, `SEED_INTERVIEWER_PASSWORD`, `SEED_INTERVIEWER_NAME` | The first interviewer account |
+| `LLM_PROVIDER`, `LLM_MODEL`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | Chat model (`gemini` or `openai`) |
+| `LLM_REQUESTS_PER_MINUTE`, `AI_TIMEOUT_SECONDS` | Rate limit for the chat model and the timeout of each AI call |
+| `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `OLLAMA_BASE_URL` | Embedding model |
+| `CHROMA_HOST`, `CHROMA_PORT` | Vector store |
+| `MCP_RAG_URL`, `JD_REFERENCE_MAX_DISTANCE` | RAG MCP server, and how close a template must be to count as a reference |
+| `MCP_BLOGGER_URL`, `BLOGGER_BLOG_ID`, `BLOGGER_API_KEY` | Publishing to Blogger |
+| `GOOGLE_TOKEN_FILE` | The Google sign-in file inside the backend container |
+| `APP_ENV`, `LOG_LEVEL` | Environment name and log level |
+
+## Usage walkthrough
+
+1. **Sign in** at http://localhost:3000 with the seeded interviewer account.
+2. **(Optional) Knowledge Base:** upload job description templates, so the agent can use them as references.
+3. **Create a job:** on the Dashboard, type the role into "What role are you hiring for?". In the AI Agent conversation:
+   - review the description and approve it, or ask for changes
+   - review the requirements and weights, edit them if needed, then **Confirm and save job**
+4. **Publish:** paste the job's Google Form link when the agent asks, review the post preview and approve it. The job appears on the careers blog.
+5. **Candidates apply** through the form on the blog post.
+6. **Applications tab:** press **Fetch CVs**. New applications waiting are also shown on the Dashboard.
+7. **Screening tab:** press **Screen CVs** and follow the progress. Then:
+   - compare the **Requirement match** and **Final ranking** views
+   - open a candidate to see the evidence, scores, justifications and CV facts
+   - shortlist candidates one by one, by top N or by minimum score
+8. **Change the rules (if needed):** in the job brief, **Edit** the requirements and weights. If CVs were screened, confirm the reset, then press **Screen CVs** again. CVs are not read again.
 
 ## External services and data
 
 | Service | Used for | What is sent |
 |---|---|---|
-| Google Gemini API | Text generation and analysis | Prompts, which will include job descriptions, CV text and interview transcripts |
+| Google Gemini API | Job descriptions, CV parsing, requirement matching, scoring | Prompts with job details and **CV text with email addresses and phone numbers masked**. The CV text can still contain the candidate's name and other details written in the CV |
 | Ollama (local container) | Embeddings | Nothing leaves the machine |
+| Google Blogger API | Publishing approved job posts | The job title, description, job code and application form link |
+| Google Forms and Drive APIs | Checking the application form and collecting CVs | Nothing is sent. Form responses and uploaded CVs are read |
 
-The provider and model are set in `.env` (`LLM_PROVIDER`, `LLM_MODEL`,
-`EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`). Prompts and model answers are never
-written to the logs.
+Prompts and model answers are never written to the logs.
+
+## Privacy and data handling
+
+- Only sample or synthetic CVs are used for development and demonstration. No personal data is stored in the repository.
+- CV files are stored in a Docker volume (`/data/cv_intake`), never in the repository. `data/`, `sample_cvs/`, `secrets/`, `logs/` and `.env` are git-ignored.
+- Logs contain IDs, counts and error types only: never names, email addresses, CV text, prompts, tokens or keys.
+- Screening uses job-related criteria only.
+- **Deleting a candidate** (`DELETE /candidates/{id}`, also a button on the Screening tab) removes their record, screening results, CV file and CV embeddings. The form response is remembered only by its ID, so it is not collected again.
+- **Deleting a job** removes its candidates, CV files, embeddings and conversation.
+- Raw interview audio and video will never be stored (planned for Modules 4–5).
+
+## Google setup (publishing and CV collection)
+
+Job posts are published to a Blogger page, and CVs arrive through a Google Form. Blogger is an openly declared stand-in for job portals such as LinkedIn and BdJobs, whose posting APIs are open to partners only. The rest of the application starts and works without this setup; only publishing and CV collection need it.
+
+One-time setup with a personal Google account:
+
+1. Create a Blogger blog and note its blog ID.
+2. In a Google Cloud project, enable the Blogger, Google Forms and Google Drive APIs.
+3. Set the OAuth consent screen to External and Testing, and add your own address as a test user.
+4. Create an OAuth client of type Desktop app and save its JSON file as `secrets/google_client.json`.
+5. Create an API key restricted to the Blogger API.
+6. Set `BLOGGER_BLOG_ID` and `BLOGGER_API_KEY` in `.env`.
+7. Sign in once, on your own computer (it opens a browser):
+
+   ```bash
+   cd backend
+   python -m scripts.google_auth
+   ```
+
+   This saves `secrets/google_token.json` and `secrets/blogger_tokens.json`.
+8. Start the application and check the connection. Nothing is published:
+
+   ```bash
+   docker compose up -d --build
+   docker compose exec backend python -m scripts.blogger_check
+   ```
+
+**The application form** needs three questions: the applicant's name, email address and a CV file upload (PDF or DOCX). Each job uses its own form. To check a form without saving anything:
+
+```bash
+docker compose exec backend python -m scripts.form_check "<form link>"
+```
+
+The `secrets/` folder is git-ignored and must never be committed. While the consent screen is in Testing mode a sign-in lasts about 7 days. Run step 7 again when publishing or CV collection stops working, and before a demo, then restart the Blogger server:
+
+```bash
+docker compose restart mcp-blogger
+```
+
+The `mcp-blogger` service runs the community [blogger-mcp-server](https://github.com/zachsladecode/blogger-mcp-server) (MIT licence), pinned to one commit, behind an HTTP bridge. The application only ever calls its create-post tool, and only after the interviewer approves the post.
+
+## Development
+
+**Backend tests** (in a local virtual environment):
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+**Frontend checks:**
+
+```bash
+cd frontend
+npm install
+npm run lint
+npm run build
+```
+
+**Score stability check:** scores one already-screened candidate again 1–5 times, without saving, and compares the results with the saved scores. It prints IDs and numbers only:
+
+```bash
+docker compose exec backend python -m scripts.stability_check --candidate <id> --runs 3
+```
+
+**Project layout:**
+
+```
+backend/
+  app/
+    api/routes/     REST and WebSocket endpoints
+    services/       business logic (jobs, chat, intake, screening, shortlist, knowledge, tasks)
+    graphs/         LangGraph workflows (recruiter/, screening/)
+    ai/             AI model access: rate limit, retries, timeouts
+    rag/            ChromaDB access, chunking, MCP client
+    mcp_servers/    the custom RAG MCP server
+    models/ schemas/ core/ db/
+  alembic/          database migrations
+  scripts/          seed, Google sign-in and check scripts
+  tests/
+frontend/src/       pages, components, hooks, lib
+mcp-blogger/        container for the community Blogger MCP server
+docs/               architecture and LangGraph diagrams
+```
+
+**Branches:** `main` (final release), `dev` (completed modules) and one branch per module, merged into `dev` by pull request.
+
+## Known limitations
+
+- **Score repeatability:** the model in use (Gemini 3.5 Flash-Lite) ignores the temperature setting, so scoring the same CV again can differ slightly. Measured on one candidate over 3 runs: requirement results, match and ATS scores were identical; the largest final-score difference was 2 points.
+- **Screening speed:** limited by the free-tier LLM rate (15 requests per minute by default; about 3 calls per CV). The time for 20 CVs is still to be measured and will be stated here.
+- **Google sign-in** expires after about 7 days while the consent screen is in Testing mode.
+- **New applications count:** the "waiting" number compares the form's total responses with those already seen, so it can be wrong after responses are deleted from the form.
+- **CV intake** is through Google Forms only; email intake is not built.
+- **English only**, for CVs and interviews.
+- On phones, the sidebar takes a lot of space at the top of the screen.

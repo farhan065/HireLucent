@@ -4,7 +4,6 @@ from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
@@ -50,10 +49,37 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     ai_timeout_seconds: int = 60
     ai_max_attempts: int = 3
+    # The provider's limit for your model. Calls are paced to stay under it.
+    llm_requests_per_minute: int = Field(default=15, ge=1)
+
+    # Vector database for the Knowledge Base and CV matching.
+    chroma_host: str = "chromadb"
+    chroma_port: int = 8000
+    max_upload_mb: int = Field(default=10, ge=1)
+    # Where collected CVs are kept. A Docker volume, never the repository.
+    cv_storage_dir: str = "/data/cv_intake"
+    # CV screening: how many CVs are processed at once, and how many pages
+    # of a scanned CV are read by OCR.
+    screening_max_parallel: int = Field(default=4, ge=1)
+    ocr_max_pages: int = Field(default=10, ge=1)
+
+    # The RAG MCP server, which gives the assistant its search tools.
+    mcp_rag_url: str = "http://mcp-rag:8001/mcp"
+    mcp_rag_port: int = 8001
+    # How close a stored job description must be to count as a reference.
+    # Cosine distance: 0 is identical, 1 is unrelated.
+    jd_reference_max_distance: float = Field(default=0.6, ge=0, le=2)
+
+    # The Blogger MCP server, which publishes approved job posts.
+    mcp_blogger_url: str = "http://mcp-blogger:8002/mcp"
+    blogger_blog_id: str = ""
+    # The Google sign-in saved by scripts/google_auth.py.
+    google_token_file: str = "/secrets/google_token.json"
 
     jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60
 
+    # First interviewer account, created by the seed script if it is missing.
     seed_interviewer_email: str | None = None
     seed_interviewer_password: str | None = None
     seed_interviewer_name: str = "Interviewer"
@@ -76,6 +102,7 @@ class Settings(BaseSettings):
         return self.database_url.set(drivername="postgresql").render_as_string(
             hide_password=False
         )
+
 
 @lru_cache
 def get_settings() -> Settings:

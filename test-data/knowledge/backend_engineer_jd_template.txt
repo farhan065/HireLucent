@@ -1,0 +1,32 @@
+Backend Engineer - Job Description Template (synthetic sample)
+
+About the Role
+
+We are looking for a Backend Engineer to design, build and maintain the services behind our products. You will work closely with frontend engineers and product managers, and you will own features from design to release.
+
+Responsibilities
+
+- Design and build REST APIs that are reliable and well documented.
+- Model data and write efficient queries in a relational database.
+- Write automated tests and take part in code reviews.
+- Package services in containers and support their deployment.
+- Monitor services and fix problems found in production.
+
+Requirements
+
+- minimum 20 years of experience
+- Professional experience building backend services in Python.
+- Good knowledge of a web framework such as FastAPI or Django.
+- Experience with SQL databases such as PostgreSQL.
+- Understanding of REST API design and authentication.
+
+Nice to Have
+
+- Experience with Docker and CI pipelines.
+- Experience with message queues or background workers.
+- A degree in Computer Science or a related field.
+
+What We Offer
+
+- A collaborative team that values clear communication.
+- Time for learning and professional growth.

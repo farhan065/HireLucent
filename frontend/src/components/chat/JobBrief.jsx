@@ -1,0 +1,247 @@
+import { Check, ExternalLink, Link2, Pencil } from 'lucide-react'
+import { useState } from 'react'
+import RequirementList from '../RequirementList.jsx'
+import SidePanel from '../SidePanel.jsx'
+import StatusChip from '../StatusChip.jsx'
+import WeightsBar from '../WeightsBar.jsx'
+import EditProfilePanel from './EditProfilePanel.jsx'
+import Markdown from './Markdown.jsx'
+
+function journeySteps(view) {
+  const { brief, items } = view
+  return [
+    { label: 'Role described', done: items.some((item) => item.kind === 'user') },
+    { label: 'Description approved', done: brief.description?.status === 'approved' },
+    { label: 'Requirements confirmed', done: brief.requirements_status === 'confirmed' },
+    { label: 'Published', done: Boolean(brief.post_url) },
+    { label: 'CVs screened', done: false },
+    { label: 'Interviews scheduled', done: false },
+  ]
+}
+
+function Journey({ view }) {
+  const steps = journeySteps(view)
+  const current = steps.findIndex((step) => !step.done)
+  return (
+    <ol className="flex flex-col gap-2.5">
+      {steps.map((step, index) => {
+        const isCurrent = index === current
+        const circle = step.done
+          ? 'bg-success text-white'
+          : isCurrent
+            ? 'bg-brand text-white ring-4 ring-tint'
+            : 'bg-tint text-brand-dark'
+        return (
+          <li key={step.label} className="flex items-center gap-3">
+            <span
+              className={`flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${circle}`}
+            >
+              {step.done ? <Check className="size-3.5" aria-hidden="true" /> : index + 1}
+            </span>
+            <span
+              className={`text-sm font-semibold ${step.done || isCurrent ? 'text-navy' : 'text-body/70'}`}
+            >
+              {step.label}
+            </span>
+            {isCurrent && <StatusChip tone="info">now</StatusChip>}
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+// The line at the bottom of the brief: where the job stands.
+function footnote(brief) {
+  if (brief.post_url) return `Saved as ${brief.job_code} and published.`
+  if (brief.job_code) return `Saved as ${brief.job_code}. It is not published yet.`
+  return 'Nothing is saved or published until you confirm in the conversation.'
+}
+
+function BriefLink({ href, icon: Icon, children }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-1.5 text-brand hover:text-brand-dark"
+    >
+      <Icon className="size-4" aria-hidden="true" />
+      {children}
+    </a>
+  )
+}
+
+// One part of the brief. Giving it a key made from its content makes the
+// highlight animation play again whenever that content changes.
+function Section({ title, chip, watch, children }) {
+  return (
+    <section
+      key={JSON.stringify(watch ?? null)}
+      className={`flex flex-col gap-2.5 rounded-xl border-t border-line px-2 py-4 ${
+        watch ? 'animate-highlight' : ''
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-[13px] font-semibold uppercase tracking-widest">{title}</h3>
+        {chip}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function EditButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex min-h-[34px] items-center gap-1.5 rounded-full border-[1.5px] border-brand/35 bg-white px-3 text-[13.5px] font-semibold text-brand-dark hover:bg-tint"
+    >
+      <Pencil className="size-3.5" aria-hidden="true" />
+      Edit
+    </button>
+  )
+}
+
+// The current state of the job, beside the conversation. Changes are made in
+// the conversation, except the requirements and weights of a saved job,
+// which can also be edited here. "onProfileSaved" runs after such an edit.
+export default function JobBrief({ view, onProfileSaved }) {
+  const [isReading, setIsReading] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const { brief } = view
+  const description = brief.description
+  const canEdit = Boolean(brief.job_id) && brief.requirements_status === 'confirmed'
+
+  return (
+    <aside
+      aria-label="Job brief"
+      className="hidden w-96 shrink-0 flex-col overflow-y-auto border-l border-line bg-white px-5 py-5 lg:flex"
+    >
+      <div className="px-2 pb-4">
+        <h2 className="text-lg font-bold">Job brief</h2>
+        <p className="text-[13px]">Fills in as you and the assistant decide.</p>
+      </div>
+
+      <Section title="Journey">
+        <Journey view={view} />
+      </Section>
+
+      <Section
+        title="Description"
+        watch={description && [description.version, description.status]}
+        chip={
+          description ? (
+            <StatusChip tone={description.status === 'approved' ? 'success' : 'info'}>
+              Draft {description.version} ·{' '}
+              {description.status === 'approved' ? 'approved' : 'waiting for you'}
+            </StatusChip>
+          ) : (
+            <StatusChip tone="neutral">Not written yet</StatusChip>
+          )
+        }
+      >
+        {description && (
+          <button
+            type="button"
+            onClick={() => setIsReading(true)}
+            className="self-start text-sm font-semibold text-brand hover:text-brand-dark"
+          >
+            Read the full description
+          </button>
+        )}
+      </Section>
+
+      <Section
+        title="Requirements"
+        watch={brief.requirements && [brief.requirements, brief.requirements_status]}
+        chip={
+          brief.requirements && (
+            <div className="flex items-center gap-2">
+              <StatusChip tone={brief.requirements_status === 'confirmed' ? 'success' : 'info'}>
+                {brief.requirements_status === 'confirmed' ? 'Confirmed' : 'Proposed'}
+              </StatusChip>
+              {canEdit && <EditButton onClick={() => setIsEditing(true)} />}
+            </div>
+          )
+        }
+      >
+        {brief.requirements ? (
+          <>
+            <RequirementList items={brief.requirements.items} />
+            <p className="text-[13px]">
+              Minimum experience:{' '}
+              {brief.requirements.min_experience_years > 0
+                ? `${brief.requirements.min_experience_years} years`
+                : 'none'}
+              .
+            </p>
+            {canEdit && (
+              <p className="text-[12.5px] text-body/70">
+                Changing these after screening means screening every CV again.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm">Proposed after you approve the description.</p>
+        )}
+      </Section>
+
+      <Section title="Scoring weights" watch={brief.scoring_weights}>
+        {brief.scoring_weights ? (
+          <WeightsBar weights={brief.scoring_weights} />
+        ) : (
+          <p className="text-sm">Proposed together with the requirements.</p>
+        )}
+      </Section>
+
+      <Section
+        title="Job post"
+        watch={brief.post_url}
+        chip={brief.post_url && <StatusChip tone="success">Live</StatusChip>}
+      >
+        {brief.post_url ? (
+          <div className="flex flex-col gap-2 text-sm font-semibold">
+            <BriefLink href={brief.post_url} icon={ExternalLink}>
+              View the public post
+            </BriefLink>
+            <BriefLink href={brief.form_url} icon={Link2}>
+              Open the application form
+            </BriefLink>
+          </div>
+        ) : (
+          <p className="text-sm">Published after you approve the post.</p>
+        )}
+      </Section>
+
+      <p className="mt-auto rounded-2xl bg-mist px-3.5 py-3 text-[13px] leading-normal">
+        {footnote(brief)}
+      </p>
+
+      {isReading && (
+        <SidePanel
+          title={`${description.title} · draft ${description.version}`}
+          onClose={() => setIsReading(false)}
+        >
+          <div className="text-[15px]">
+            <Markdown>{description.text}</Markdown>
+          </div>
+        </SidePanel>
+      )}
+
+      {isEditing && (
+        <EditProfilePanel
+          jobId={brief.job_id}
+          subtitle={`${view.title} · ${brief.job_code}`}
+          brief={brief}
+          onClose={() => setIsEditing(false)}
+          onSaved={() => {
+            setIsEditing(false)
+            onProfileSaved?.()
+          }}
+        />
+      )}
+    </aside>
+  )
+}
