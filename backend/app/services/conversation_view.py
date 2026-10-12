@@ -10,6 +10,11 @@ from typing import Any
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 
 from app.graphs.recruiter.drafts import draft_in, is_edit
+from app.graphs.recruiter.interview_tools import (
+    CANCELLED_PREFIX,
+    MOVED_PREFIX,
+    SCHEDULED_PREFIX,
+)
 from app.models.enums import ConversationStage
 from app.schemas.chat import (
     ConversationView,
@@ -24,8 +29,17 @@ PUBLISH_TOOL = "PublishJob"
 SAVED_PREFIX = "Job saved"
 PUBLISHED_PREFIX = "Job published at "
 REJECTED_PREFIX = "The interviewer did not approve"
+SEARCH_TOOL = "search_jd_references"
+# Results of the interview tools, each followed by its details as JSON.
+INTERVIEW_PREFIXES = (SCHEDULED_PREFIX, MOVED_PREFIX, CANCELLED_PREFIX)
 # The card each approval tool is shown as.
-CARD_KINDS = {SAVE_TOOL: "requirements", PUBLISH_TOOL: "post"}
+CARD_KINDS = {
+    SAVE_TOOL: "requirements",
+    PUBLISH_TOOL: "post",
+    "ScheduleInterviews": "schedule",
+    "RescheduleInterview": "reschedule",
+    "CancelInterview": "cancel_interview",
+}
 
 
 def build_view(
@@ -42,7 +56,7 @@ def build_view(
     messages: list[AnyMessage] = values.get("messages", [])
     items = _timeline(messages)
     is_waiting = pending is not None
-    if pending is not None and items and items[-1].kind in ("requirements", "post"):
+    if pending is not None and items and items[-1].kind in CARD_KINDS.values():
         items[-1].arguments = pending["arguments"]
     descriptions = [item for item in items if item.kind == "description"]
     requirement_cards = [item for item in items if item.kind == "requirements"]
@@ -147,9 +161,10 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
                 )
             for call in message.tool_calls:
                 if call["name"] not in CARD_KINDS:
-                    used_template = used_template or _found_template(
-                        results.get(call["id"])
-                    )
+                    if call["name"] == SEARCH_TOOL:
+                        used_template = used_template or _found_template(
+                            results.get(call["id"])
+                        )
                     continue
                 status = outcomes.get(call["id"], "waiting")
                 if status == "invalid":
@@ -163,6 +178,8 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
                     )
                 )
                 result = results.get(call["id"], "")
+                if result.startswith(INTERVIEW_PREFIXES):
+                    items[-1].result = json.loads(result.split(": ", 1)[1])
                 if result.startswith(PUBLISHED_PREFIX):
                     items.append(
                         TimelineItem(
@@ -205,7 +222,7 @@ def _tool_outcomes(messages: list[AnyMessage]) -> dict[str, str]:
         if not isinstance(message, ToolMessage):
             continue
         text = message.text
-        if text.startswith((SAVED_PREFIX, PUBLISHED_PREFIX)):
+        if text.startswith((SAVED_PREFIX, PUBLISHED_PREFIX, *INTERVIEW_PREFIXES)):
             outcomes[message.tool_call_id] = "approved"
         elif text.startswith(REJECTED_PREFIX):
             outcomes[message.tool_call_id] = "changed"

@@ -16,6 +16,7 @@ import json
 import sys
 from pathlib import Path
 
+from googleapiclient.errors import HttpError
 from mcp import Client
 
 from app.core.config import get_settings
@@ -55,7 +56,16 @@ def check_scopes() -> None:
 
 def check_calendar() -> None:
     events = google_service("calendar", "v3").events()
-    events.list(calendarId="primary", maxResults=1).execute()
+    try:
+        events.list(calendarId="primary", maxResults=1).execute()
+    except HttpError as exc:
+        if "accessNotConfigured" in str(exc) or "has not been used" in str(exc):
+            sys.exit(
+                "The Google Calendar API is not enabled in your Google Cloud "
+                "project. Enable it in APIs & Services > Library, wait a minute, "
+                "then run this again."
+            )
+        sys.exit(f"The calendar could not be read (HTTP {exc.resp.status}).")
     print("Calendar: reachable.")
 
 

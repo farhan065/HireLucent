@@ -58,11 +58,16 @@ function TimelineItem({
       </AssistantRow>
     )
   }
-  return (
-    <AssistantRow>
-      <RequirementsCard item={item} canAct={canAct} onConfirm={onConfirm} />
-    </AssistantRow>
-  )
+  if (item.kind === 'requirements') {
+    return (
+      <AssistantRow>
+        <RequirementsCard item={item} canAct={canAct} onConfirm={onConfirm} />
+      </AssistantRow>
+    )
+  }
+  // Interview cards (schedule, reschedule, cancel) arrive with the
+  // Interviews screens. Until then they are not shown here.
+  return null
 }
 
 // The reply that is being written right now. If it has a title line it is
