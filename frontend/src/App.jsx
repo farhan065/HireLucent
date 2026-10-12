@@ -16,7 +16,7 @@ import NotFoundPage from './pages/NotFoundPage.jsx'
 // The AI Agent and the video pages are loaded only when opened, so their
 // libraries do not slow down the rest of the app.
 const AssistantPage = lazy(() => import('./pages/AssistantPage.jsx'))
-const LiveKitTestPage = lazy(() => import('./pages/LiveKitTestPage.jsx'))
+const InterviewRoomPage = lazy(() => import('./pages/InterviewRoomPage.jsx'))
 // The candidate's private interview link. Candidates never sign in.
 const InterviewJoinPage = lazy(() => import('./pages/InterviewJoinPage.jsx'))
 
@@ -35,6 +35,15 @@ export default function App() {
       />
       {/* Everything under /app is for signed-in interviewers only. */}
       <Route element={<RequireInterviewer />}>
+        {/* The interview room fills the screen, without the sidebar. */}
+        <Route
+          path="/app/interviews/:sessionId/room"
+          element={
+            <Suspense fallback={null}>
+              <InterviewRoomPage />
+            </Suspense>
+          }
+        />
         <Route path="/app" element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="jobs" element={<JobsPage />} />
@@ -53,15 +62,6 @@ export default function App() {
             }
           />
           <Route path="knowledge" element={<KnowledgeBasePage />} />
-          {/* Temporary video check, removed when the interview room is built. */}
-          <Route
-            path="livekit-test"
-            element={
-              <Suspense fallback={null}>
-                <LiveKitTestPage />
-              </Suspense>
-            }
-          />
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />
