@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiRequest } from '../lib/api.js'
 
-const REFRESH_MS = 30 * 1000
+const REFRESH_MS = 10 * 1000
 
-// A job's interviews and the scheduling rules. They load again every 30
-// seconds, so "Starts in 8 min" and the Start button stay current, and when
-// version changes. Nothing loads while jobId is empty.
+// A job's interviews and the scheduling rules. They load again every 10
+// seconds, so a candidate entering the waiting room shows up quickly and
+// "Starts in 8 min" stays current, and when version changes. Nothing loads
+// while jobId is empty.
 export function useInterviews(jobId, version) {
   const [interviews, setInterviews] = useState(null)
   const [rules, setRules] = useState(null)

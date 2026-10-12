@@ -16,7 +16,7 @@ import StatusChip from '../components/StatusChip.jsx'
 import { useInterviews } from '../hooks/useInterviews.js'
 import { useJob } from '../hooks/useJob.js'
 import { useJobActivity } from '../hooks/useJobActivity.js'
-import { countToday } from '../lib/interviews.js'
+import { countToday, countWaiting } from '../lib/interviews.js'
 import { JOB_STAGES, formatDate, jobStage } from '../lib/jobs.js'
 
 const TABS = ['applications', 'screening', 'interviews']
@@ -118,6 +118,7 @@ export default function JobPage() {
             threadId={threadId}
             waiting={waiting}
             today={countToday(interviews.interviews, interviews.now)}
+            inWaitingRoom={countWaiting(interviews.interviews)}
             current={current}
           />
 

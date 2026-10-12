@@ -10,7 +10,7 @@ import JobTabs from '../components/jobs/JobTabs.jsx'
 import { useConversation } from '../hooks/useConversation.js'
 import { useInterviews } from '../hooks/useInterviews.js'
 import { useJob } from '../hooks/useJob.js'
-import { countToday } from '../lib/interviews.js'
+import { countToday, countWaiting } from '../lib/interviews.js'
 import { jobStage } from '../lib/jobs.js'
 import { getLastThread, setLastThread } from '../lib/stages.js'
 
@@ -124,6 +124,7 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
             threadId={view.thread_id}
             waiting={saved.waiting}
             today={countToday(interviews.interviews, interviews.now)}
+            inWaitingRoom={countWaiting(interviews.interviews)}
             current="post"
           />
         </div>

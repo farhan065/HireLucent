@@ -161,6 +161,17 @@ export function opensLabel(interview, rules, now = new Date()) {
   return isSameDay(opens, now) ? clock(opens) : formatShortDate(opens)
 }
 
+// Candidates in the waiting room now, for the tab's badge.
+export function countWaiting(interviews) {
+  return (interviews ?? []).filter((item) => item.candidate_waiting).length
+}
+
+// "just now" or "2 min": how long the candidate has been waiting.
+export function waitingFor(interview, now = new Date()) {
+  const minutes = Math.floor((now - new Date(interview.candidate_joined_at)) / 60000)
+  return minutes < 1 ? 'just now' : `${minutes} min`
+}
+
 // Interviews that have not ended and start today, for the tab's badge.
 export function countToday(interviews, now = new Date()) {
   return (interviews ?? []).filter(

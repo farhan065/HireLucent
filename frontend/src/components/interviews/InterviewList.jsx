@@ -7,6 +7,7 @@ import {
   opensLabel,
   scoreLabel,
   span,
+  waitingFor,
 } from '../../lib/interviews.js'
 import StatusChip from '../StatusChip.jsx'
 
@@ -23,6 +24,9 @@ function statusOf(interview, rules, now) {
   if (interview.status === 'cancelled') return { tone: 'neutral', label: 'Cancelled' }
   if (interview.status === 'completed') return { tone: 'success', label: 'Completed' }
   if (interview.status === 'in_progress') return { tone: 'info', label: 'In progress' }
+  if (interview.candidate_waiting) {
+    return { tone: 'success', label: `Waiting · ${waitingFor(interview, now)}`, row: 'bg-success-soft/50' }
+  }
   const state = joinState(interview, rules, now)
   if (state === 'missed') return { tone: 'danger', label: 'Missed' }
   if (state === 'open') {
@@ -30,7 +34,7 @@ function statusOf(interview, rules, now) {
       new Date(interview.scheduled_start) > now
         ? `Starts in ${minutesUntil(interview.scheduled_start, now)} min`
         : 'Waiting to start'
-    return { tone: 'amber', label, isSoon: true }
+    return { tone: 'amber', label, row: 'bg-amber-soft/40' }
   }
   return { tone: 'amber', label: 'Scheduled' }
 }
@@ -172,7 +176,7 @@ export default function InterviewList({
               <div
                 key={interview.id}
                 className={`${GRID} border-b border-line/60 py-4.5 last:border-b-0 ${
-                  status.isSoon ? 'bg-amber-soft/40' : ''
+                  status.row ?? ''
                 }`}
               >
                 <div className="flex flex-col gap-0.5">

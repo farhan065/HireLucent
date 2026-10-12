@@ -1,4 +1,4 @@
-import { Bot, CalendarDays, CircleCheck, Info, TriangleAlert, X } from 'lucide-react'
+import { Bot, CalendarDays, CircleCheck, Info, TriangleAlert, Video, X } from 'lucide-react'
 import { useState } from 'react'
 import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
@@ -9,12 +9,14 @@ import Skeleton from '../../components/Skeleton.jsx'
 import { useCandidates } from '../../hooks/useCandidates.js'
 import {
   cancelInterview,
+  clock,
   deleteInterview,
   isActive,
   scoreLabel,
   shortDay,
   sortInterviews,
   span,
+  waitingFor,
 } from '../../lib/interviews.js'
 
 // The three views of the list. Upcoming includes interviews in progress and
@@ -61,6 +63,39 @@ function ViewPills({ view, counts, onChange }) {
         )
       })}
     </div>
+  )
+}
+
+// A candidate in the waiting room. Start interview opens the room, where
+// the interviewer lets them in; the room comes in the next step.
+function WaitingBanner({ interview, now }) {
+  return (
+    <section
+      role="status"
+      className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-success/25 bg-success-soft px-5 py-4"
+    >
+      <span className="flex items-center gap-3 text-[15.5px] text-navy">
+        <span aria-hidden="true" className="relative size-3 shrink-0">
+          <span className="absolute -inset-1.5 animate-ping rounded-full bg-success/20" />
+          <span className="absolute inset-0 rounded-full bg-success" />
+        </span>
+        <span>
+          <strong className="font-semibold">
+            {interview.candidate_name} is in the waiting room
+          </strong>{' '}
+          · for {waitingFor(interview, now)} · interview at {clock(interview.scheduled_start)}
+        </span>
+      </span>
+      <button
+        type="button"
+        disabled
+        title="The interview room is coming soon."
+        className="inline-flex min-h-11 cursor-not-allowed items-center gap-2 rounded-full bg-success/15 px-5 font-display text-[15px] font-bold text-success/70"
+      >
+        <Video className="size-4.5" aria-hidden="true" />
+        Start interview · room coming soon
+      </button>
+    </section>
   )
 }
 
@@ -243,6 +278,9 @@ export default function InterviewsTab() {
   return (
     <>
       {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
+      {sortInterviews(interviews.filter((item) => item.candidate_waiting)).map((item) => (
+        <WaitingBanner key={item.id} interview={item} now={now} />
+      ))}
 
       <section className="flex flex-wrap items-center justify-between gap-4">
         <ViewPills view={currentView} counts={counts} onChange={setView} />
