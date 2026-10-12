@@ -1,10 +1,10 @@
 """The Recruiter Agent's interview tools.
 
-GetShortlistedCandidates is read-only. The other three send emails and
-calendar invitations, so they always wait for the interviewer's approval.
-Before the interviewer is asked, a preparer turns the model's dates and
-times into exact times, checks every rule and builds an email preview, so
-the schedule card shows exactly what will be sent.
+GetShortlistedCandidates is read-only. The other three send, change or
+cancel calendar invitations, so they always wait for the interviewer's
+approval. Before the interviewer is asked, a preparer turns the model's
+dates and times into exact times, checks every rule and builds a preview
+of the invitation, so the card shows exactly what will be sent.
 
 The model only ever sees candidate IDs, names, scores and times. Email
 addresses stay in the database and go only to the Google MCP server.
@@ -23,7 +23,7 @@ from app.db.session import SessionLocal
 from app.models import Candidate, InterviewSession, Job, ScreeningResult
 from app.models.enums import CandidateStatus, SessionStatus
 from app.services import interview_emails, scheduling_service, session_service
-from app.services.interview_times import app_zone, describe, parse_local
+from app.services.interview_times import app_zone, describe, parse_local, zone_label
 from app.services.scheduling_service import Slot
 
 SCHEDULED_PREFIX = "Interviews scheduled: "
@@ -106,8 +106,23 @@ def _row(name: str, slot: dict[str, Any], start: datetime, end: datetime) -> dic
     }
 
 
-def _preview(email: interview_emails.Email) -> dict[str, str]:
-    return {"subject": email.subject, "text": email.text}
+def _scores(candidate: Candidate) -> dict[str, Any]:
+    """The final score and rank, shown beside the name on the card."""
+    result = candidate.screening_result
+    return {
+        "final_score": result.final_score if result else None,
+        "rank": result.final_rank if result else None,
+    }
+
+
+def _zone(moment: datetime) -> dict[str, str]:
+    """The time zone of the card's times, for example "Dhaka, GMT+6"."""
+    return {"time_zone": app_zone().key, "time_zone_label": zone_label(moment)}
+
+
+def _preview(invitation: interview_emails.Invitation) -> dict[str, str]:
+    """The calendar invitation as the candidate will see it."""
+    return {"subject": invitation.title, "text": invitation.description}
 
 
 def check_batch(rows: list[dict[str, Any]]) -> None:
@@ -143,13 +158,11 @@ def shortlisted_rows(db: Session, job_id: int) -> list[dict[str, Any]]:
     rows = []
     for candidate in candidates:
         upcoming = session_service.find_scheduled(db, job_id, candidate.id)
-        result = candidate.screening_result
         rows.append(
             {
                 "candidate_id": candidate.id,
                 "name": candidate.full_name,
-                "final_score": result.final_score if result else None,
-                "rank": result.final_rank if result else None,
+                **_scores(candidate),
                 "interview": (
                     describe(upcoming.scheduled_start, upcoming.scheduled_end)
                     if upcoming
@@ -183,7 +196,7 @@ def prepare_schedule(arguments: dict[str, Any], state: dict[str, Any]) -> dict[s
                 session_service.check_new(db, candidate.id, start, end, state["user_id"])
             except AppError as exc:
                 raise ConflictError(f"{candidate.full_name}: {exc.message}") from exc
-            rows.append(_row(candidate.full_name, slot, start, end))
+            rows.append({**_row(candidate.full_name, slot, start, end), **_scores(candidate)})
         check_batch(rows)
         first = rows[0]
         example = interview_emails.invitation(
@@ -195,7 +208,7 @@ def prepare_schedule(arguments: dict[str, Any], state: dict[str, Any]) -> dict[s
         )
         return {
             "job_title": job.title,
-            "time_zone": app_zone().key,
+            **_zone(datetime.fromisoformat(first["start"])),
             "interviews": rows,
             "email_preview": _preview(example),
         }
@@ -217,6 +230,8 @@ def schedule_interviews(arguments: dict[str, Any], state: dict[str, Any]) -> tup
             "candidate_id": outcome.candidate_id,
             "candidate_name": outcome.candidate_name,
             "status": outcome.status,
+            "start": outcome.scheduled_start.isoformat() if outcome.scheduled_start else None,
+            "end": outcome.scheduled_end.isoformat() if outcome.scheduled_end else None,
             "when": (
                 describe(outcome.scheduled_start, outcome.scheduled_end)
                 if outcome.scheduled_start
@@ -248,13 +263,16 @@ def prepare_reschedule(arguments: dict[str, Any], state: dict[str, Any]) -> dict
         session = _scheduled_session(db, job_id, candidate)
         start, end = _times(arguments)
         session_service.check_move(db, session, start, end)
-        example = interview_emails.rescheduled(
+        example = interview_emails.moved(
             candidate.full_name, job.title, start, end, interview_emails.PREVIEW_LINK
         )
         return {
             **_row(candidate.full_name, arguments, start, end),
+            **_zone(start),
             "session_id": session.id,
             "job_title": job.title,
+            "previous_start": session.scheduled_start.isoformat(),
+            "previous_end": session.scheduled_end.isoformat(),
             "previous_when": describe(session.scheduled_start, session.scheduled_end),
             "email_preview": _preview(example),
         }
@@ -287,16 +305,17 @@ def prepare_cancel(arguments: dict[str, Any], state: dict[str, Any]) -> dict[str
         session = _scheduled_session(db, job_id, candidate)
         if session.status != SessionStatus.SCHEDULED:
             raise ConflictError("Only an interview that has not started can be cancelled.")
-        example = interview_emails.cancelled(
-            candidate.full_name, job.title, session.scheduled_start, session.scheduled_end
-        )
+        # Google's own cancellation notice tells the candidate, so there is
+        # no text of ours to preview.
         return {
             "candidate_id": candidate.id,
             "candidate_name": candidate.full_name,
+            **_zone(session.scheduled_start),
             "session_id": session.id,
             "job_title": job.title,
+            "start": session.scheduled_start.isoformat(),
+            "end": session.scheduled_end.isoformat(),
             "when": describe(session.scheduled_start, session.scheduled_end),
-            "email_preview": _preview(example),
         }
 
 

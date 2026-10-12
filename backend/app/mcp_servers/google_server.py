@@ -169,9 +169,20 @@ def update_calendar_event(
 
 
 @server.tool()
-def cancel_calendar_event(event_id: str) -> dict:
-    """Delete an event. The guest receives Google's cancellation notice."""
+def cancel_calendar_event(event_id: str, description: str | None = None) -> dict:
+    """Delete an event. The guest receives Google's cancellation notice.
+
+    The notice shows the event's description, so a new description can be
+    given; it is saved first without telling the guest, so the guest gets
+    one email."""
     try:
+        if description is not None:
+            _calendar().patch(
+                calendarId="primary",
+                eventId=event_id,
+                body={"description": description},
+                sendUpdates="none",
+            ).execute()
         _calendar().delete(
             calendarId="primary", eventId=event_id, sendUpdates="all"
         ).execute()

@@ -75,6 +75,38 @@ def test_an_event_time_without_a_time_zone_is_refused() -> None:
         )
 
 
+class FakeEvents:
+    """Records calendar calls instead of sending them."""
+
+    def __init__(self):
+        self.calls = []
+
+    def patch(self, **kwargs):
+        self.calls.append(("patch", kwargs))
+        return self
+
+    def delete(self, **kwargs):
+        self.calls.append(("delete", kwargs))
+        return self
+
+    def execute(self):
+        return {}
+
+
+def test_cancel_saves_the_cancellation_text_quietly_then_tells_the_guest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = FakeEvents()
+    monkeypatch.setattr(google_server, "_calendar", lambda: events)
+
+    google_server.cancel_calendar_event("event-1", "Your interview has been cancelled.")
+
+    [(first, patch), (second, delete)] = events.calls
+    assert first == "patch" and patch["sendUpdates"] == "none"
+    assert patch["body"] == {"description": "Your interview has been cancelled."}
+    assert second == "delete" and delete["sendUpdates"] == "all"
+
+
 def test_google_tools_are_backend_only() -> None:
     google = mcp_servers()["google"]
 

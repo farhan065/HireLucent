@@ -1,5 +1,6 @@
-"""Tests for scheduling: times, emails, the scheduling service, the agent's
-interview tools and the endpoints. Nothing is sent to Google."""
+"""Tests for scheduling: times, the calendar invitation, the scheduling
+service, the agent's interview tools and the endpoints. Nothing is sent to
+Google."""
 
 import json
 from contextlib import contextmanager
@@ -56,25 +57,24 @@ def test_the_agent_is_told_the_local_date() -> None:
     assert text == "Now it is Wednesday 14 October 2026, 3:00 PM in Asia/Dhaka (Dhaka, GMT+6)."
 
 
-# --- Emails ---
+# --- Calendar invitation ---
 
 
-def test_invitation_has_the_time_link_and_consent_note() -> None:
-    email = interview_emails.invitation("Test <Candidate>", "Backend Engineer", START, END, LINK)
+def test_invitation_starts_with_the_link_and_has_the_time_and_consent_note() -> None:
+    invitation = interview_emails.invitation("Test", "Backend Engineer", START, END, LINK)
 
-    assert email.subject == "Interview invitation: Backend Engineer"
-    assert "3:00–3:45 PM (Dhaka, GMT+6)" in email.text
-    assert f"Join: {LINK}" in email.text
-    assert "not recorded" in email.text
-    assert "Test &lt;Candidate&gt;" in email.html
-    assert f'href="{LINK}"' in email.html
+    assert invitation.title == "HireLucent video interview – Backend Engineer"
+    assert invitation.description.startswith(f"Join the interview: {LINK}")
+    assert "3:00–3:45 PM (Dhaka, GMT+6)" in invitation.description
+    assert "45-minute" in invitation.description
+    assert "not recorded" in invitation.description
 
 
-def test_cancellation_has_no_link() -> None:
-    email = interview_emails.cancelled("Test", "Backend Engineer", START, END)
+def test_moved_invitation_says_the_old_link_stops_working() -> None:
+    invitation = interview_emails.moved("Test", "Backend Engineer", START, END, LINK)
 
-    assert "cancelled" in email.subject
-    assert "Join:" not in email.text and "/interview/" not in email.html
+    assert invitation.description.startswith(f"Join the interview: {LINK}")
+    assert "no longer works" in invitation.description
 
 
 # --- Scheduling service ---
@@ -126,7 +126,7 @@ def google(monkeypatch: pytest.MonkeyPatch) -> dict:
     return record
 
 
-def test_scheduling_creates_event_then_email(monkeypatch, google) -> None:
+def test_scheduling_sends_only_the_calendar_invitation(monkeypatch, google) -> None:
     job, candidate = _job_and_candidate()
     db = FakeDB({(Job, 2): job, (Candidate, 5): candidate})
     session = _session(candidate)
@@ -139,12 +139,15 @@ def test_scheduling_creates_event_then_email(monkeypatch, google) -> None:
     [outcome] = scheduling_service.schedule(db, 2, [Slot(5, START, END)], created_by=1)
 
     assert outcome.status == "scheduled" and outcome.warning is None
-    assert [tool for tool, _ in google["calls"]] == ["create_calendar_event", "send_email"]
+    assert [tool for tool, _ in google["calls"]] == ["create_calendar_event"]
     event = google["calls"][0][1]
+    assert event["title"] == "HireLucent video interview – Backend Engineer"
     assert event["attendee"] == "candidate@example.com"
     assert event["time_zone"] == "Asia/Dhaka"
     assert event["start"] == "2026-10-14T15:00:00+06:00"
-    assert "/interview/secret-token" in event["description"]
+    first_line = event["description"].splitlines()[0]
+    assert first_line.startswith("Join the interview: ")
+    assert first_line.endswith("/interview/secret-token")
     assert session.calendar_event_id == "event-1"
 
 
@@ -168,22 +171,6 @@ def test_failed_calendar_removes_the_interview(monkeypatch, google) -> None:
     assert outcome.status == "failed" and "nothing was sent" in outcome.error
     assert discarded == [session]
     assert [tool for tool, _ in google["calls"]] == ["create_calendar_event"]
-
-
-def test_failed_email_keeps_the_interview_with_a_warning(monkeypatch, google) -> None:
-    job, candidate = _job_and_candidate()
-    db = FakeDB({(Job, 2): job, (Candidate, 5): candidate})
-    monkeypatch.setattr(
-        scheduling_service.session_service,
-        "create_session",
-        lambda *args, **kwargs: (_session(candidate), "secret-token"),
-    )
-    google["fail"].add("send_email")
-
-    [outcome] = scheduling_service.schedule(db, 2, [Slot(5, START, END)], created_by=1)
-
-    assert outcome.status == "scheduled"
-    assert "calendar invitation has the join link" in outcome.warning
 
 
 def test_a_candidate_of_another_job_is_not_scheduled(google) -> None:
@@ -222,13 +209,48 @@ def test_cancel_stands_even_when_google_is_down(monkeypatch, google) -> None:
     session = _session(candidate)
     session.status = SessionStatus.CANCELLED
     monkeypatch.setattr(scheduling_service.session_service, "cancel", lambda db, i: session)
-    google["fail"].update({"cancel_calendar_event", "send_email"})
+    google["fail"].add("cancel_calendar_event")
 
     change = scheduling_service.cancel(FakeDB({(Job, 2): job}), 9)
 
     assert change.interview.status == "cancelled"
-    assert "calendar invitation could not be removed" in change.warning
-    assert "cancellation email could not be sent" in change.warning
+    assert "candidate could not be told" in change.warning
+    assert [tool for tool, _ in google["calls"]] == ["cancel_calendar_event"]
+
+
+def test_cancellation_notice_says_cancelled_without_a_link(monkeypatch, google) -> None:
+    job, candidate = _job_and_candidate()
+    session = _session(candidate)
+    monkeypatch.setattr(scheduling_service.session_service, "cancel", lambda db, i: session)
+
+    change = scheduling_service.cancel(FakeDB({(Job, 2): job}), 9)
+
+    assert change.warning is None
+    [(tool, arguments)] = google["calls"]
+    assert tool == "cancel_calendar_event" and arguments["event_id"] == "event-1"
+    assert "has been cancelled" in arguments["description"]
+    assert "/interview/" not in arguments["description"]
+
+
+def test_a_move_updates_the_invitation_with_the_new_link(monkeypatch, google) -> None:
+    job, candidate = _job_and_candidate()
+    session = _session(candidate)
+    later = START + timedelta(days=1)
+    monkeypatch.setattr(scheduling_service.session_service, "get_session", lambda db, i: session)
+    monkeypatch.setattr(
+        scheduling_service.session_service,
+        "reschedule",
+        lambda db, session_id, start, end: (session, "new-token"),
+    )
+
+    change = scheduling_service.reschedule(
+        FakeDB({(Job, 2): job}), 9, later, later + timedelta(minutes=45)
+    )
+
+    assert change.warning is None
+    [(tool, event)] = google["calls"]
+    assert tool == "update_calendar_event"
+    assert "/interview/new-token" in event["description"].splitlines()[0]
 
 
 # --- The agent's interview tools ---
@@ -264,6 +286,7 @@ def test_schedule_card_has_exact_times_and_an_email_preview(monkeypatch) -> None
     assert row["candidate_name"] == "Test Candidate"
     assert row["start"] == "2026-10-14T15:00:00+06:00"
     assert row["when"].startswith("Wednesday 14 October 2026, 3:00–3:45 PM")
+    assert card["time_zone_label"] == "Dhaka, GMT+6"
     assert "[private link]" in card["email_preview"]["text"]
     assert "candidate@example.com" not in json.dumps(card)
 

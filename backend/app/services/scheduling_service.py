@@ -5,12 +5,11 @@ behave the same. It is only ever called after the interviewer has approved
 (the confirm dialog, or the schedule card in the conversation).
 
 For each candidate:
-    session (with a private link) -> calendar event -> email
+    session (with a private link) -> calendar event
 
-The calendar invitation also holds the join link, so it is the step that
-decides: if it cannot be created, the session is removed and nothing is
-sent. If only the email fails, the interview stays scheduled with a
-warning, because the candidate has the link in the calendar invitation.
+Google Calendar emails the candidate the invitation, with the join link in
+its description, so the candidate gets one email for each change. If the
+event cannot be created, the session is removed and nothing is sent.
 
 Candidate email addresses go only to the Google MCP server. They are never
 logged and never given to the AI.
@@ -45,9 +44,9 @@ CALENDAR_FAILED = (
     "The calendar invitation could not be created, so nothing was sent. "
     "Try again in a moment."
 )
-EMAIL_FAILED = (
-    "The email could not be sent. The candidate's calendar invitation has the "
-    "join link."
+NOT_TOLD = (
+    "The interview is cancelled, but the candidate could not be told because "
+    "Google could not be reached."
 )
 MOVE_FAILED = (
     "The interview could not be moved because its calendar invitation could "
@@ -88,13 +87,15 @@ def _schedule_one(db: Session, job: Job, slot: Slot, created_by: int) -> Schedul
     except AppError as exc:
         return _failed(slot, candidate.full_name, exc.message)
 
-    link = join_link(token)
+    invitation = interview_emails.invitation(
+        candidate.full_name, job.title, slot.start, slot.end, join_link(token)
+    )
     try:
         event = _google(
             "create_calendar_event",
             {
-                "title": interview_emails.calendar_title(job.title),
-                "description": interview_emails.calendar_description(job.title, link),
+                "title": invitation.title,
+                "description": invitation.description,
                 "start": _local_iso(slot.start),
                 "end": _local_iso(slot.end),
                 "time_zone": app_zone().key,
@@ -106,11 +107,6 @@ def _schedule_one(db: Session, job: Job, slot: Slot, created_by: int) -> Schedul
         return _failed(slot, candidate.full_name, CALENDAR_FAILED)
     session.calendar_event_id = event.get("event_id")
     db.commit()
-
-    email = interview_emails.invitation(
-        candidate.full_name, job.title, slot.start, slot.end, link
-    )
-    warning = None if _send(candidate.email, email) else EMAIL_FAILED
     return ScheduleOutcome(
         candidate_id=candidate.id,
         candidate_name=candidate.full_name,
@@ -118,15 +114,15 @@ def _schedule_one(db: Session, job: Job, slot: Slot, created_by: int) -> Schedul
         session_id=session.id,
         scheduled_start=session.scheduled_start,
         scheduled_end=session.scheduled_end,
-        warning=warning,
     )
 
 
 def reschedule(
     db: Session, session_id: int, start: datetime, end: datetime
 ) -> InterviewChange:
-    """Move an interview. The calendar event is updated and the candidate is
-    emailed the new time with a new link; the old link stops working."""
+    """Move an interview. The calendar event gets the new time and a new
+    link, and Google emails the candidate the updated invitation; the old
+    link stops working."""
     session = session_service.get_session(db, session_id)
     before = (
         session.scheduled_start,
@@ -135,70 +131,54 @@ def reschedule(
         session.candidate_joined_at,
     )
     session, token = session_service.reschedule(db, session_id, start, end)
-    link = join_link(token)
-    candidate, job = session.candidate, db.get(Job, session.job_id)
-
-    if session.calendar_event_id:
-        try:
-            _google(
-                "update_calendar_event",
-                {
-                    "event_id": session.calendar_event_id,
-                    "start": _local_iso(start),
-                    "end": _local_iso(end),
-                    "time_zone": app_zone().key,
-                    "description": interview_emails.calendar_description(job.title, link),
-                },
-            )
-        except ServiceUnavailableError as exc:
-            (
-                session.scheduled_start,
-                session.scheduled_end,
-                session.join_token_hash,
-                session.candidate_joined_at,
-            ) = before
-            db.commit()
-            raise ServiceUnavailableError(MOVE_FAILED) from exc
-
-    email = interview_emails.rescheduled(candidate.full_name, job.title, start, end, link)
-    warning = None if _send(candidate.email, email) else EMAIL_FAILED
-    return _change(session, warning)
+    job = db.get(Job, session.job_id)
+    invitation = interview_emails.moved(
+        session.candidate.full_name, job.title, start, end, join_link(token)
+    )
+    try:
+        if not session.calendar_event_id:
+            raise ServiceUnavailableError(MOVE_FAILED)
+        _google(
+            "update_calendar_event",
+            {
+                "event_id": session.calendar_event_id,
+                "start": _local_iso(start),
+                "end": _local_iso(end),
+                "time_zone": app_zone().key,
+                "description": invitation.description,
+            },
+        )
+    except ServiceUnavailableError as exc:
+        (
+            session.scheduled_start,
+            session.scheduled_end,
+            session.join_token_hash,
+            session.candidate_joined_at,
+        ) = before
+        db.commit()
+        raise ServiceUnavailableError(MOVE_FAILED) from exc
+    return _change(session, None)
 
 
 def cancel(db: Session, session_id: int) -> InterviewChange:
-    """Cancel an interview. Google tells the candidate through the calendar,
-    and the candidate is also emailed. The cancellation stands even if
-    Google cannot be reached; a warning says what could not be sent."""
+    """Cancel an interview. Google emails the candidate its cancellation
+    notice. The cancellation stands even if Google cannot be reached; a
+    warning then says the candidate was not told."""
     session = session_service.cancel(db, session_id)
-    candidate, job = session.candidate, db.get(Job, session.job_id)
-    problems = []
-    if session.calendar_event_id:
-        try:
-            _google("cancel_calendar_event", {"event_id": session.calendar_event_id})
-        except ServiceUnavailableError:
-            problems.append("the calendar invitation could not be removed")
-    email = interview_emails.cancelled(
-        candidate.full_name, job.title, session.scheduled_start, session.scheduled_end
+    job = db.get(Job, session.job_id)
+    description = interview_emails.cancelled(
+        session.candidate.full_name, job.title, session.scheduled_start, session.scheduled_end
     )
-    if not _send(candidate.email, email):
-        problems.append("the cancellation email could not be sent")
-    warning = None
-    if problems:
-        warning = "The interview is cancelled, but " + " and ".join(problems) + "."
-    return _change(session, warning)
-
-
-def _send(address: str, email: interview_emails.Email) -> bool:
-    """Send one email. Returns False instead of raising, so a failed email
-    never undoes an interview that is already in the calendar."""
     try:
+        if not session.calendar_event_id:
+            raise ServiceUnavailableError(NOT_TOLD)
         _google(
-            "send_email",
-            {"to": address, "subject": email.subject, "text": email.text, "html": email.html},
+            "cancel_calendar_event",
+            {"event_id": session.calendar_event_id, "description": description},
         )
     except ServiceUnavailableError:
-        return False
-    return True
+        return _change(session, NOT_TOLD)
+    return _change(session, None)
 
 
 def _google(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
