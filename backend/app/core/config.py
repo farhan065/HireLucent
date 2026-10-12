@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     livekit_api_secret: str = ""
     # How many minutes before an interview's start the candidate can join.
     join_opens_minutes_before: int = Field(default=10, ge=0, le=60)
+    # How far ahead an interview must be scheduled. Set it to 1 while testing
+    # to send invitations and join almost at once.
+    interview_min_notice_minutes: int = Field(default=15, ge=0, le=1440)
     # The time zone used in interview emails and for times typed to the AI
     # Agent. Times are stored in UTC; screens show the viewer's local time.
     app_timezone: str = "Asia/Dhaka"

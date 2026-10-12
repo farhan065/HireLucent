@@ -4,7 +4,7 @@ Scheduling, moving and cancelling send emails and calendar invitations, so
 the screen asks the interviewer to confirm before calling them.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, require_interviewer
@@ -13,6 +13,7 @@ from app.models import InterviewSession
 from app.schemas.error import ErrorResponse
 from app.schemas.interview import (
     InterviewChange,
+    InterviewRules,
     InterviewSessionSummary,
     InterviewTime,
     ScheduleOutcome,
@@ -67,6 +68,17 @@ def schedule_interviews(
     return scheduling_service.schedule(db, job_id, slots, principal.subject_id)
 
 
+@session_router.get(
+    "/rules",
+    response_model=InterviewRules,
+    summary="Read the scheduling rules",
+)
+def read_rules() -> dict[str, int]:
+    """How far ahead an interview must start, how early it can be joined,
+    and its shortest and longest length, in minutes."""
+    return session_service.rules()
+
+
 @session_router.put(
     "/{session_id}",
     response_model=InterviewChange,
@@ -91,3 +103,18 @@ def cancel_interview(session_id: int, db: Session = Depends(get_db)) -> Intervie
     """The link stops working and the candidate is told by email and
     through the calendar."""
     return scheduling_service.cancel(db, session_id)
+
+
+@session_router.delete(
+    "/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a cancelled interview",
+    responses={
+        404: {"model": ErrorResponse, "description": "Interview not found"},
+        409: {"model": ErrorResponse, "description": "The interview is not cancelled"},
+    },
+)
+def delete_interview(session_id: int, db: Session = Depends(get_db)) -> None:
+    """Removes a cancelled interview from the job's history. Nothing is sent
+    to the candidate; Google was told when it was cancelled."""
+    session_service.delete_cancelled(db, session_id)

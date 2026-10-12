@@ -26,7 +26,6 @@ from app.models.enums import CandidateStatus, SessionStatus
 logger = get_logger(__name__)
 
 TOKEN_BYTES = 32
-MIN_NOTICE = timedelta(minutes=15)
 MIN_LENGTH = timedelta(minutes=15)
 MAX_LENGTH = timedelta(minutes=120)
 MAX_AHEAD = timedelta(days=60)
@@ -71,12 +70,25 @@ def check_times(start: datetime, end: datetime, now: datetime) -> None:
     """Refuse times an interview cannot have."""
     if start.tzinfo is None or end.tzinfo is None:
         raise AppError("Interview times must include their time zone.")
-    if start < now + MIN_NOTICE:
-        raise AppError("An interview must start at least 15 minutes from now.")
+    notice = get_settings().interview_min_notice_minutes
+    if start < now + timedelta(minutes=notice):
+        unit = "minute" if notice == 1 else "minutes"
+        raise AppError(f"An interview must start at least {notice} {unit} from now.")
     if start > now + MAX_AHEAD:
         raise AppError("An interview can be scheduled at most 60 days ahead.")
     if not MIN_LENGTH <= end - start <= MAX_LENGTH:
         raise AppError("An interview must last between 15 and 120 minutes.")
+
+
+def rules() -> dict[str, int]:
+    """The scheduling rules the screens need, in minutes."""
+    settings = get_settings()
+    return {
+        "min_notice_minutes": settings.interview_min_notice_minutes,
+        "join_opens_minutes_before": settings.join_opens_minutes_before,
+        "min_length_minutes": int(MIN_LENGTH.total_seconds() // 60),
+        "max_length_minutes": int(MAX_LENGTH.total_seconds() // 60),
+    }
 
 
 def join_state(session: InterviewSession, now: datetime) -> JoinState:
@@ -219,6 +231,17 @@ def cancel(db: Session, session_id: int, now: datetime | None = None) -> Intervi
     db.commit()
     log_event(logger, "interview_cancelled", session_id=session.id)
     return session
+
+
+def delete_cancelled(db: Session, session_id: int) -> None:
+    """Remove a cancelled interview from the job's history. Other interviews
+    cannot be deleted: an upcoming one must be cancelled first, so the
+    candidate is told, and a finished one keeps its transcript."""
+    session = get_session(db, session_id)
+    if session.status != SessionStatus.CANCELLED:
+        raise ConflictError("Only a cancelled interview can be deleted.")
+    db.delete(session)
+    db.commit()
 
 
 def get_session(db: Session, session_id: int) -> InterviewSession:

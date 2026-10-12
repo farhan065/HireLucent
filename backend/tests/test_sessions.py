@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.core.errors import AppError, ConflictError, NotFoundError
 from app.core.security import create_access_token
 from app.db.session import get_db
@@ -101,6 +102,15 @@ def test_valid_times_are_accepted() -> None:
 def test_impossible_times_are_refused(start, end, message: str) -> None:
     with pytest.raises(AppError, match=message):
         session_service.check_times(start, end, NOW)
+
+
+def test_notice_comes_from_the_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "interview_min_notice_minutes", 1)
+    soon = NOW + timedelta(minutes=2)
+
+    session_service.check_times(soon, soon + timedelta(minutes=30), NOW)
+    with pytest.raises(AppError, match="at least 1 minute from now"):
+        session_service.check_times(NOW, NOW + timedelta(minutes=30), NOW)
 
 
 # --- Join window ---
@@ -221,6 +231,24 @@ def test_a_started_interview_cannot_be_moved_even_in_a_check() -> None:
         )
 
 
+def test_a_cancelled_interview_can_be_deleted() -> None:
+    session = _session(SessionStatus.CANCELLED)
+    db = FakeDB({(InterviewSession, 9): session})
+
+    session_service.delete_cancelled(db, 9)
+
+    assert db.deleted is session and db.commits == 1
+
+
+@pytest.mark.parametrize("status", [SessionStatus.SCHEDULED, SessionStatus.COMPLETED])
+def test_only_a_cancelled_interview_can_be_deleted(status) -> None:
+    db = FakeDB({(InterviewSession, 9): _session(status)})
+
+    with pytest.raises(ConflictError, match="Only a cancelled interview"):
+        session_service.delete_cancelled(db, 9)
+    assert db.commits == 0
+
+
 # --- Requirement edits ---
 
 
@@ -275,5 +303,27 @@ def test_interviewer_sees_the_interviews_without_tokens(client: TestClient) -> N
 
 def test_candidate_cannot_list_interviews(client: TestClient) -> None:
     response = client.get("/jobs/2/interviews", headers=_auth(UserRole.CANDIDATE))
+
+    assert response.status_code == 403
+
+
+def test_interviewer_reads_the_scheduling_rules(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "interview_min_notice_minutes", 1)
+
+    response = client.get("/interviews/rules", headers=_auth(UserRole.INTERVIEWER))
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "min_notice_minutes": 1,
+        "join_opens_minutes_before": get_settings().join_opens_minutes_before,
+        "min_length_minutes": 15,
+        "max_length_minutes": 120,
+    }
+
+
+def test_candidate_cannot_read_the_rules(client: TestClient) -> None:
+    response = client.get("/interviews/rules", headers=_auth(UserRole.CANDIDATE))
 
     assert response.status_code == 403

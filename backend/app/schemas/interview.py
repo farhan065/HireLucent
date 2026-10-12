@@ -72,3 +72,12 @@ class InterviewChange(BaseModel):
     warning: str | None = Field(
         default=None, description="Done, but something could not be sent."
     )
+
+
+class InterviewRules(BaseModel):
+    """The scheduling rules, in minutes."""
+
+    min_notice_minutes: int
+    join_opens_minutes_before: int
+    min_length_minutes: int
+    max_length_minutes: int
