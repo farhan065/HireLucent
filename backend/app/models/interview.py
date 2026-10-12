@@ -19,7 +19,14 @@ class InterviewSession(TimestampMixin, Base):
     candidate_id: Mapped[int] = mapped_column(
         ForeignKey("candidates.id", ondelete="CASCADE"), index=True
     )
-    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), index=True
+    )
+    # The interviewer who scheduled it. Two interviews of the same
+    # interviewer may not overlap.
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
     scheduled_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     scheduled_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     # Only the hash of the private join token is stored, never the token.
@@ -29,9 +36,13 @@ class InterviewSession(TimestampMixin, Base):
     candidate_joined_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    interviewer_joined_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consent_given_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     candidate: Mapped["Candidate"] = relationship(  
         back_populates="sessions"
@@ -42,6 +53,11 @@ class InterviewSession(TimestampMixin, Base):
         passive_deletes=True,
         order_by="TranscriptTurn.start_ms",
     )
+
+    @property
+    def candidate_name(self) -> str:
+        """The candidate's name, for the interviewer's list of interviews."""
+        return self.candidate.full_name
 
 
 class TranscriptTurn(Base):
