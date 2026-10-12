@@ -106,3 +106,7 @@ export function formatDate(value) {
 
 // How a shortlisted candidate is marked in every list.
 export const SHORTLISTED_CHIP = { tone: 'teal', label: 'Shortlisted' }
+
+// A candidate with an interview, marked in the same colour as on the
+// Interviews tab. Their shortlist cannot change until it is cancelled.
+export const INTERVIEW_CHIP = { tone: 'amber', label: 'Interview scheduled' }

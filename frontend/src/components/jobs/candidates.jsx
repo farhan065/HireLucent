@@ -1,5 +1,6 @@
-import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { apiFile } from '../../lib/api.js'
 import StatusChip from '../StatusChip.jsx'
 
@@ -58,6 +59,20 @@ export function ViewCvLink({ candidateId }) {
         </span>
       )}
     </span>
+  )
+}
+
+// Opens the Interviews tab, for a candidate who has an interview.
+export function SeeInterviewLink() {
+  return (
+    <Link
+      to="../interviews"
+      relative="path"
+      className="flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-full border-[1.5px] border-amber/30 bg-white px-3.5 text-sm font-semibold text-amber hover:bg-amber-soft"
+    >
+      <CalendarDays className="size-4" aria-hidden="true" />
+      See interview
+    </Link>
   )
 }
 

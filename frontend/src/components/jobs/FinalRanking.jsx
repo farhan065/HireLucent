@@ -15,12 +15,13 @@ import {
   LABEL,
   NoMatches,
   RowActions,
+  SeeInterviewLink,
   UnrankedRow,
   ViewCvLink,
 } from './candidates.jsx'
-import { SHORTLISTED_CHIP } from '../../lib/jobs.js'
+import { INTERVIEW_CHIP, SHORTLISTED_CHIP } from '../../lib/jobs.js'
 
-const ROW = 'grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 lg:grid-cols-[3.25rem_minmax(0,1.5fr)_minmax(9.5rem,1fr)_minmax(0,1fr)_7.5rem_15.5rem]'
+const ROW = 'grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 lg:grid-cols-[3.25rem_minmax(0,1.5fr)_minmax(9.5rem,1fr)_minmax(0,1fr)_10.5rem_15.5rem]'
 
 // The same shares as the backend uses for the final score.
 const CRITERIA_SHARE = 0.8
@@ -390,7 +391,12 @@ function Breakdown({ candidate, onShowEvidence }) {
 
 function RankedRow({ candidate, isOpen, onToggle, isLocked, onChanged, onShowEvidence }) {
   const Chevron = isOpen ? ChevronDown : ChevronRight
-  const chip = candidate.status === 'shortlisted' ? SHORTLISTED_CHIP : SCORED_CHIP
+  const hasInterview = candidate.status === 'interview_scheduled'
+  const chip = hasInterview
+    ? INTERVIEW_CHIP
+    : candidate.status === 'shortlisted'
+      ? SHORTLISTED_CHIP
+      : SCORED_CHIP
   return (
     <li className="border-t border-line/60">
       <div className={`${ROW} py-3.5 ${isOpen ? 'bg-mist/60' : ''}`}>
@@ -413,7 +419,11 @@ function RankedRow({ candidate, isOpen, onToggle, isLocked, onChanged, onShowEvi
           <StatusChip tone={chip.tone}>{chip.label}</StatusChip>
         </div>
         <RowActions chip={chip}>
-          <ShortlistButton candidate={candidate} onChanged={onChanged} />
+          {hasInterview ? (
+            <SeeInterviewLink />
+          ) : (
+            <ShortlistButton candidate={candidate} onChanged={onChanged} />
+          )}
           <ViewCvLink candidateId={candidate.id} />
           <DeleteCandidateButton candidate={candidate} isLocked={isLocked} onDeleted={onChanged} />
         </RowActions>

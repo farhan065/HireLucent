@@ -17,6 +17,10 @@ from app.services import job_service
 logger = get_logger(__name__)
 
 NOT_SCORED = "Only candidates with a final score can be shortlisted."
+HAS_INTERVIEW = (
+    "This candidate has an interview. Cancel it on the Interviews tab to change "
+    "the shortlist."
+)
 SCORED = (CandidateStatus.SCREENED, CandidateStatus.SHORTLISTED)
 
 
@@ -25,6 +29,8 @@ def set_shortlisted(db: Session, candidate_id: int, shortlisted: bool) -> Candid
     candidate = db.get(Candidate, candidate_id)
     if candidate is None:
         raise NotFoundError("This candidate does not exist.")
+    if candidate.status == CandidateStatus.INTERVIEW_SCHEDULED:
+        raise ConflictError(HAS_INTERVIEW)
     if candidate.status not in SCORED:
         raise ConflictError(NOT_SCORED)
     candidate.status = CandidateStatus.SHORTLISTED if shortlisted else CandidateStatus.SCREENED
