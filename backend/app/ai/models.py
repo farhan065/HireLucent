@@ -29,6 +29,17 @@ def build_rate_limiter(requests_per_minute: int) -> InMemoryRateLimiter:
 
 
 @lru_cache
+def get_background_rate_limiter() -> InMemoryRateLimiter:
+    """The extra pace for background work such as CV screening.
+
+    Background calls wait for this limiter as well as the chat model's own,
+    so they never use more than their share of the per-minute limit and the
+    AI Agent and the interview room always have room.
+    """
+    return build_rate_limiter(get_settings().llm_background_requests_per_minute)
+
+
+@lru_cache
 def get_chat_model() -> BaseChatModel:
     """Return the configured chat model.
 

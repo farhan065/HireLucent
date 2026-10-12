@@ -103,3 +103,62 @@ def test_calls_are_paced_to_the_per_minute_limit() -> None:
 
     assert limiter.requests_per_second == 0.25
     assert limiter.max_bucket_size == 1
+
+
+class CountingLimiter:
+    """Records how many calls waited for the background limiter."""
+
+    def __init__(self) -> None:
+        self.waits = 0
+
+    def acquire(self, blocking: bool = True) -> bool:
+        self.waits += 1
+        return True
+
+
+@pytest.fixture()
+def background_limiter(monkeypatch: pytest.MonkeyPatch) -> CountingLimiter:
+    limiter = CountingLimiter()
+    monkeypatch.setattr(client, "get_background_rate_limiter", lambda: limiter)
+    monkeypatch.setattr(
+        client, "get_chat_model", lambda: FakeListChatModel(responses=["ok", "ok"])
+    )
+    return limiter
+
+
+def test_interactive_calls_skip_the_background_limiter(
+    background_limiter: CountingLimiter,
+) -> None:
+    assert client.generate_text("hello") == "ok"
+    assert background_limiter.waits == 0
+
+
+def test_background_calls_wait_for_their_own_limiter(
+    background_limiter: CountingLimiter,
+) -> None:
+    with client.background_calls():
+        client.generate_text("hello")
+    client.generate_text("hello again")
+
+    assert background_limiter.waits == 1
+
+
+def test_background_mark_reaches_graph_nodes() -> None:
+    """Screening runs its CV pipeline inside background_calls(); the mark
+    must still be set inside the graph's nodes."""
+    from typing import TypedDict
+
+    from langgraph.graph import END, START, StateGraph
+
+    class State(TypedDict, total=False):
+        seen: bool
+
+    graph = StateGraph(State)
+    graph.add_node("node", lambda state: {"seen": client._background.get()})
+    graph.add_edge(START, "node")
+    graph.add_edge("node", END)
+    pipeline = graph.compile()
+
+    with client.background_calls():
+        assert pipeline.invoke({})["seen"] is True
+    assert pipeline.invoke({})["seen"] is False

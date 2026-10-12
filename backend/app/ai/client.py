@@ -7,12 +7,14 @@ logged, because they can contain candidate data.
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TypeVar
 
 from pydantic import BaseModel
 
-from app.ai.models import get_chat_model, get_embedding_model
+from app.ai.models import get_background_rate_limiter, get_chat_model, get_embedding_model
 from app.core.config import get_settings
 from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
@@ -28,6 +30,29 @@ AI_UNAVAILABLE_MESSAGE = (
 RETRY_WAIT_SECONDS = 2
 # A rate limit resets within a minute, so a short wait would only fail again.
 RATE_LIMIT_WAIT_SECONDS = 20
+
+# True while background work (CV screening) is making AI calls.
+_background = ContextVar("ai_background", default=False)
+
+
+@contextmanager
+def background_calls() -> Iterator[None]:
+    """Mark the AI calls made inside this block as background work.
+
+    They are held to a lower rate than interactive calls, so screening many
+    CVs never leaves the AI Agent or the interview room waiting.
+    """
+    token = _background.set(True)
+    try:
+        yield
+    finally:
+        _background.reset(token)
+
+
+def _wait_turn() -> None:
+    """Background calls wait for their own, slower pace first."""
+    if _background.get():
+        get_background_rate_limiter().acquire()
 
 
 def is_rate_limit(exc: Exception) -> bool:
@@ -70,14 +95,24 @@ def run_with_retries(operation: str, call: Callable[[], T]) -> T:
 
 def generate_text(prompt: str) -> str:
     """Ask the chat model for a plain-text answer."""
-    response = run_with_retries("generate_text", lambda: get_chat_model().invoke(prompt))
+
+    def call():
+        _wait_turn()
+        return get_chat_model().invoke(prompt)
+
+    response = run_with_retries("generate_text", call)
     return response.text
 
 
 def generate_structured(prompt: str, schema: type[SchemaT]) -> SchemaT:
     """Ask the chat model for an answer that matches a Pydantic schema."""
     model = get_chat_model().with_structured_output(schema)
-    return run_with_retries("generate_structured", lambda: model.invoke(prompt))
+
+    def call():
+        _wait_turn()
+        return model.invoke(prompt)
+
+    return run_with_retries("generate_structured", call)
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:

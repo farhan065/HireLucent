@@ -43,6 +43,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
+from app.ai import client as ai_client
 from app.core.config import get_settings
 from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
@@ -341,7 +342,10 @@ def screen_cv(cv: CVState) -> dict:
     candidate_id = cv["candidate_id"]
     was_read_before = bool(cv.get("parsed"))
     try:
-        result = cv_pipeline.invoke(cv)
+        # Screening is background work: its AI calls keep part of the
+        # per-minute limit free for the AI Agent and the interview room.
+        with ai_client.background_calls():
+            result = cv_pipeline.invoke(cv)
     except Exception as exc:
         log_event(
             logger,
