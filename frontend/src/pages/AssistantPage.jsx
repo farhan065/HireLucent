@@ -1,5 +1,5 @@
 import { CircleAlert } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import Button from '../components/Button.jsx'
 import Composer from '../components/chat/Composer.jsx'
@@ -8,7 +8,10 @@ import JobSwitcher from '../components/chat/JobSwitcher.jsx'
 import Timeline from '../components/chat/Timeline.jsx'
 import JobTabs from '../components/jobs/JobTabs.jsx'
 import { useConversation } from '../hooks/useConversation.js'
+import { useInterviews } from '../hooks/useInterviews.js'
 import { useJob } from '../hooks/useJob.js'
+import { countToday } from '../lib/interviews.js'
+import { jobStage } from '../lib/jobs.js'
 import { getLastThread, setLastThread } from '../lib/stages.js'
 
 const APPROVE_MESSAGE = 'I approve this job description.'
@@ -77,7 +80,22 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
   const stage = view?.stage ?? 'describing'
   const isEmpty = !view && !isBusy
   // Once the job is saved, its stage tabs are shown above the conversation.
-  const saved = useJob(view?.brief.job_id, view?.brief.post_url)
+  // The job loads again when it is published and after each interview
+  // change approved here, so its stage stays current.
+  const changes = (view?.items ?? []).filter((item) => item.result).length
+  const saved = useJob(view?.brief.job_id, `${view?.brief.post_url}|${changes}`)
+  // A published job's interviews: they load again whenever the conversation
+  // changes, for example after the interviewer approves a schedule.
+  const interviews = useInterviews(
+    saved.job?.status === 'published' ? saved.job.id : null,
+    view?.items.length,
+  )
+  // The same rule as the server: any interview that is not cancelled locks
+  // the requirements and weights.
+  const hasInterviews = (interviews.interviews ?? []).some(
+    (item) => item.status !== 'cancelled',
+  )
+  const composerRef = useRef(null)
 
   // Remember this conversation, or forget it if it could not be opened.
   useEffect(() => {
@@ -105,6 +123,7 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
             job={saved.job}
             threadId={view.thread_id}
             waiting={saved.waiting}
+            today={countToday(interviews.interviews, interviews.now)}
             current="post"
           />
         </div>
@@ -132,6 +151,15 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
                   onEditPost={(changes) =>
                     conversation.submitApproval(false, { arguments: changes })
                   }
+                  jobId={view?.brief.job_id}
+                  onApproveAction={() => conversation.submitApproval(true)}
+                  onEditAction={(changes) =>
+                    conversation.submitApproval(false, { arguments: changes })
+                  }
+                  onRejectAction={(feedback) =>
+                    conversation.submitApproval(false, { feedback })
+                  }
+                  onRequestChanges={() => composerRef.current?.focus()}
                 />
               )}
             </div>
@@ -149,6 +177,7 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
                 </p>
               )}
               <Composer
+                inputRef={composerRef}
                 stage={stage}
                 isDisabled={isBusy || status !== 'connected'}
                 onSend={conversation.sendMessage}
@@ -159,6 +188,8 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
 
         <JobBrief
           view={view ?? EMPTY_VIEW}
+          stage={saved.job ? jobStage(saved.job) : null}
+          isLocked={hasInterviews}
           onProfileSaved={() => {
             conversation.reloadView()
             saved.reload()

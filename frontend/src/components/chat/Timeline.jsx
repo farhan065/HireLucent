@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { splitDraft } from '../../lib/drafts.js'
 import DescriptionCard from './DescriptionCard.jsx'
+import InterviewChangeCard from './InterviewChangeCard.jsx'
 import {
   AssistantRow,
   AssistantText,
@@ -11,16 +12,22 @@ import {
 import PostCard from './PostCard.jsx'
 import PublishedCard from './PublishedCard.jsx'
 import RequirementsCard from './RequirementsCard.jsx'
+import ScheduleCard from './ScheduleCard.jsx'
 
 function TimelineItem({
   item,
   canAct,
   canEdit,
+  jobId,
   onApprove,
   onConfirm,
   onEdit,
   onPublish,
   onEditPost,
+  onApproveAction,
+  onEditAction,
+  onRejectAction,
+  onRequestChanges,
 }) {
   if (item.kind === 'user') return <UserBubble text={item.text} />
   if (item.kind === 'note') return <NoteLine text={item.text} />
@@ -65,8 +72,33 @@ function TimelineItem({
       </AssistantRow>
     )
   }
-  // Interview cards (schedule, reschedule, cancel) arrive with the
-  // Interviews screens. Until then they are not shown here.
+  if (item.kind === 'schedule') {
+    return (
+      <AssistantRow>
+        <ScheduleCard
+          item={item}
+          canAct={canAct}
+          jobId={jobId}
+          onApprove={onApproveAction}
+          onCheck={onEditAction}
+          onRequestChanges={onRequestChanges}
+        />
+      </AssistantRow>
+    )
+  }
+  if (item.kind === 'reschedule' || item.kind === 'cancel_interview') {
+    return (
+      <AssistantRow>
+        <InterviewChangeCard
+          item={item}
+          canAct={canAct}
+          onApprove={onApproveAction}
+          onReject={onRejectAction}
+          onRequestChanges={onRequestChanges}
+        />
+      </AssistantRow>
+    )
+  }
   return null
 }
 
@@ -105,11 +137,16 @@ export default function Timeline({
   streamingText,
   isBusy,
   canEdit,
+  jobId,
   onApprove,
   onConfirm,
   onEdit,
   onPublish,
   onEditPost,
+  onApproveAction,
+  onEditAction,
+  onRejectAction,
+  onRequestChanges,
 }) {
   const endRef = useRef(null)
 
@@ -126,11 +163,16 @@ export default function Timeline({
           item={item}
           canAct={!isBusy}
           canEdit={canEdit}
+          jobId={jobId}
           onApprove={onApprove}
           onConfirm={onConfirm}
           onEdit={onEdit}
           onPublish={onPublish}
           onEditPost={onEditPost}
+          onApproveAction={onApproveAction}
+          onEditAction={onEditAction}
+          onRejectAction={onRejectAction}
+          onRequestChanges={onRequestChanges}
         />
       ))}
       {pendingText && <UserBubble text={pendingText} />}

@@ -25,8 +25,9 @@ const PLACEHOLDERS = {
   published: 'Message the assistant…',
 }
 
-// The message box with suggested replies above it.
-export default function Composer({ stage, isDisabled, onSend }) {
+// The message box with suggested replies above it. "inputRef" lets the
+// page put the cursor in the box, for example after "Request changes".
+export default function Composer({ stage, isDisabled, onSend, inputRef }) {
   const [text, setText] = useState('')
 
   function submit(message) {
@@ -64,6 +65,7 @@ export default function Composer({ stage, isDisabled, onSend }) {
       )}
       <div className="flex items-end gap-2.5 rounded-[18px] border-[1.5px] border-line bg-white py-2 pl-4 pr-2 shadow-card focus-within:border-brand">
         <textarea
+          ref={inputRef}
           aria-label="Message the AI Agent"
           rows={1}
           value={text}
