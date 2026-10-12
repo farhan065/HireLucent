@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     # LiveKit, the video server. The URL is the address the browser uses.
     # The key and secret sign room tokens and must match the livekit service.
     livekit_url: str = "ws://localhost:7880"
+    # The same server as the backend reaches it, used to close a room when
+    # an interview ends.
+    livekit_api_url: str = "http://livekit:7880"
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
     # How many minutes before an interview's start the candidate can join.

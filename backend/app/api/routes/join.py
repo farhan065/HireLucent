@@ -9,6 +9,7 @@ from app.api.deps import Principal, require_candidate
 from app.db.session import get_db
 from app.schemas.error import ErrorResponse
 from app.schemas.join import EnterRequest, JoinPass, LinkInfo, LinkRequest, WaitingStatus
+from app.schemas.video import RoomTokenResponse
 from app.services import join_service
 
 router = APIRouter(prefix="/join", tags=["Candidate join"])
@@ -60,3 +61,17 @@ def leave_waiting_room(
     principal: Principal = Depends(require_candidate), db: Session = Depends(get_db)
 ) -> None:
     join_service.leave(db, principal.session_id, principal.link)
+
+
+@router.post(
+    "/room",
+    response_model=RoomTokenResponse,
+    summary="Join the interview room",
+    responses={409: {"model": ErrorResponse, "description": "Not admitted yet"}},
+)
+def join_room(
+    principal: Principal = Depends(require_candidate), db: Session = Depends(get_db)
+) -> dict:
+    """The candidate's pass for the video room, given only after the
+    interviewer let them in."""
+    return join_service.room_pass(db, principal.session_id, principal.link)

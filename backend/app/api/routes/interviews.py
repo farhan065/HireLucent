@@ -9,17 +9,19 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, require_interviewer
 from app.db.session import get_db
-from app.models import InterviewSession
+from app.models import InterviewSession, Job
 from app.schemas.error import ErrorResponse
 from app.schemas.interview import (
     InterviewChange,
+    InterviewRoomInfo,
     InterviewRules,
     InterviewSessionSummary,
     InterviewTime,
     ScheduleOutcome,
     ScheduleRequest,
 )
-from app.services import scheduling_service, session_service
+from app.schemas.video import RoomTokenResponse
+from app.services import room_service, scheduling_service, session_service
 from app.services.scheduling_service import Slot
 
 router = APIRouter(
@@ -77,6 +79,64 @@ def read_rules() -> dict[str, int]:
     """How far ahead an interview must start, how early it can be joined,
     and its shortest and longest length, in minutes."""
     return session_service.rules()
+
+
+@session_router.get(
+    "/{session_id}",
+    response_model=InterviewRoomInfo,
+    summary="Read one interview for its room",
+    responses={404: {"model": ErrorResponse, "description": "Interview not found"}},
+)
+def read_interview(session_id: int, db: Session = Depends(get_db)) -> InterviewRoomInfo:
+    """The interview with its job, and whether the candidate is waiting.
+    The room asks every few seconds."""
+    session = session_service.get_session(db, session_id)
+    job = db.get(Job, session.job_id)
+    return InterviewRoomInfo(
+        interview=InterviewSessionSummary.model_validate(session),
+        job_id=job.id,
+        job_title=job.title,
+        job_code=job.job_code,
+    )
+
+
+ROOM_ERRORS = {
+    404: {"model": ErrorResponse, "description": "Interview not found"},
+    409: {"model": ErrorResponse, "description": "Not possible at this stage"},
+}
+
+
+@session_router.post(
+    "/{session_id}/room",
+    response_model=RoomTokenResponse,
+    summary="Open the interview room",
+    responses={**ROOM_ERRORS, 503: {"model": ErrorResponse, "description": "Video is not set up"}},
+)
+def open_room(session_id: int, db: Session = Depends(get_db)) -> dict:
+    """The interviewer's pass for the video room, from when Join opens until
+    the interview ends."""
+    return room_service.open_room(db, session_id)
+
+
+@session_router.post(
+    "/{session_id}/admit",
+    response_model=InterviewSessionSummary,
+    summary="Let the waiting candidate in and start the interview",
+    responses=ROOM_ERRORS,
+)
+def admit_candidate(session_id: int, db: Session = Depends(get_db)) -> InterviewSession:
+    return room_service.admit(db, session_id)
+
+
+@session_router.post(
+    "/{session_id}/end",
+    response_model=InterviewSessionSummary,
+    summary="End the interview for both people",
+    responses=ROOM_ERRORS,
+)
+def end_interview(session_id: int, db: Session = Depends(get_db)) -> InterviewSession:
+    """Closes the video room; the candidate's link stops working."""
+    return room_service.end(db, session_id)
 
 
 @session_router.put(

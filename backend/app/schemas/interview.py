@@ -28,6 +28,15 @@ class InterviewSessionSummary(BaseModel):
     )
 
 
+class InterviewRoomInfo(BaseModel):
+    """What the interview room shows about its interview."""
+
+    interview: InterviewSessionSummary
+    job_id: int
+    job_title: str
+    job_code: str
+
+
 class InterviewTime(BaseModel):
     """A start and end time, each with its time zone."""
 

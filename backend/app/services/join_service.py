@@ -23,7 +23,7 @@ from app.core.logging import get_logger, log_event
 from app.core.security import create_access_token
 from app.models import InterviewSession, Job
 from app.models.enums import SessionStatus, UserRole
-from app.services import session_service
+from app.services import room_service, session_service
 from app.services.session_service import JoinState, hash_token, now_utc
 
 logger = get_logger(__name__)
@@ -88,9 +88,12 @@ def enter(db: Session, token: str, now: datetime | None = None) -> str:
         raise ConflictError(NOT_OPEN_YET)
     if session.consent_given_at is None:
         session.consent_given_at = now
-    if not session.candidate_waiting:
-        session.candidate_joined_at = now
-    session.candidate_seen_at = now
+    # Before the start the candidate waits to be let in. Once the interview
+    # has started, they go straight back into the room.
+    if session.status == SessionStatus.SCHEDULED:
+        if not session.candidate_waiting:
+            session.candidate_joined_at = now
+        session.candidate_seen_at = now
     db.commit()
     log_event(logger, "candidate_entered_waiting_room", session_id=session.id)
     valid_until = max(session.scheduled_end, now) + PASS_EXTRA
@@ -132,3 +135,8 @@ def leave(db: Session, session_id: int | None, link: str | None) -> None:
     session = _session_for(db, session_id, link)
     session.candidate_seen_at = None
     db.commit()
+
+
+def room_pass(db: Session, session_id: int | None, link: str | None) -> dict:
+    """The candidate's pass for the video room, once they were admitted."""
+    return room_service.candidate_pass(db, _session_for(db, session_id, link))

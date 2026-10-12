@@ -193,3 +193,13 @@ def test_join_needs_consent(client: TestClient) -> None:
 
 def test_status_needs_a_candidate_pass(client: TestClient) -> None:
     assert client.get("/join/status").status_code == 401
+
+
+def test_rejoining_a_started_interview_skips_the_waiting_room() -> None:
+    session = _session(SessionStatus.IN_PROGRESS)
+    session.candidate_joined_at = NOW - timedelta(minutes=20)
+
+    join_service.enter(FakeDB(session), TOKEN, now=NOW)
+
+    assert session.candidate_joined_at == NOW - timedelta(minutes=20)
+    assert session.candidate_seen_at is None
