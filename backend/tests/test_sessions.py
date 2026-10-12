@@ -42,6 +42,9 @@ class FakeDB:
     def add(self, item):
         self.added.append(item)
 
+    def delete(self, item):
+        self.deleted = item
+
     def commit(self):
         self.commits += 1
 
@@ -199,6 +202,23 @@ def test_cancel_keeps_status_after_an_earlier_interview() -> None:
     session_service.cancel(db, 9, now=NOW)
 
     assert session.candidate.status == CandidateStatus.INTERVIEW_SCHEDULED
+
+
+def test_discard_removes_the_interview_and_restores_the_shortlist() -> None:
+    session = _session()
+    db = FakeDB(counts=[0])
+
+    session_service.discard(db, session)
+
+    assert db.deleted is session and db.commits == 1
+    assert session.candidate.status == CandidateStatus.SHORTLISTED
+
+
+def test_a_started_interview_cannot_be_moved_even_in_a_check() -> None:
+    with pytest.raises(ConflictError, match="not started"):
+        session_service.check_move(
+            FakeDB(), _session(SessionStatus.IN_PROGRESS), START, END, now=NOW
+        )
 
 
 # --- Requirement edits ---

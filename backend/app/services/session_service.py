@@ -100,6 +100,28 @@ def join_state(session: InterviewSession, now: datetime) -> JoinState:
     return JoinState.MISSED
 
 
+def check_new(
+    db: Session,
+    candidate_id: int,
+    start: datetime,
+    end: datetime,
+    created_by: int,
+    now: datetime | None = None,
+) -> Candidate:
+    """Check that the candidate can have an interview at this time, without
+    saving anything. Returns the candidate."""
+    check_times(start, end, now or now_utc())
+    candidate = db.get(Candidate, candidate_id)
+    if candidate is None:
+        raise NotFoundError("This candidate does not exist.")
+    if candidate.status not in SCHEDULABLE:
+        raise ConflictError("Only shortlisted candidates can be scheduled for an interview.")
+    if _active_count(db, InterviewSession.candidate_id == candidate_id):
+        raise ConflictError("This candidate already has an upcoming interview.")
+    _ensure_free(db, created_by, start, end)
+    return candidate
+
+
 def create_session(
     db: Session,
     candidate_id: int,
@@ -113,16 +135,7 @@ def create_session(
     The token is returned only here. Keep it only as long as it takes to put
     it in the invitation.
     """
-    check_times(start, end, now or now_utc())
-    candidate = db.get(Candidate, candidate_id)
-    if candidate is None:
-        raise NotFoundError("This candidate does not exist.")
-    if candidate.status not in SCHEDULABLE:
-        raise ConflictError("Only shortlisted candidates can be scheduled for an interview.")
-    if _active_count(db, InterviewSession.candidate_id == candidate_id):
-        raise ConflictError("This candidate already has an upcoming interview.")
-    _ensure_free(db, created_by, start, end)
-
+    candidate = check_new(db, candidate_id, start, end, created_by, now)
     token, token_hash = new_join_token()
     session = InterviewSession(
         candidate_id=candidate_id,
@@ -146,6 +159,29 @@ def create_session(
     return session, token
 
 
+def discard(db: Session, session: InterviewSession) -> None:
+    """Remove an interview whose invitation could not be sent, as if it had
+    never been scheduled."""
+    _restore_candidate(db, session)
+    db.delete(session)
+    db.commit()
+    log_event(logger, "interview_discarded", candidate_id=session.candidate_id)
+
+
+def check_move(
+    db: Session,
+    session: InterviewSession,
+    start: datetime,
+    end: datetime,
+    now: datetime | None = None,
+) -> None:
+    """Check that an interview can move to this time, without saving."""
+    if session.status != SessionStatus.SCHEDULED:
+        raise ConflictError("Only an interview that has not started can be moved.")
+    check_times(start, end, now or now_utc())
+    _ensure_free(db, session.created_by, start, end, exclude_id=session.id)
+
+
 def reschedule(
     db: Session,
     session_id: int,
@@ -156,10 +192,7 @@ def reschedule(
     """Move an interview that has not started. It gets a new join token, so
     the old link stops working."""
     session = get_session(db, session_id)
-    if session.status != SessionStatus.SCHEDULED:
-        raise ConflictError("Only an interview that has not started can be moved.")
-    check_times(start, end, now or now_utc())
-    _ensure_free(db, session.created_by, start, end, exclude_id=session.id)
+    check_move(db, session, start, end, now)
 
     token, token_hash = new_join_token()
     session.scheduled_start = start
@@ -182,17 +215,7 @@ def cancel(db: Session, session_id: int, now: datetime | None = None) -> Intervi
         raise ConflictError("Only an interview that has not started can be cancelled.")
     session.status = SessionStatus.CANCELLED
     session.cancelled_at = now or now_utc()
-    had_interview = db.scalar(
-        select(func.count())
-        .select_from(InterviewSession)
-        .where(
-            InterviewSession.candidate_id == session.candidate_id,
-            InterviewSession.id != session.id,
-            InterviewSession.status != SessionStatus.CANCELLED,
-        )
-    )
-    if not had_interview:
-        session.candidate.status = CandidateStatus.SHORTLISTED
+    _restore_candidate(db, session)
     db.commit()
     log_event(logger, "interview_cancelled", session_id=session.id)
     return session
@@ -219,6 +242,17 @@ def list_for_job(db: Session, job_id: int) -> list[InterviewSession]:
     )
 
 
+def find_scheduled(db: Session, job_id: int, candidate_id: int) -> InterviewSession | None:
+    """The candidate's interview for this job that has not started yet."""
+    return db.scalar(
+        select(InterviewSession).where(
+            InterviewSession.job_id == job_id,
+            InterviewSession.candidate_id == candidate_id,
+            InterviewSession.status == SessionStatus.SCHEDULED,
+        )
+    )
+
+
 def find_by_token(db: Session, token: str) -> InterviewSession | None:
     """The interview a join token belongs to, or None."""
     return db.scalar(
@@ -239,6 +273,22 @@ def ensure_rules_can_change(db: Session, job_id: int) -> None:
     )
     if count:
         raise ConflictError(RULES_LOCKED)
+
+
+def _restore_candidate(db: Session, session: InterviewSession) -> None:
+    """Put the candidate back on the shortlist, unless they have had another
+    interview, so they can be scheduled again."""
+    other_interviews = db.scalar(
+        select(func.count())
+        .select_from(InterviewSession)
+        .where(
+            InterviewSession.candidate_id == session.candidate_id,
+            InterviewSession.id != session.id,
+            InterviewSession.status != SessionStatus.CANCELLED,
+        )
+    )
+    if not other_interviews:
+        session.candidate.status = CandidateStatus.SHORTLISTED
 
 
 def _active_count(db: Session, *conditions) -> int:
