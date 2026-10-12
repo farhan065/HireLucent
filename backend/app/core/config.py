@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # The Google sign-in saved by scripts/google_auth.py.
     google_token_file: str = "/secrets/google_token.json"
 
+    # LiveKit, the video server. The URL is the address the browser uses.
+    # The key and secret sign room tokens and must match the livekit service.
+    livekit_url: str = "ws://localhost:7880"
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+
     jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60
 

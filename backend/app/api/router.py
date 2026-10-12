@@ -15,6 +15,7 @@ from app.api.routes import (
     knowledge,
     screening,
     tasks,
+    video,
 )
 
 api_router = APIRouter()
@@ -30,3 +31,4 @@ api_router.include_router(screening.router)
 api_router.include_router(chat.router)
 api_router.include_router(chat_ws.router)
 api_router.include_router(knowledge.router)
+api_router.include_router(video.router)
