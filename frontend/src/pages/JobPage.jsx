@@ -13,9 +13,13 @@ import DeleteJobButton from '../components/jobs/DeleteJobButton.jsx'
 import JobTabs from '../components/jobs/JobTabs.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
+import { useInterviews } from '../hooks/useInterviews.js'
 import { useJob } from '../hooks/useJob.js'
 import { useJobActivity } from '../hooks/useJobActivity.js'
+import { countToday } from '../lib/interviews.js'
 import { JOB_STAGES, formatDate, jobStage } from '../lib/jobs.js'
+
+const TABS = ['applications', 'screening', 'interviews']
 
 function LoadingJob() {
   return (
@@ -45,6 +49,9 @@ export default function JobPage() {
     setListVersion((version) => version + 1)
   }, [reload])
   const run = useJobActivity(jobId, handleFinished)
+  // Interviews are loaded here, so the tab's "today" badge and the
+  // Interviews tab share one list.
+  const interviews = useInterviews(job?.status === 'published' ? jobId : null, listVersion)
 
   // After a shortlist change or a deletion, the same as after a run.
   function handleChanged() {
@@ -61,7 +68,7 @@ export default function JobPage() {
   }
 
   const stage = job && JOB_STAGES[jobStage(job)]
-  const current = pathname.endsWith('/screening') ? 'screening' : 'applications'
+  const current = TABS.find((tab) => pathname.endsWith(`/${tab}`)) ?? 'applications'
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
@@ -106,10 +113,24 @@ export default function JobPage() {
             </div>
           </header>
 
-          <JobTabs job={job} threadId={threadId} waiting={waiting} current={current} />
+          <JobTabs
+            job={job}
+            threadId={threadId}
+            waiting={waiting}
+            today={countToday(interviews.interviews, interviews.now)}
+            current={current}
+          />
 
           <Outlet
-            context={{ job, threadId, waiting, run, listVersion, onChanged: handleChanged }}
+            context={{
+              job,
+              threadId,
+              waiting,
+              run,
+              listVersion,
+              interviews,
+              onChanged: handleChanged,
+            }}
           />
         </>
       )}
@@ -123,6 +144,10 @@ export function JobIndex() {
   if (job.status !== 'published' && threadId) {
     return <Navigate to={`/app/assistant/${threadId}`} replace />
   }
-  const tab = jobStage(job) === 'published' ? 'applications' : 'screening'
-  return <Navigate to={tab} replace />
+  const tab = {
+    published: 'applications',
+    cvs_screened: 'screening',
+    interviews_scheduled: 'interviews',
+  }[jobStage(job)]
+  return <Navigate to={tab ?? 'applications'} replace />
 }
