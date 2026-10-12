@@ -67,7 +67,7 @@ function ViewPills({ view, counts, onChange }) {
 }
 
 // A candidate in the waiting room. Start interview opens the room, where
-// the interviewer lets them in; the room comes in the next step.
+// the interviewer lets them in.
 function WaitingBanner({ interview, now }) {
   return (
     <section
@@ -86,15 +86,13 @@ function WaitingBanner({ interview, now }) {
           · for {waitingFor(interview, now)} · interview at {clock(interview.scheduled_start)}
         </span>
       </span>
-      <button
-        type="button"
-        disabled
-        title="The interview room is coming soon."
-        className="inline-flex min-h-11 cursor-not-allowed items-center gap-2 rounded-full bg-success/15 px-5 font-display text-[15px] font-bold text-success/70"
+      <Button
+        to={`/app/interviews/${interview.id}/room`}
+        className="bg-success hover:bg-success/90"
       >
         <Video className="size-4.5" aria-hidden="true" />
-        Start interview · room coming soon
-      </button>
+        Start interview
+      </Button>
     </section>
   )
 }

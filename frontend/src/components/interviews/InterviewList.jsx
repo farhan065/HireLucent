@@ -1,4 +1,5 @@
 import { Trash2, Video } from 'lucide-react'
+import { Link } from 'react-router'
 import {
   dayLabel,
   formatShortDate,
@@ -63,28 +64,27 @@ function When({ interview, now }) {
   )
 }
 
-// The Start button. The interview room arrives in a later step, so for now
-// it shows when the room opens, or that it is coming soon.
+// Opens the interview room once Join is open; before that it says when.
 function StartButton({ interview, rules, now }) {
-  const state = joinState(interview, rules, now)
-  const isOpen = state === 'open'
-  return (
-    <div className="flex flex-col items-end gap-1">
+  if (joinState(interview, rules, now) !== 'open') {
+    return (
       <button
         type="button"
         disabled
-        title={isOpen ? 'The interview room is coming soon.' : undefined}
-        className="inline-flex min-h-10.5 cursor-not-allowed items-center gap-2 whitespace-nowrap rounded-full bg-mist px-4.5 font-display text-sm font-bold text-body"
+        className="inline-flex min-h-10.5 cursor-not-allowed items-center whitespace-nowrap rounded-full bg-mist px-4.5 font-display text-sm font-bold text-body"
       >
-        {isOpen && <Video className="size-4.5" aria-hidden="true" />}
-        {isOpen
-          ? interview.status === 'in_progress'
-            ? 'Rejoin interview'
-            : 'Start interview'
-          : `Opens ${opensLabel(interview, rules, now)}`}
+        Opens {opensLabel(interview, rules, now)}
       </button>
-      {isOpen && <span className="text-xs font-medium">Room coming soon</span>}
-    </div>
+    )
+  }
+  return (
+    <Link
+      to={`/app/interviews/${interview.id}/room`}
+      className="inline-flex min-h-10.5 items-center gap-2 whitespace-nowrap rounded-full bg-brand px-4.5 font-display text-sm font-bold text-white shadow-button hover:bg-brand-dark"
+    >
+      <Video className="size-4.5" aria-hidden="true" />
+      {interview.status === 'in_progress' ? 'Rejoin interview' : 'Start interview'}
+    </Link>
   )
 }
 
