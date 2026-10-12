@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Route, Routes } from 'react-router'
 import RequireInterviewer from './auth/RequireInterviewer.jsx'
 import AppLayout from './layouts/AppLayout.jsx'
@@ -11,6 +12,10 @@ import KnowledgeBasePage from './pages/KnowledgeBasePage.jsx'
 import LandingPage from './pages/LandingPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
+
+// Video pages are loaded only when opened, so the video library does not
+// slow down the rest of the app.
+const LiveKitTestPage = lazy(() => import('./pages/LiveKitTestPage.jsx'))
 
 export default function App() {
   return (
@@ -29,6 +34,15 @@ export default function App() {
           </Route>
           <Route path="assistant/:threadId?" element={<AssistantPage />} />
           <Route path="knowledge" element={<KnowledgeBasePage />} />
+          {/* Temporary video check, removed when the interview room is built. */}
+          <Route
+            path="livekit-test"
+            element={
+              <Suspense fallback={null}>
+                <LiveKitTestPage />
+              </Suspense>
+            }
+          />
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />
