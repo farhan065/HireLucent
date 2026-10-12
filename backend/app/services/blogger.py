@@ -1,19 +1,19 @@
 """Publishes a post through the Blogger MCP server.
 
-Only the server's create_post tool is ever called, and only from the
-publishing tool after the interviewer has approved the post. The server's
-tools are never offered to the language model.
+Only the server's create_post tool is ever called (the registry allows no
+other), and only from the publishing tool after the interviewer has
+approved the post. The server's tools are never offered to the language
+model.
 """
 
 import asyncio
 import logging
 import re
 
-from mcp import Client
-
 from app.core.config import get_settings
 from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
+from app.mcp_clients import client
 
 logger = get_logger(__name__)
 
@@ -26,12 +26,11 @@ _POST_URL = re.compile(r"^URL: (https?://\S+)", re.MULTILINE)
 
 
 async def _create_post(title: str, html: str) -> str:
-    settings = get_settings()
-    async with Client(settings.mcp_blogger_url) as client:
-        result = await client.call_tool(
-            "create_post",
-            {"blogId": settings.blogger_blog_id, "title": title, "content": html},
-        )
+    result = await client.call_tool_async(
+        "blogger",
+        "create_post",
+        {"blogId": get_settings().blogger_blog_id, "title": title, "content": html},
+    )
     return result.content[0].text
 
 
