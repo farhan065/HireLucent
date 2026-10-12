@@ -14,6 +14,7 @@
 
 import json
 import logging
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -35,6 +36,7 @@ from app.graphs.base import MAX_ATTEMPTS, BaseState, capture_errors
 from app.graphs.checkpointer import get_checkpointer
 from app.graphs.recruiter.prompts import ERROR_REPLY, SYSTEM_PROMPT
 from app.rag import mcp_client
+from app.services.interview_times import now_description
 from app.graphs.recruiter.tools import (
     EXTERNAL_ACTIONS,
     PREPARERS,
@@ -72,7 +74,9 @@ def load_context(state: RecruiterState) -> dict:
 @capture_errors
 def agent(state: RecruiterState) -> dict:
     """Ask the model what to do next: answer, or use a tool."""
-    messages = [SystemMessage(SYSTEM_PROMPT), *state["messages"]]
+    # Today's date, so a day such as "Tuesday" means the right one.
+    prompt = f"{SYSTEM_PROMPT}\n{now_description(datetime.now(timezone.utc))}"
+    messages = [SystemMessage(prompt), *state["messages"]]
     response = run_with_retries(
         "recruiter_agent", lambda: get_agent_model().invoke(messages)
     )
@@ -103,7 +107,9 @@ def human_approval(
     shown complete, valid details.
     """
     request = state["messages"][-1]
-    call = request.tool_calls[0]
+    # The action to approve. If the model asked for other tools in the same
+    # reply, they are dropped: one action is approved at a time.
+    call = next(c for c in request.tool_calls if c["name"] in EXTERNAL_ACTIONS)
     name = call["name"]
     try:
         arguments = TOOL_SCHEMAS_BY_NAME[name].model_validate(call["args"]).model_dump()
@@ -125,7 +131,8 @@ def human_approval(
         # edited version, if any, replaces the checked details.
         final = arguments if name in PREPARERS else (edited or arguments)
         return Command(
-            goto="call_tools", update={"messages": [_with_arguments(request, final)]}
+            goto="call_tools",
+            update={"messages": [_with_arguments(request, call, final)]},
         )
 
     if edited:
@@ -133,7 +140,7 @@ def human_approval(
         # and ask again, without involving the model.
         return Command(
             goto="human_approval",
-            update={"messages": [_with_arguments(request, edited)]},
+            update={"messages": [_with_arguments(request, call, edited)]},
         )
 
     feedback = decision.get("feedback") or "No reason was given."
@@ -144,10 +151,10 @@ def human_approval(
     return Command(goto="agent", update={"messages": [rejection]})
 
 
-def _with_arguments(request: AIMessage, arguments: dict) -> AIMessage:
+def _with_arguments(request: AIMessage, call: dict, arguments: dict) -> AIMessage:
     """The same tool request with different arguments. Keeping the message
     id replaces the original, so the conversation stays consistent."""
-    call = {**request.tool_calls[0], "args": arguments}
+    call = {**call, "args": arguments}
     return AIMessage(content=request.content, tool_calls=[call], id=request.id)
 
 

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.core.errors import ConflictError
 from app.db.session import SessionLocal
+from app.graphs.recruiter import interview_tools
 from app.graphs.recruiter.drafts import latest_draft
 from app.models.enums import JobStatus
 from app.schemas.job import JobRequirements, ScoringWeights
@@ -136,19 +137,44 @@ def publish_job(arguments: dict[str, Any], state: dict[str, Any]) -> tuple[str, 
 
 
 # What the model is shown.
-TOOL_SCHEMAS: list[type[BaseModel]] = [SaveJob, PublishJob]
+TOOL_SCHEMAS: list[type[BaseModel]] = [
+    SaveJob,
+    PublishJob,
+    interview_tools.GetShortlistedCandidates,
+    interview_tools.ScheduleInterviews,
+    interview_tools.RescheduleInterview,
+    interview_tools.CancelInterview,
+]
 TOOL_SCHEMAS_BY_NAME = {schema.__name__: schema for schema in TOOL_SCHEMAS}
 
 # What runs when the model asks for a tool.
 ToolHandler = Callable[[dict[str, Any], dict[str, Any]], tuple[str, dict]]
-TOOL_HANDLERS: dict[str, ToolHandler] = {"SaveJob": save_job, "PublishJob": publish_job}
+TOOL_HANDLERS: dict[str, ToolHandler] = {
+    "SaveJob": save_job,
+    "PublishJob": publish_job,
+    "GetShortlistedCandidates": interview_tools.get_shortlisted,
+    "ScheduleInterviews": interview_tools.schedule_interviews,
+    "RescheduleInterview": interview_tools.reschedule_interview,
+    "CancelInterview": interview_tools.cancel_interview,
+}
 
 # Tools that change something or act outside the app. They always wait for
 # the interviewer's approval before running.
-EXTERNAL_ACTIONS = {"SaveJob", "PublishJob"}
+EXTERNAL_ACTIONS = {
+    "SaveJob",
+    "PublishJob",
+    "ScheduleInterviews",
+    "RescheduleInterview",
+    "CancelInterview",
+}
 
 # Work done before the interviewer is asked: the checked arguments go in and
 # the full details to approve come out. Because these details are built by
 # the app, they are used as approved and cannot be replaced from the browser.
 Preparer = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
-PREPARERS: dict[str, Preparer] = {"PublishJob": prepare_publication}
+PREPARERS: dict[str, Preparer] = {
+    "PublishJob": prepare_publication,
+    "ScheduleInterviews": interview_tools.prepare_schedule,
+    "RescheduleInterview": interview_tools.prepare_reschedule,
+    "CancelInterview": interview_tools.prepare_cancel,
+}
