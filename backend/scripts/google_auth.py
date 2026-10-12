@@ -26,12 +26,15 @@ TOKEN_FILE = SECRETS_DIR / "google_token.json"
 BLOGGER_TOKEN_FILE = SECRETS_DIR / "blogger_tokens.json"
 
 # Only what the app does: publish posts, read the application form and its
-# responses, and download the CVs uploaded through the form.
+# responses, download the CVs uploaded through the form, send interview
+# emails (send only, no reading) and manage interview calendar events.
 SCOPES = [
     "https://www.googleapis.com/auth/blogger",
     "https://www.googleapis.com/auth/forms.body.readonly",
     "https://www.googleapis.com/auth/forms.responses.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/calendar.events",
 ]
 
 
