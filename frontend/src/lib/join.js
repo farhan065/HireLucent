@@ -36,3 +36,8 @@ export function timeUntil(date, now = new Date()) {
   if (hours === 0) return `in ${minutes} min`
   return rest === 0 ? `in ${hours} h` : `in ${hours} h ${rest} min`
 }
+
+// The candidate's pass for the video room, given once they were let in.
+export function joinRoom(pass) {
+  return apiRequest('/join/room', { method: 'POST', auth: pass })
+}

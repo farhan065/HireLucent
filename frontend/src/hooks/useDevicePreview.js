@@ -14,8 +14,9 @@ function constraint(deviceId) {
 
 // The candidate's own camera and microphone before and while they wait:
 // the preview, the device lists, on/off switches and a microphone level.
-// Nothing is recorded or sent anywhere; it stays in this browser.
-export function useDevicePreview() {
+// Nothing is recorded or sent anywhere; it stays in this browser. When
+// "isEnabled" is false (in the interview room) the camera is released.
+export function useDevicePreview(isEnabled = true) {
   const [stream, setStream] = useState(null)
   const [devices, setDevices] = useState({ cameras: [], microphones: [] })
   const [cameraId, setCameraId] = useState('')
@@ -30,7 +31,7 @@ export function useDevicePreview() {
 
   // Open the chosen camera and microphone, and list the others.
   useEffect(() => {
-    if (!navigator.mediaDevices?.getUserMedia) return undefined
+    if (!isEnabled || !navigator.mediaDevices?.getUserMedia) return undefined
     let opened = null
     let isCurrent = true
     navigator.mediaDevices
@@ -56,7 +57,7 @@ export function useDevicePreview() {
       isCurrent = false
       opened?.getTracks().forEach((track) => track.stop())
     }
-  }, [cameraId, microphoneId])
+  }, [isEnabled, cameraId, microphoneId])
 
   // The on/off switches only mute the tracks, so turning back on is instant.
   useEffect(() => {
