@@ -12,7 +12,7 @@ from app.core.logging import get_logger, log_event
 from app.models import Candidate, Job, ScreeningResult
 from app.models.enums import CandidateStatus, JobStatus
 from app.schemas.job import JobRequirements, ScoringWeights
-from app.services import task_service
+from app.services import session_service, task_service
 
 logger = get_logger(__name__)
 
@@ -135,9 +135,11 @@ def update_profile(
 
     Screening results made with the old rules are cleared, so every
     candidate of the job is screened again with the same rules. Refused
-    while a fetch or a screening is running for the job.
+    while a fetch or a screening is running for the job, and once the job
+    has interviews.
     """
     get_job(db, job_id)
+    session_service.ensure_rules_can_change(db, job_id)
     task_service.ensure_idle(db, job_id)
     job = db.get(Job, job_id)
     job.requirements = requirements.model_dump()
