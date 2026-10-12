@@ -85,6 +85,29 @@ services:
     networks:
       - hirelucent
 
+  mcp-google:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.mcp_servers.google_server"]
+    env_file: .env
+    environment:
+      LOG_SERVICE_NAME: mcp-google
+    volumes:
+      # The Google sign-in, read only.
+      - ./secrets:/secrets:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('localhost', 8003), timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - hirelucent
+
   mcp-blogger:
     build: ./mcp-blogger
     restart: unless-stopped

@@ -8,8 +8,8 @@ at the address set in .env. Two settings decide what the AI may do:
 - allowed_tools: the only tools the backend will ever call on that server.
   Anything else is refused before a request is sent.
 
-Servers that act on the outside world (publishing, later email and
-calendar) are never offered to the agent. The backend calls their allowed
+Servers that act on the outside world (publishing, email and calendar)
+are never offered to the agent. The backend calls their allowed
 tools only after the interviewer has approved the action.
 """
 
@@ -39,5 +39,18 @@ def mcp_servers() -> dict[str, McpServer]:
         "blogger": McpServer(
             url=settings.mcp_blogger_url,
             allowed_tools=frozenset({"create_post"}),
+        ),
+        # Interview emails and calendar invitations. Called only by the
+        # backend, after the interviewer has approved the schedule.
+        "google": McpServer(
+            url=settings.mcp_google_url,
+            allowed_tools=frozenset(
+                {
+                    "send_email",
+                    "create_calendar_event",
+                    "update_calendar_event",
+                    "cancel_calendar_event",
+                }
+            ),
         ),
     }

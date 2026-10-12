@@ -80,6 +80,15 @@ class Settings(BaseSettings):
     # The Google sign-in saved by scripts/google_auth.py.
     google_token_file: str = "/secrets/google_token.json"
 
+    # The Google MCP server, which sends interview emails and calendar
+    # invitations after the interviewer has approved them.
+    mcp_google_url: str = "http://mcp-google:8003/mcp"
+    mcp_google_port: int = 8003
+    # How interview emails are signed. The address is the Gmail account you
+    # signed in with; leave it empty to let Gmail fill it in.
+    email_sender_name: str = "HireLucent Careers"
+    email_sender_address: str = ""
+
     # LiveKit, the video server. The URL is the address the browser uses.
     # The key and secret sign room tokens and must match the livekit service.
     livekit_url: str = "ws://localhost:7880"
