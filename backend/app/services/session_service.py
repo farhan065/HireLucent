@@ -211,6 +211,7 @@ def reschedule(
     session.scheduled_end = end
     session.join_token_hash = token_hash
     session.candidate_joined_at = None
+    session.candidate_seen_at = None
     db.commit()
     log_event(logger, "interview_rescheduled", session_id=session.id)
     return session, token

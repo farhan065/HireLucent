@@ -23,6 +23,9 @@ class InterviewSessionSummary(BaseModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     cancelled_at: datetime | None = None
+    candidate_waiting: bool = Field(
+        default=False, description="The candidate is in the waiting room now."
+    )
 
 
 class InterviewTime(BaseModel):

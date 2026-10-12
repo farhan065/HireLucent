@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
@@ -10,6 +10,9 @@ from app.models.enums import SessionStatus
 if TYPE_CHECKING:
     from app.models.candidate import Candidate
 
+# The candidate's waiting page checks in every few seconds. Without a check
+# for this long, they are no longer counted as waiting.
+WAITING_TIMEOUT = timedelta(seconds=15)
 
 
 class InterviewSession(TimestampMixin, Base):
@@ -43,6 +46,8 @@ class InterviewSession(TimestampMixin, Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consent_given_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the candidate's waiting page last checked in.
+    candidate_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     candidate: Mapped["Candidate"] = relationship(  
         back_populates="sessions"
@@ -58,6 +63,14 @@ class InterviewSession(TimestampMixin, Base):
     def candidate_name(self) -> str:
         """The candidate's name, for the interviewer's list of interviews."""
         return self.candidate.full_name
+
+    @property
+    def candidate_waiting(self) -> bool:
+        """True while the candidate is in the waiting room of an interview
+        that has not started."""
+        if self.status != SessionStatus.SCHEDULED or self.candidate_seen_at is None:
+            return False
+        return datetime.now(timezone.utc) - self.candidate_seen_at <= WAITING_TIMEOUT
 
 
 class TranscriptTurn(Base):
