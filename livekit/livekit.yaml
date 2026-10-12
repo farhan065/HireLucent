@@ -1,0 +1,19 @@
+# LiveKit video server settings for running on one computer.
+# The API key and secret come from .env (LIVEKIT_KEYS), never from this file.
+
+# Signalling: the browser connects here (ws://localhost:7880).
+port: 7880
+
+rtc:
+  # Media for all participants goes through one UDP port...
+  udp_port: 7882
+  # ...with a TCP fallback when UDP is blocked.
+  tcp_port: 7881
+  # The browser runs on the same computer and reaches the container through
+  # the published ports, so the server announces 127.0.0.1.
+  use_external_ip: false
+  node_ip: 127.0.0.1
+
+logging:
+  level: info
+  json: true
