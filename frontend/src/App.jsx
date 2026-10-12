@@ -17,12 +17,22 @@ import NotFoundPage from './pages/NotFoundPage.jsx'
 // libraries do not slow down the rest of the app.
 const AssistantPage = lazy(() => import('./pages/AssistantPage.jsx'))
 const LiveKitTestPage = lazy(() => import('./pages/LiveKitTestPage.jsx'))
+// The candidate's private interview link. Candidates never sign in.
+const InterviewJoinPage = lazy(() => import('./pages/InterviewJoinPage.jsx'))
 
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/interview/:token"
+        element={
+          <Suspense fallback={null}>
+            <InterviewJoinPage />
+          </Suspense>
+        }
+      />
       {/* Everything under /app is for signed-in interviewers only. */}
       <Route element={<RequireInterviewer />}>
         <Route path="/app" element={<AppLayout />}>
