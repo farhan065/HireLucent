@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -48,6 +49,9 @@ class InterviewSession(TimestampMixin, Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # When the candidate's waiting page last checked in.
     candidate_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Questions the AI suggested for this candidate, with whether each was
+    # asked. Kept for the interview room and the assessment after it.
+    suggested_questions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
 
     candidate: Mapped["Candidate"] = relationship(  
         back_populates="sessions"

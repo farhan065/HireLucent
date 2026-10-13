@@ -93,3 +93,35 @@ class InterviewRules(BaseModel):
     join_opens_minutes_before: int
     min_length_minutes: int
     max_length_minutes: int
+
+
+class SuggestedQuestion(BaseModel):
+    """A question the AI suggested for the candidate in this interview."""
+
+    id: int
+    requirement_id: str | None = Field(description="The requirement it checks, such as R2.")
+    requirement: str | None = Field(description="That requirement's text.")
+    reason: Literal["partly_met", "not_in_cv", "cv_claim"] = Field(
+        description="Partly met, not shown in the CV, or a claim the CV makes."
+    )
+    question: str
+    why: str
+    asked: bool
+
+
+class QuestionAsked(BaseModel):
+    asked: bool
+
+
+class InterviewChatMessage(BaseModel):
+    """One message in the interview room's chat with the AI Agent."""
+
+    role: Literal["interviewer", "agent"]
+    text: str
+    from_question_bank: bool = Field(
+        default=False, description="The answer quotes questions from the question bank."
+    )
+
+
+class InterviewChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)

@@ -5,23 +5,35 @@ the screen asks the interviewer to confirm before calling them.
 """
 
 from fastapi import APIRouter, Depends, status
+from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, require_interviewer
 from app.db.session import get_db
+from app.graphs.recruiter.graph import get_recruiter_graph
 from app.models import InterviewSession, Job
 from app.schemas.error import ErrorResponse
 from app.schemas.interview import (
     InterviewChange,
+    InterviewChatMessage,
+    InterviewChatRequest,
     InterviewRoomInfo,
     InterviewRules,
     InterviewSessionSummary,
     InterviewTime,
+    QuestionAsked,
     ScheduleOutcome,
     ScheduleRequest,
+    SuggestedQuestion,
 )
 from app.schemas.video import RoomTokenResponse
-from app.services import room_service, scheduling_service, session_service
+from app.services import (
+    interview_chat_service,
+    question_service,
+    room_service,
+    scheduling_service,
+    session_service,
+)
 from app.services.scheduling_service import Slot
 
 router = APIRouter(
@@ -137,6 +149,77 @@ def admit_candidate(session_id: int, db: Session = Depends(get_db)) -> Interview
 def end_interview(session_id: int, db: Session = Depends(get_db)) -> InterviewSession:
     """Closes the video room; the candidate's link stops working."""
     return room_service.end(db, session_id)
+
+
+AI_ERRORS = {**ROOM_ERRORS, 503: {"model": ErrorResponse, "description": "AI unavailable"}}
+
+
+@session_router.get(
+    "/{session_id}/questions",
+    response_model=list[SuggestedQuestion],
+    summary="List the questions suggested for the candidate",
+    responses=ROOM_ERRORS,
+)
+def list_questions(session_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    return question_service.list_questions(db, session_id)
+
+
+@session_router.post(
+    "/{session_id}/questions",
+    response_model=list[SuggestedQuestion],
+    summary="Suggest five more questions for the candidate",
+    responses=AI_ERRORS,
+)
+def suggest_questions(session_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    """Written by the AI from the candidate's CV and screening results.
+    Returns every suggested question of the interview."""
+    return question_service.generate(db, session_id)
+
+
+@session_router.patch(
+    "/{session_id}/questions/{question_id}",
+    response_model=list[SuggestedQuestion],
+    summary="Mark a suggested question as asked or not asked",
+    responses=ROOM_ERRORS,
+)
+def mark_question(
+    session_id: int, question_id: int, payload: QuestionAsked, db: Session = Depends(get_db)
+) -> list[dict]:
+    return question_service.mark_asked(db, session_id, question_id, payload.asked)
+
+
+@session_router.get(
+    "/{session_id}/chat",
+    response_model=list[InterviewChatMessage],
+    summary="Read the interview room's chat with the AI Agent",
+    responses=ROOM_ERRORS,
+)
+def read_chat(
+    session_id: int,
+    db: Session = Depends(get_db),
+    graph: CompiledStateGraph = Depends(get_recruiter_graph),
+) -> list[dict]:
+    return interview_chat_service.read(db, graph, session_id)
+
+
+@session_router.post(
+    "/{session_id}/chat",
+    response_model=list[InterviewChatMessage],
+    summary="Ask the AI Agent about this interview",
+    responses=AI_ERRORS,
+)
+def send_chat(
+    session_id: int,
+    payload: InterviewChatRequest,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+    graph: CompiledStateGraph = Depends(get_recruiter_graph),
+) -> list[dict]:
+    """Read-only: the agent answers about this job, this candidate and the
+    question bank, and cannot change anything. Returns the whole chat."""
+    return interview_chat_service.send(
+        db, graph, session_id, principal.subject_id, payload.message
+    )
 
 
 @session_router.put(
