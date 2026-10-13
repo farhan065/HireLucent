@@ -20,6 +20,32 @@ export function endInterview(sessionId) {
   return apiRequest(`/interviews/${sessionId}/end`, { method: 'POST' })
 }
 
+// Questions the AI suggested for the candidate, oldest first.
+export function readQuestions(sessionId) {
+  return apiRequest(`/interviews/${sessionId}/questions`)
+}
+
+// Five more suggested questions; returns all of them.
+export function suggestQuestions(sessionId) {
+  return apiRequest(`/interviews/${sessionId}/questions`, { method: 'POST' })
+}
+
+export function markAsked(sessionId, questionId, asked) {
+  return apiRequest(`/interviews/${sessionId}/questions/${questionId}`, {
+    method: 'PATCH',
+    body: { asked },
+  })
+}
+
+// The room's read-only chat with the AI Agent.
+export function readChat(sessionId) {
+  return apiRequest(`/interviews/${sessionId}/chat`)
+}
+
+export function sendChat(sessionId, message) {
+  return apiRequest(`/interviews/${sessionId}/chat`, { method: 'POST', body: { message } })
+}
+
 // Back from full screen, so a dialog opened next can be seen.
 export function leaveFullScreen() {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => null)

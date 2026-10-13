@@ -1,11 +1,13 @@
-import { ArrowLeft, Bot, CircleAlert, Lightbulb, MessageSquareText, UserRound } from 'lucide-react'
+import { ArrowLeft, CircleAlert, Lightbulb, MessageSquareText, UserRound } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import Button from '../components/Button.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import CandidateProfile from '../components/room/CandidateProfile.jsx'
 import ConnectionChip from '../components/room/ConnectionChip.jsx'
+import InterviewChat from '../components/room/InterviewChat.jsx'
 import RoomControls from '../components/room/RoomControls.jsx'
+import SuggestedQuestions from '../components/room/SuggestedQuestions.jsx'
 import VideoStage from '../components/room/VideoStage.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
@@ -107,12 +109,18 @@ function AdmitBar({ interview, now, isAdmitting, error, onAdmit }) {
 }
 
 const TABS = [
-  { key: 'info', label: 'Candidate info', icon: UserRound },
-  { key: 'questions', label: 'Suggested questions', icon: Lightbulb },
+  { key: 'info', label: 'Candidate info', icon: UserRound, active: 'bg-tint text-brand-dark' },
+  {
+    key: 'questions',
+    label: 'Suggested questions',
+    icon: Lightbulb,
+    active: 'bg-violet-soft text-violet',
+  },
 ]
 
-// The candidate at a glance and, in the next step, questions to ask them.
-function CandidatePanel({ candidate }) {
+// The candidate at a glance, and questions to ask them. Both tabs stay
+// loaded, so switching between them keeps their place.
+function CandidatePanel({ sessionId, candidateName, candidate }) {
   const [tab, setTab] = useState('info')
   return (
     <section className="flex min-h-[36rem] flex-col overflow-hidden rounded-card border border-line bg-white shadow-card lg:min-h-0">
@@ -125,7 +133,7 @@ function CandidatePanel({ candidate }) {
             aria-selected={tab === item.key}
             onClick={() => setTab(item.key)}
             className={`flex min-h-10.5 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-2 font-display text-[13.5px] font-bold ${
-              tab === item.key ? 'bg-tint text-brand-dark' : 'text-body hover:text-navy'
+              tab === item.key ? item.active : 'text-body hover:text-navy'
             }`}
           >
             <item.icon className="size-4" aria-hidden="true" />
@@ -133,25 +141,26 @@ function CandidatePanel({ candidate }) {
           </button>
         ))}
       </div>
-      {tab === 'questions' ? (
-        <p className="px-6 py-10 text-center text-sm">
-          Questions prepared from this candidate&apos;s CV arrive with the next step.
-        </p>
-      ) : !candidate ? (
-        <div className="p-4.5">
-          <Skeleton className="h-64 w-full" />
-        </div>
-      ) : (
-        <CandidateProfile candidate={candidate} />
-      )}
+      <div className={`min-h-0 flex-1 flex-col ${tab === 'info' ? 'flex' : 'hidden'}`}>
+        {candidate ? (
+          <CandidateProfile candidate={candidate} />
+        ) : (
+          <div className="p-4.5">
+            <Skeleton className="h-64 w-full" />
+          </div>
+        )}
+      </div>
+      <div className={`min-h-0 flex-1 flex-col ${tab === 'questions' ? 'flex' : 'hidden'}`}>
+        <SuggestedQuestions sessionId={sessionId} candidateName={candidateName} />
+      </div>
     </section>
   )
 }
 
-// The interviewer's interview room: the candidate on the left, the video
-// with the live transcript below it in the middle and the chat on the
-// right. The transcript (Module 5), the chat and the suggested questions
-// (next step) fill in later.
+// The interviewer's interview room: the candidate and suggested questions
+// on the left, the video with the live transcript below it in the middle
+// and the read-only AI Agent chat on the right. The transcript arrives with
+// Module 5.
 export default function InterviewRoomPage() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -284,7 +293,11 @@ export default function InterviewRoomPage() {
       </header>
 
       <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[360px_minmax(0,1fr)_360px] lg:grid-rows-[minmax(0,1fr)]">
-        <CandidatePanel candidate={candidate} />
+        <CandidatePanel
+          sessionId={interview.id}
+          candidateName={interview.candidate_name}
+          candidate={candidate}
+        />
 
         <div className="@container flex min-h-0 min-w-0 flex-col gap-3.5 lg:overflow-hidden">
           <AdmitBar
@@ -338,14 +351,7 @@ export default function InterviewRoomPage() {
           </ComingSoon>
         </div>
 
-        <ComingSoon
-          icon={Bot}
-          title="Chat with the AI Agent"
-          note="Read-only during the interview"
-          className="min-h-80"
-        >
-          <p>Ask the AI Agent about the job, this candidate or the question bank. Arrives with the next step.</p>
-        </ComingSoon>
+        <InterviewChat sessionId={interview.id} candidateName={interview.candidate_name} />
       </div>
 
       {isConfirmingEnd && (
