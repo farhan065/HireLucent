@@ -174,7 +174,9 @@ export default function InterviewRoomPage() {
   const [isConfirmingEnd, setIsConfirmingEnd] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
   const [endError, setEndError] = useState('')
-  const room = useRoom(connection)
+  // A fresh pass to rejoin the room after the connection was lost.
+  const renewPass = useCallback(() => openRoom(sessionId), [sessionId])
+  const room = useRoom(connection, renewPass)
 
   const load = useCallback(
     () =>
@@ -207,8 +209,9 @@ export default function InterviewRoomPage() {
   const status = info?.interview.status
   // Ended somewhere else, for example in another tab.
   useEffect(() => {
-    if (status === 'completed' || status === 'cancelled') navigate(backTo, { replace: true })
-  }, [status, backTo, navigate])
+    const isOver = status === 'completed' || status === 'cancelled' || room.endReason === 'ended'
+    if (isOver) navigate(backTo, { replace: true })
+  }, [status, room.endReason, backTo, navigate])
 
   async function handleAdmit() {
     setIsAdmitting(true)
@@ -309,11 +312,6 @@ export default function InterviewRoomPage() {
           />
           {room.notice && (
             <p className="rounded-2xl bg-amber-soft px-4 py-2.5 text-sm text-amber">{room.notice}</p>
-          )}
-          {room.error && (
-            <p role="alert" className="rounded-2xl bg-danger-soft px-4 py-2.5 text-sm font-semibold text-danger">
-              {room.error}
-            </p>
           )}
           {/* Full width: 16:9 where it fits, down to 2:1 on a short window and
               at most 62% of the window height, so the transcript keeps its room

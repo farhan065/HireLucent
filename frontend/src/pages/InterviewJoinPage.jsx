@@ -66,6 +66,8 @@ function JoinFlow({ token, link, onEnded, onRoomChange }) {
   }, [onRoomChange])
 
   const handleRoomEnded = useCallback(() => onEnded(true), [onEnded])
+  // A fresh room pass to rejoin after the connection was lost.
+  const renewRoomPass = useCallback(() => joinRoom(pass), [pass])
 
   // While joined, check in every few seconds: still waiting, let in, or
   // ended. Being let in opens the room with the chosen camera and microphone.
@@ -97,6 +99,7 @@ function JoinFlow({ token, link, onEnded, onRoomChange }) {
         <CandidateRoom
           link={link}
           connection={connection}
+          renewPass={renewRoomPass}
           onLeft={handleLeftRoom}
           onEnded={handleRoomEnded}
         />

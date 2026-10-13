@@ -9,8 +9,8 @@ import VideoStage from '../room/VideoStage.jsx'
 // The candidate's interview room: the interviewer large in a standard-size
 // frame, themselves small, and Mute, Camera, Share screen and Leave. The
 // video can go full screen. No transcript, notes or scores.
-export default function CandidateRoom({ link, connection, onLeft, onEnded }) {
-  const room = useRoom(connection)
+export default function CandidateRoom({ link, connection, renewPass, onLeft, onEnded }) {
+  const room = useRoom(connection, renewPass)
   const [joinedAt] = useState(() => new Date())
   const [now, setNow] = useState(() => new Date())
   const [isConfirmingLeave, setIsConfirmingLeave] = useState(false)
@@ -49,14 +49,6 @@ export default function CandidateRoom({ link, connection, onLeft, onEnded }) {
         {room.notice && (
           <p className="w-full max-w-[65rem] rounded-2xl bg-amber-soft px-4 py-2.5 text-sm text-amber">
             {room.notice}
-          </p>
-        )}
-        {room.error && (
-          <p
-            role="alert"
-            className="w-full max-w-[65rem] rounded-2xl bg-danger-soft px-4 py-2.5 text-sm font-semibold text-danger"
-          >
-            {room.error}
           </p>
         )}
         <VideoStage
