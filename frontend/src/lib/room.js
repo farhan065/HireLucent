@@ -20,6 +20,11 @@ export function endInterview(sessionId) {
   return apiRequest(`/interviews/${sessionId}/end`, { method: 'POST' })
 }
 
+// Back from full screen, so a dialog opened next can be seen.
+export function leaveFullScreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => null)
+}
+
 // "12:48": minutes and seconds since a moment.
 export function elapsed(since, now = new Date()) {
   const seconds = Math.max(0, Math.floor((now - new Date(since)) / 1000))

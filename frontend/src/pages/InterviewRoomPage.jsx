@@ -3,8 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import Button from '../components/Button.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
-import CvFacts from '../components/jobs/CvFacts.jsx'
-import { ViewCvLink } from '../components/jobs/candidates.jsx'
+import CandidateProfile from '../components/room/CandidateProfile.jsx'
 import ConnectionChip from '../components/room/ConnectionChip.jsx'
 import RoomControls from '../components/room/RoomControls.jsx'
 import VideoStage from '../components/room/VideoStage.jsx'
@@ -12,8 +11,15 @@ import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
 import { useRoom } from '../hooks/useRoom.js'
 import { apiRequest } from '../lib/api.js'
-import { clock, minutesBetween, scoreLabel, waitingFor } from '../lib/interviews.js'
-import { admitCandidate, elapsed, endInterview, openRoom, readInterview } from '../lib/room.js'
+import { clock, minutesBetween, waitingFor } from '../lib/interviews.js'
+import {
+  admitCandidate,
+  elapsed,
+  endInterview,
+  leaveFullScreen,
+  openRoom,
+  readInterview,
+} from '../lib/room.js'
 
 const REFRESH_MS = 3 * 1000
 
@@ -43,18 +49,20 @@ function Timer({ interview, now }) {
   )
 }
 
-// A column the next steps fill in, shown now so the room keeps its shape.
-function ComingSoon({ icon: Icon, title, note, children }) {
+// A panel the next steps fill in, shown now so the room keeps its shape.
+function ComingSoon({ icon: Icon, title, note, className = '', children }) {
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-card border border-line bg-white shadow-card">
-      <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+    <section
+      className={`flex min-h-0 flex-col overflow-hidden rounded-card border border-line bg-white shadow-card ${className}`}
+    >
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line px-4 py-3">
         <span className="flex items-center gap-2 font-display text-[15px] font-bold text-navy">
           <Icon className="size-4.5 text-brand" aria-hidden="true" />
           {title}
         </span>
         {note && <span className="text-xs">{note}</span>}
       </header>
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center text-sm">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-y-auto px-6 py-6 text-center text-sm">
         {children}
       </div>
     </section>
@@ -103,12 +111,12 @@ const TABS = [
   { key: 'questions', label: 'Suggested questions', icon: Lightbulb },
 ]
 
-// The candidate's screening summary and CV facts, with the full CV.
+// The candidate at a glance and, in the next step, questions to ask them.
 function CandidatePanel({ candidate }) {
   const [tab, setTab] = useState('info')
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-card border border-line bg-white shadow-card">
-      <div role="tablist" aria-label="About the candidate" className="flex border-b border-line">
+    <section className="flex min-h-[36rem] flex-col overflow-hidden rounded-card border border-line bg-white shadow-card lg:min-h-0">
+      <div role="tablist" aria-label="About the candidate" className="grid grid-cols-2 gap-1.5 border-b border-line p-1.5">
         {TABS.map((item) => (
           <button
             key={item.key}
@@ -116,8 +124,8 @@ function CandidatePanel({ candidate }) {
             role="tab"
             aria-selected={tab === item.key}
             onClick={() => setTab(item.key)}
-            className={`-mb-px flex min-h-12 flex-1 items-center justify-center gap-1.5 whitespace-nowrap border-b-[3px] px-2 text-[13.5px] font-semibold ${
-              tab === item.key ? 'border-brand text-navy' : 'border-transparent text-body hover:text-navy'
+            className={`flex min-h-10.5 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-2 font-display text-[13.5px] font-bold ${
+              tab === item.key ? 'bg-tint text-brand-dark' : 'text-body hover:text-navy'
             }`}
           >
             <item.icon className="size-4" aria-hidden="true" />
@@ -125,37 +133,25 @@ function CandidatePanel({ candidate }) {
           </button>
         ))}
       </div>
-      <div className="flex-1 overflow-y-auto px-5 py-4">
-        {tab === 'questions' ? (
-          <p className="py-8 text-center text-sm">
-            Questions prepared from this candidate&apos;s CV arrive with the next step.
-          </p>
-        ) : !candidate ? (
+      {tab === 'questions' ? (
+        <p className="px-6 py-10 text-center text-sm">
+          Questions prepared from this candidate&apos;s CV arrive with the next step.
+        </p>
+      ) : !candidate ? (
+        <div className="p-4.5">
           <Skeleton className="h-64 w-full" />
-        ) : (
-          <div className="flex flex-col gap-2">
-            <h2 className="text-lg font-extrabold tracking-tight">{candidate.full_name}</h2>
-            <p className="text-[13px]">
-              {scoreLabel(candidate.scores?.final_score)}
-              {candidate.scores?.final_rank && ` · rank ${candidate.scores.final_rank}`}
-            </p>
-            {candidate.scores?.summary && (
-              <p className="text-sm leading-relaxed text-navy">{candidate.scores.summary}</p>
-            )}
-            {candidate.cv_facts && <CvFacts facts={candidate.cv_facts} />}
-            <div className="mt-3 border-t border-line pt-3">
-              <ViewCvLink candidateId={candidate.id} />
-            </div>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <CandidateProfile candidate={candidate} />
+      )}
     </section>
   )
 }
 
-// The interviewer's interview room: the video in the middle, the live
-// transcript on the left and the candidate on the right. The transcript
-// (Module 5), the chat and the suggested questions (next step) fill in later.
+// The interviewer's interview room: the candidate on the left, the video
+// with the live transcript below it in the middle and the chat on the
+// right. The transcript (Module 5), the chat and the suggested questions
+// (next step) fill in later.
 export default function InterviewRoomPage() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -287,13 +283,10 @@ export default function InterviewRoomPage() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 gap-5 p-5 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)_minmax(280px,340px)]">
-        <ComingSoon icon={MessageSquareText} title="Live transcript" note="Only you see this">
-          <p className="font-semibold text-navy">The live transcript appears here</p>
-          <p>Each person&apos;s words are written down once speech-to-text is added.</p>
-        </ComingSoon>
+      <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[360px_minmax(0,1fr)_360px] lg:grid-rows-[minmax(0,1fr)]">
+        <CandidatePanel candidate={candidate} />
 
-        <div className="flex min-h-0 min-w-0 flex-col gap-4">
+        <div className="@container flex min-h-0 min-w-0 flex-col gap-3.5 lg:overflow-hidden">
           <AdmitBar
             interview={interview}
             now={now}
@@ -309,29 +302,50 @@ export default function InterviewRoomPage() {
               {room.error}
             </p>
           )}
+          {/* Full width: 16:9 where it fits, down to 2:1 on a short window and
+              at most 62% of the window height, so the transcript keeps its room
+              and the middle never scrolls. */}
           <VideoStage
             room={room}
             selfName="You"
             otherName={interview.candidate_name}
             waitingText={isStarted ? `${interview.candidate_name} is joining…` : 'Not joined yet'}
+            heading={`Interview with ${interview.candidate_name}`}
+            clock={isStarted ? elapsed(interview.started_at, now) : null}
+            frameClassName="h-[min(56.25cqw,max(50cqw,calc(100vh_-_20rem)),62vh)]"
+            renderControls={(isOverlay) => (
+              <RoomControls
+                room={room}
+                endLabel={isStarted ? 'End interview' : 'Leave room'}
+                isEnding={isEnding}
+                isOverlay={isOverlay}
+                onEnd={() => {
+                  leaveFullScreen()
+                  setEndError('')
+                  setIsConfirmingEnd(true)
+                }}
+              />
+            )}
           />
-          <RoomControls
-            room={room}
-            endLabel={isStarted ? 'End interview' : 'Leave room'}
-            isEnding={isEnding}
-            onEnd={() => {
-              setEndError('')
-              setIsConfirmingEnd(true)
-            }}
-          />
-          <div className="h-44 shrink-0">
-            <ComingSoon icon={Bot} title="Chat" note="AI Agent · read-only during the interview">
-              <p>Ask the AI Agent about the job, this candidate or the question bank. Arrives with the next step.</p>
-            </ComingSoon>
-          </div>
+          <ComingSoon
+            icon={MessageSquareText}
+            title="Live transcript"
+            note="Only you see this"
+            className="min-h-40 flex-1 lg:min-h-0"
+          >
+            <p className="font-semibold text-navy">The live transcript appears here</p>
+            <p>Each person&apos;s words are written down once speech-to-text is added.</p>
+          </ComingSoon>
         </div>
 
-        <CandidatePanel candidate={candidate} />
+        <ComingSoon
+          icon={Bot}
+          title="Chat with the AI Agent"
+          note="Read-only during the interview"
+          className="min-h-80"
+        >
+          <p>Ask the AI Agent about the job, this candidate or the question bank. Arrives with the next step.</p>
+        </ComingSoon>
       </div>
 
       {isConfirmingEnd && (
