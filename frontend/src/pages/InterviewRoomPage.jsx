@@ -1,4 +1,12 @@
-import { ArrowLeft, CircleAlert, Lightbulb, MessageSquareText, UserRound } from 'lucide-react'
+import {
+  ArrowLeft,
+  Bot,
+  CircleAlert,
+  Lightbulb,
+  MessageSquareText,
+  ScrollText,
+  UserRound,
+} from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import Button from '../components/Button.jsx'
@@ -7,11 +15,13 @@ import CandidateProfile from '../components/room/CandidateProfile.jsx'
 import ConnectionChip from '../components/room/ConnectionChip.jsx'
 import InterviewChat from '../components/room/InterviewChat.jsx'
 import RoomControls from '../components/room/RoomControls.jsx'
+import RoomMessages from '../components/room/RoomMessages.jsx'
 import SuggestedQuestions from '../components/room/SuggestedQuestions.jsx'
 import VideoStage from '../components/room/VideoStage.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
 import { useRoom } from '../hooks/useRoom.js'
+import { useUnread } from '../hooks/useUnread.js'
 import { apiRequest } from '../lib/api.js'
 import { clock, minutesBetween, waitingFor } from '../lib/interviews.js'
 import {
@@ -34,19 +44,22 @@ function useNow(intervalMs) {
   return now
 }
 
-// "12:48 of 45:00 · ends 3:45 PM", amber once the planned end has passed.
+// "12:48 of 45:00 · ends 3:45 PM", amber once the planned length has
+// passed: "47:10 of 45:00 · 2 min over". Both count from when the
+// interview really started, so the numbers always agree.
 function Timer({ interview, now }) {
   const length = minutesBetween(interview.scheduled_start, interview.scheduled_end)
   if (!interview.started_at) {
     return <span className="text-sm">Starts at {clock(interview.scheduled_start)}</span>
   }
-  const over = Math.floor((now - new Date(interview.scheduled_end)) / 60000)
+  const plannedEnd = new Date(new Date(interview.started_at).getTime() + length * 60000)
+  const over = Math.floor((now - plannedEnd) / 60000)
   return (
     <span
-      className={`font-display text-[15px] font-bold tabular-nums ${over > 0 ? 'text-amber' : 'text-navy'}`}
+      className={`font-display text-[14.5px] font-bold tabular-nums ${over > 0 ? 'text-amber' : 'text-navy'}`}
     >
       {elapsed(interview.started_at, now)} of {length}:00 ·{' '}
-      {over > 0 ? `${over} min over` : `ends ${clock(interview.scheduled_end)}`}
+      {over > 0 ? `${over} min over` : `ends ${clock(plannedEnd)}`}
     </span>
   )
 }
@@ -123,7 +136,7 @@ const TABS = [
 function CandidatePanel({ sessionId, candidateName, candidate }) {
   const [tab, setTab] = useState('info')
   return (
-    <section className="flex min-h-[36rem] flex-col overflow-hidden rounded-card border border-line bg-white shadow-card lg:min-h-0">
+    <section className="@container flex min-h-[36rem] flex-col overflow-hidden rounded-card border border-line bg-white shadow-card lg:min-h-0">
       <div role="tablist" aria-label="About the candidate" className="grid grid-cols-2 gap-1.5 border-b border-line p-1.5">
         {TABS.map((item) => (
           <button
@@ -132,11 +145,12 @@ function CandidatePanel({ sessionId, candidateName, candidate }) {
             role="tab"
             aria-selected={tab === item.key}
             onClick={() => setTab(item.key)}
-            className={`flex min-h-10.5 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-2 font-display text-[13.5px] font-bold ${
+            className={`flex min-h-9.5 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-2 font-display text-[13px] font-bold ${
               tab === item.key ? item.active : 'text-body hover:text-navy'
             }`}
           >
-            <item.icon className="size-4" aria-hidden="true" />
+            {/* On a narrow column the labels need the room. */}
+            <item.icon className="hidden size-4 @[22rem]:block" aria-hidden="true" />
             {item.label}
           </button>
         ))}
@@ -157,10 +171,67 @@ function CandidatePanel({ sessionId, candidateName, candidate }) {
   )
 }
 
+// The read-only AI Agent chat, and live messages with the candidate. Both
+// tabs stay loaded; the Message tab counts messages that arrive while it
+// is hidden.
+function ChatPanel({ sessionId, candidateName, room }) {
+  const [tab, setTab] = useState('agent')
+  const [unread, markSeen] = useUnread(room.messages, tab === 'message')
+  const firstName = candidateName.split(/\s+/)[0] || candidateName
+
+  function choose(next) {
+    if (tab === 'message' && next !== 'message') markSeen()
+    setTab(next)
+  }
+
+  const tabs = [
+    { key: 'agent', label: 'AI Agent', icon: Bot },
+    { key: 'message', label: 'Message', icon: MessageSquareText, unread },
+  ]
+  return (
+    <section className="flex min-h-[32rem] flex-col overflow-hidden rounded-card border border-line bg-white shadow-card lg:min-h-0">
+      <div role="tablist" aria-label="Chat" className="grid grid-cols-2 gap-1.5 border-b border-line p-1.5">
+        {tabs.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.key}
+            aria-label={item.unread ? `${item.label}, ${item.unread} unread` : undefined}
+            onClick={() => choose(item.key)}
+            className={`flex min-h-9.5 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-2 font-display text-[13px] font-bold ${
+              tab === item.key ? 'bg-tint text-brand-dark' : 'text-body hover:text-navy'
+            }`}
+          >
+            <item.icon className="size-4" aria-hidden="true" />
+            {item.label}
+            {item.unread > 0 && (
+              <span className="inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-danger px-1.25 font-sans text-[11px] font-bold text-white">
+                {item.unread}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      <div className={`min-h-0 flex-1 flex-col ${tab === 'agent' ? 'flex' : 'hidden'}`}>
+        <InterviewChat sessionId={sessionId} candidateName={candidateName} />
+      </div>
+      <div className={`min-h-0 flex-1 flex-col ${tab === 'message' ? 'flex' : 'hidden'}`}>
+        <RoomMessages
+          room={room}
+          otherName={firstName}
+          hint={`Only ${firstName} and you see these. They are not saved.`}
+          waitingText={`You can message ${firstName} once they are in the room.`}
+        />
+      </div>
+    </section>
+  )
+}
+
 // The interviewer's interview room: the candidate and suggested questions
-// on the left, the video with the live transcript below it in the middle
-// and the read-only AI Agent chat on the right. The transcript arrives with
-// Module 5.
+// on the left, the video with the live transcript below it in the middle,
+// and the read-only AI Agent chat and messages with the candidate on the
+// right. The transcript arrives with Module 5.
 export default function InterviewRoomPage() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -266,25 +337,25 @@ export default function InterviewRoomPage() {
   const isStarted = interview.status === 'in_progress'
   return (
     <div className="flex min-h-screen flex-col bg-mist lg:h-screen">
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-line bg-white px-6 py-3">
-        <div className="flex items-center gap-4">
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line bg-white px-5 py-2 lg:h-15 lg:py-0">
+        <div className="flex items-center gap-2.5">
           <Link
             to={backTo}
             aria-label="Back to Interviews"
-            className="flex size-10 items-center justify-center rounded-xl text-body hover:bg-mist"
+            className="flex size-9 items-center justify-center rounded-xl text-body hover:bg-mist"
           >
-            <ArrowLeft className="size-5" aria-hidden="true" />
+            <ArrowLeft className="size-4.5" aria-hidden="true" />
           </Link>
           <div>
-            <h1 className="text-lg font-extrabold tracking-tight">
+            <h1 className="text-base font-extrabold tracking-tight">
               Interview with {interview.candidate_name}
             </h1>
-            <p className="text-[13px]">
+            <p className="text-[12.5px]">
               {info.job_title} · {info.job_code}
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           {isStarted ? (
             <StatusChip tone="danger">Live</StatusChip>
           ) : (
@@ -295,14 +366,20 @@ export default function InterviewRoomPage() {
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[360px_minmax(0,1fr)_360px] lg:grid-rows-[minmax(0,1fr)]">
+      {/* The middle column is as wide as the 16:9 video that fits above the
+          transcript, never more than 52% of the row; the candidate and chat
+          columns share the rest, 23 to 25. With a 60px header and 16px
+          padding the middle is 100vh - 92px tall, and the transcript keeps
+          at least 250px or 41% of it, so the video is at most
+          min(100vh - 354px, 59vh - 66px) tall. */}
+      <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[minmax(290px,23fr)_minmax(0,min(52%,calc(min(100vh_-_354px,59vh_-_66px)*16/9)))_minmax(310px,25fr)] lg:grid-rows-[minmax(0,1fr)]">
         <CandidatePanel
           sessionId={interview.id}
           candidateName={interview.candidate_name}
           candidate={candidate}
         />
 
-        <div className="@container flex min-h-0 min-w-0 flex-col gap-3.5 lg:overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-col gap-3 lg:overflow-hidden">
           <AdmitBar
             interview={interview}
             now={now}
@@ -313,9 +390,6 @@ export default function InterviewRoomPage() {
           {room.notice && (
             <p className="rounded-2xl bg-amber-soft px-4 py-2.5 text-sm text-amber">{room.notice}</p>
           )}
-          {/* Full width: 16:9 where it fits, down to 2:1 on a short window and
-              at most 62% of the window height, so the transcript keeps its room
-              and the middle never scrolls. */}
           <VideoStage
             room={room}
             selfName="You"
@@ -323,13 +397,15 @@ export default function InterviewRoomPage() {
             waitingText={isStarted ? `${interview.candidate_name} is joining…` : 'Not joined yet'}
             heading={`Interview with ${interview.candidate_name}`}
             clock={isStarted ? elapsed(interview.started_at, now) : null}
-            frameClassName="h-[min(56.25cqw,max(50cqw,calc(100vh_-_20rem)),62vh)]"
-            renderControls={(isOverlay) => (
+            frameClassName="aspect-video"
+            controlsInside
+            renderControls={(place) => (
               <RoomControls
                 room={room}
                 endLabel={isStarted ? 'End interview' : 'Leave room'}
                 isEnding={isEnding}
-                isOverlay={isOverlay}
+                isOverlay={place === 'overlay'}
+                variant={place === 'inside' ? 'compact' : 'full'}
                 onEnd={() => {
                   leaveFullScreen()
                   setEndError('')
@@ -339,7 +415,7 @@ export default function InterviewRoomPage() {
             )}
           />
           <ComingSoon
-            icon={MessageSquareText}
+            icon={ScrollText}
             title="Live transcript"
             note="Only you see this"
             className="min-h-40 flex-1 lg:min-h-0"
@@ -349,7 +425,11 @@ export default function InterviewRoomPage() {
           </ComingSoon>
         </div>
 
-        <InterviewChat sessionId={interview.id} candidateName={interview.candidate_name} />
+        <ChatPanel
+          sessionId={interview.id}
+          candidateName={interview.candidate_name}
+          room={room}
+        />
       </div>
 
       {isConfirmingEnd && (

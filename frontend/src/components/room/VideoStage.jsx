@@ -49,7 +49,7 @@ function droppedName(name) {
 
 function Label({ children }) {
   return (
-    <span className="flex items-center gap-2 rounded-xl bg-navy/70 px-3 py-1.5 text-sm font-semibold text-white">
+    <span className="flex min-w-0 items-center gap-2 rounded-xl bg-navy/70 px-3 py-1.5 text-sm font-semibold text-white">
       {children}
     </span>
   )
@@ -69,11 +69,15 @@ function useFullScreen(ref) {
   return isFullScreen
 }
 
-// The video in a frame sized by the page, with the controls below it. The big
-// video has a small floating tile at the bottom right, like a video call
-// app; clicking the tile swaps the two. A shared screen always takes the
-// big view, with the other person's camera in the tile. Full screen shows
-// the video on the whole screen with the controls floating over it.
+// The video in a frame sized by the page. The big video has a small
+// floating tile at the bottom right, like a video call app; clicking the
+// tile swaps the two. A shared screen always takes the big view, with the
+// other person's camera in the tile. Full screen shows the video on the
+// whole screen with the controls floating over it.
+//
+// renderControls(place) draws the controls for one place: "below" the
+// frame, "inside" it at the bottom centre (controlsInside), or "overlay"
+// in full screen.
 export default function VideoStage({
   room,
   selfName,
@@ -83,6 +87,7 @@ export default function VideoStage({
   clock,
   frameClassName = '',
   showFullScreenLabel = false,
+  controlsInside = false,
   renderControls,
 }) {
   const stageRef = useRef(null)
@@ -179,11 +184,20 @@ export default function VideoStage({
           </p>
         )}
 
-        <div className={`absolute flex gap-2 ${isFullScreen ? 'bottom-28 left-6' : 'bottom-3.5 left-3.5'}`}>
+        {/* Beside controls inside the frame, the label stops short of them. */}
+        <div
+          className={`absolute flex gap-2 ${isFullScreen ? 'bottom-28 left-6' : 'bottom-3.5 left-3.5'} ${
+            controlsInside && !isFullScreen ? 'max-w-[calc(50%_-_7.5rem)]' : ''
+          }`}
+        >
           <Label>
-            {main.isScreen && <MonitorUp className="size-4" aria-hidden="true" />}
-            {main === other && room.isRemoteMuted && <MicOff className="size-4" aria-hidden="true" />}
-            {main.isScreen ? `${main.name} is sharing the screen` : main.name}
+            {main.isScreen && <MonitorUp className="size-4 shrink-0" aria-hidden="true" />}
+            {main === other && room.isRemoteMuted && (
+              <MicOff className="size-4 shrink-0" aria-hidden="true" />
+            )}
+            <span className="truncate">
+              {main.isScreen ? `${main.name} is sharing the screen` : main.name}
+            </span>
           </Label>
         </div>
         <button
@@ -204,15 +218,24 @@ export default function VideoStage({
             <RefreshCw className="absolute right-2 top-2 size-4 text-white/80" aria-hidden="true" />
           )}
         </button>
+        {!isFullScreen && controlsInside && (
+          <div className="absolute bottom-3.5 left-1/2 -translate-x-1/2">
+            {renderControls('inside')}
+          </div>
+        )}
         {room.remoteAudio.map((audio) => (
           <MediaTrack key={audio.sid} track={audio} />
         ))}
         <ConnectionOverlay room={room} />
       </div>
 
-      <div className={isFullScreen ? 'absolute inset-x-0 bottom-6 flex justify-center' : ''}>
-        {renderControls(isFullScreen)}
-      </div>
+      {isFullScreen ? (
+        <div className="absolute inset-x-0 bottom-6 flex justify-center">
+          {renderControls('overlay')}
+        </div>
+      ) : (
+        !controlsInside && renderControls('below')
+      )}
     </div>
   )
 }
