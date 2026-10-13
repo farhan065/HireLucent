@@ -109,3 +109,11 @@ Interview details:
 """
 
 ERROR_REPLY = "Sorry, I could not complete that. Please try again in a moment."
+
+# In the interview room: the AI service did not answer in time, or the
+# turn failed for another reason.
+ROOM_BUSY_REPLY = (
+    "The AI service is busy right now, so the AI Agent could not answer. "
+    "Try again in a minute."
+)
+ROOM_ERROR_REPLY = "The AI Agent could not answer that. Try again in a moment."

@@ -36,12 +36,19 @@ from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
 from app.ai.client import run_with_retries
-from app.ai.models import get_chat_model
-from app.core.errors import AppError
+from app.ai.models import get_chat_model, get_room_chat_model
+from app.core.config import get_settings
+from app.core.errors import AppError, ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import MAX_ATTEMPTS, BaseState, capture_errors
 from app.graphs.checkpointer import get_checkpointer
-from app.graphs.recruiter.prompts import ERROR_REPLY, INTERVIEW_PROMPT, SYSTEM_PROMPT
+from app.graphs.recruiter.prompts import (
+    ERROR_REPLY,
+    INTERVIEW_PROMPT,
+    ROOM_BUSY_REPLY,
+    ROOM_ERROR_REPLY,
+    SYSTEM_PROMPT,
+)
 from app.rag import mcp_client
 from app.services import interview_context
 from app.services.interview_times import now_description
@@ -108,9 +115,10 @@ def get_agent_model() -> Runnable[LanguageModelInput, AIMessage]:
 
 def get_interview_model() -> Runnable[LanguageModelInput, AIMessage]:
     """The chat model for an interview room, with the question bank search
-    as its only tool."""
+    as its only tool. It waits less than the AI Agent page does."""
     tools = _mcp_tools(interview=True)
-    return get_chat_model().bind_tools(tools) if tools else get_chat_model()
+    model = get_room_chat_model()
+    return model.bind_tools(tools) if tools else model
 
 
 def _in_interview(state: RecruiterState) -> bool:
@@ -130,15 +138,20 @@ def load_context(state: RecruiterState) -> dict:
 @capture_errors
 def agent(state: RecruiterState) -> dict:
     """Ask the model what to do next: answer, or use a tool."""
+    max_attempts = None
     if _in_interview(state):
         prompt = f"{INTERVIEW_PROMPT}{state.get('interview_details') or ''}"
         model = get_interview_model()
+        # Fewer tries, so a slow AI service gives up within about a minute.
+        max_attempts = get_settings().room_ai_max_attempts
     else:
         # Today's date, so a day such as "Tuesday" means the right one.
         prompt = f"{SYSTEM_PROMPT}\n{now_description(datetime.now(timezone.utc))}"
         model = get_agent_model()
     messages = [SystemMessage(prompt), *state["messages"]]
-    response = run_with_retries("recruiter_agent", lambda: model.invoke(messages))
+    response = run_with_retries(
+        "recruiter_agent", lambda: model.invoke(messages), max_attempts=max_attempts
+    )
     return {"messages": [response]}
 
 
@@ -278,8 +291,17 @@ def _describe_failure(exc: Exception) -> str:
 
 
 def handle_error(state: RecruiterState) -> dict:
-    """Give the interviewer a clear message when the turn cannot be completed."""
-    return {"messages": [AIMessage(ERROR_REPLY)], "error": None}
+    """Give the interviewer a clear message when the turn cannot be completed.
+
+    In an interview room the reply says whether the AI service was busy,
+    and is marked as failed so the room can show it differently."""
+    if not _in_interview(state):
+        return {"messages": [AIMessage(ERROR_REPLY)], "error": None}
+    is_busy = state.get("error") == ServiceUnavailableError.__name__
+    reply = AIMessage(
+        ROOM_BUSY_REPLY if is_busy else ROOM_ERROR_REPLY, additional_kwargs={"failed": True}
+    )
+    return {"messages": [reply], "error": None}
 
 
 def respond(state: RecruiterState) -> dict:

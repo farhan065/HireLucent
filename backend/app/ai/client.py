@@ -64,12 +64,15 @@ def is_rate_limit(exc: Exception) -> bool:
     )
 
 
-def run_with_retries(operation: str, call: Callable[[], T]) -> T:
+def run_with_retries(
+    operation: str, call: Callable[[], T], max_attempts: int | None = None
+) -> T:
     """Run one AI call, retrying on failure with a growing wait.
 
-    Raises ServiceUnavailableError when every attempt has failed.
+    max_attempts defaults to the AI_MAX_ATTEMPTS setting. Raises
+    ServiceUnavailableError when every attempt has failed.
     """
-    max_attempts = get_settings().ai_max_attempts
+    max_attempts = max_attempts or get_settings().ai_max_attempts
     for attempt in range(1, max_attempts + 1):
         try:
             return call()

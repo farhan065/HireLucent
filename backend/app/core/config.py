@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     ai_timeout_seconds: int = 60
     ai_max_attempts: int = 3
+    # The interview room's AI Agent chat gives up sooner, so a slow AI
+    # service never leaves the interviewer waiting for minutes.
+    room_ai_timeout_seconds: int = Field(default=30, ge=5)
+    room_ai_max_attempts: int = Field(default=2, ge=1)
     # The provider's limit for your model, minus a small safety margin.
     # Calls are paced to stay under it.
     llm_requests_per_minute: int = Field(default=14, ge=1)

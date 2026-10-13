@@ -40,8 +40,14 @@ def get_background_rate_limiter() -> InMemoryRateLimiter:
 
 
 @lru_cache
-def get_chat_model() -> BaseChatModel:
-    """Return the configured chat model.
+def get_rate_limiter() -> InMemoryRateLimiter:
+    """The pace shared by every chat model call, so all of them together
+    stay under the provider's per-minute limit."""
+    return build_rate_limiter(get_settings().llm_requests_per_minute)
+
+
+def build_chat_model(timeout_seconds: int) -> BaseChatModel:
+    """The configured chat model, waiting at most timeout_seconds per call.
 
     temperature=0 keeps answers as repeatable as possible, which matters for
     stable candidate scores. Retries are handled in app.ai.client, so the
@@ -51,13 +57,25 @@ def get_chat_model() -> BaseChatModel:
     options = {
         "model": settings.llm_model,
         "temperature": 0,
-        "timeout": settings.ai_timeout_seconds,
+        "timeout": timeout_seconds,
         "max_retries": 0,
-        "rate_limiter": build_rate_limiter(settings.llm_requests_per_minute),
+        "rate_limiter": get_rate_limiter(),
     }
     if settings.llm_provider == "openai":
         return ChatOpenAI(api_key=settings.openai_api_key, **options)
     return ChatGoogleGenerativeAI(google_api_key=settings.gemini_api_key, **options)
+
+
+@lru_cache
+def get_chat_model() -> BaseChatModel:
+    """Return the configured chat model."""
+    return build_chat_model(get_settings().ai_timeout_seconds)
+
+
+@lru_cache
+def get_room_chat_model() -> BaseChatModel:
+    """The chat model for the interview room, with a shorter wait."""
+    return build_chat_model(get_settings().room_ai_timeout_seconds)
 
 
 @lru_cache

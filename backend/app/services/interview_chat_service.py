@@ -55,7 +55,12 @@ def _view(messages: list[AnyMessage]) -> list[dict]:
                 used_bank = used_bank or _found_questions(message.text)
         elif isinstance(message, AIMessage) and message.text.strip():
             view.append(
-                {"role": "agent", "text": message.text, "from_question_bank": used_bank}
+                {
+                    "role": "agent",
+                    "text": message.text,
+                    "from_question_bank": used_bank,
+                    "failed": bool(message.additional_kwargs.get("failed")),
+                }
             )
             used_bank = False
     return view

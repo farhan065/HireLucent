@@ -10,10 +10,12 @@ from langchain_core.language_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
+from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError
 from app.core.security import create_access_token
 from app.db.session import get_db
 from app.graphs.recruiter import graph as recruiter
+from app.graphs.recruiter.prompts import ROOM_BUSY_REPLY
 from app.main import create_app
 from app.mcp_servers import rag_server
 from app.models import Candidate, InterviewSession, Job, ScreeningResult
@@ -213,7 +215,12 @@ def test_the_chat_answers_and_keeps_its_history(monkeypatch: pytest.MonkeyPatch)
 
     assert chat == [
         {"role": "interviewer", "text": "What is weak?"},
-        {"role": "agent", "text": "Docker is partly met.", "from_question_bank": False},
+        {
+            "role": "agent",
+            "text": "Docker is partly met.",
+            "from_question_bank": False,
+            "failed": False,
+        },
     ]
     assert interview_chat_service.read(db, graph, 9) == chat
 
@@ -260,6 +267,42 @@ def test_bank_answers_are_marked_and_kept_to_the_role(monkeypatch: pytest.Monkey
 
     assert chat[-1]["from_question_bank"] is True
     assert searched == [{"query": "kubernetes", "role": "Backend Engineer"}]
+
+
+class _SlowModel:
+    """A model whose every call fails, like an AI service that is busy."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, messages):
+        self.calls += 1
+        raise TimeoutError("504 DEADLINE_EXCEEDED")
+
+
+def test_a_busy_ai_service_gives_up_sooner_with_a_clear_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _SlowModel()
+    monkeypatch.setattr(recruiter, "get_interview_model", lambda: model)
+    monkeypatch.setattr(
+        interview_context, "for_session", lambda session_id: ("details", "Backend Engineer")
+    )
+    monkeypatch.setattr("app.ai.client.time.sleep", lambda seconds: None)
+    graph = recruiter.build_recruiter_graph(InMemorySaver())
+
+    chat = interview_chat_service.send(FakeDB(_session()), graph, 9, 1, "Hello")
+
+    # The room tries fewer times than the AI Agent page.
+    assert model.calls == get_settings().room_ai_max_attempts == 2
+    assert chat[-1] == {
+        "role": "agent",
+        "text": ROOM_BUSY_REPLY,
+        "from_question_bank": False,
+        "failed": True,
+    }
+    # The reply is kept with the chat, still marked.
+    assert interview_chat_service.read(FakeDB(_session()), graph, 9)[-1]["failed"] is True
 
 
 def test_the_chat_is_closed_after_the_interview(monkeypatch: pytest.MonkeyPatch) -> None:

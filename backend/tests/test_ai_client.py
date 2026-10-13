@@ -55,6 +55,20 @@ def test_gives_a_clear_error_after_the_last_attempt() -> None:
     assert "internal detail" not in error.value.message
 
 
+def test_a_caller_can_ask_for_fewer_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(client.time, "sleep", lambda seconds: None)
+    attempts = []
+
+    def failing_call() -> str:
+        attempts.append(1)
+        raise ConnectionError("down")
+
+    with pytest.raises(ServiceUnavailableError):
+        client.run_with_retries("test", failing_call, max_attempts=2)
+
+    assert len(attempts) == 2
+
+
 def test_generate_text_returns_the_model_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_model = FakeListChatModel(responses=["Hello from the model"])
     monkeypatch.setattr(client, "get_chat_model", lambda: fake_model)

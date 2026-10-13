@@ -121,6 +121,9 @@ class InterviewChatMessage(BaseModel):
     from_question_bank: bool = Field(
         default=False, description="The answer quotes questions from the question bank."
     )
+    failed: bool = Field(
+        default=False, description="The AI Agent could not answer; the text says why."
+    )
 
 
 class InterviewChatRequest(BaseModel):
