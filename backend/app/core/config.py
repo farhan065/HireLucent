@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     livekit_api_url: str = "http://livekit:7880"
     livekit_api_key: str = ""
     livekit_api_secret: str = ""
+    # The transcription worker runs inside the livekit service's network,
+    # where the video server is localhost (the address it announces).
+    capture_livekit_url: str = "ws://localhost:7880"
+    # How often the worker looks for interviews that started or ended.
+    capture_poll_seconds: float = Field(default=3, gt=0, le=60)
     # How many minutes before an interview's start the candidate can join.
     join_opens_minutes_before: int = Field(default=10, ge=0, le=60)
     # How far ahead an interview must be scheduled. Set it to 1 while testing

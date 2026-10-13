@@ -142,6 +142,22 @@ services:
     networks:
       - hirelucent
 
+  # Joins running interviews as a hidden listener and receives each person's
+  # audio separately, for speech-to-text. It stores no audio or video.
+  transcription-worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.transcription_worker"]
+    env_file: .env
+    environment:
+      LOG_SERVICE_NAME: transcription-worker
+    # Shares the livekit service's network, where the video server is
+    # localhost: the address it announces for media (see livekit.yaml).
+    network_mode: "service:livekit"
+    depends_on:
+      - livekit
+      - postgres
+
   chromadb:
     image: chromadb/chroma:1.5.3
     restart: unless-stopped
