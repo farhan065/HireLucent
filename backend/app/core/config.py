@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     # How close a stored job description must be to count as a reference.
     # Cosine distance: 0 is identical, 1 is unrelated.
     jd_reference_max_distance: float = Field(default=0.6, ge=0, le=2)
+    # How close a question in the question bank must be to the topic asked.
+    question_bank_max_distance: float = Field(default=0.6, ge=0, le=2)
 
     # The Blogger MCP server, which publishes approved job posts.
     mcp_blogger_url: str = "http://mcp-blogger:8002/mcp"

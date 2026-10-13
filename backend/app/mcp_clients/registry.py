@@ -32,7 +32,7 @@ def mcp_servers() -> dict[str, McpServer]:
         # Knowledge Base search for the AI Agent (read-only).
         "rag": McpServer(
             url=settings.mcp_rag_url,
-            allowed_tools=frozenset({"search_jd_references"}),
+            allowed_tools=frozenset({"search_jd_references", "search_question_bank"}),
             offer_to_agent=True,
         ),
         # Publishing approved job posts. Called only by the backend.
