@@ -1,5 +1,6 @@
 import { Maximize, MicOff, Minimize, MonitorUp, RefreshCw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import ConnectionOverlay, { RemoteDropped } from './ConnectionOverlay.jsx'
 import MediaTrack from './MediaTrack.jsx'
 
 function initials(name) {
@@ -37,6 +38,13 @@ function Feed({ track, name, isMirrored, isScreen, placeholder, size = 'large' }
       {size === 'large' && <span className="text-[15px] font-semibold">{placeholder}</span>}
     </div>
   )
+}
+
+// "Nadia Karim's" and "Nadia Karim", or "The interviewer's" and "the
+// interviewer" when the other person is the interviewer.
+function droppedName(name) {
+  if (name === 'Interviewer') return { title: "The interviewer's", waiting: 'the interviewer' }
+  return { title: `${name}'s`, waiting: name }
 }
 
 function Label({ children }) {
@@ -97,6 +105,8 @@ export default function VideoStage({
     tile = isSwapped ? other : self
   }
   const otherPlaceholder = room.isRemoteHere ? 'Camera off' : waitingText
+  // The other person dropped while this person is still connected.
+  const isOtherDropped = Boolean(room.remoteLostAt) && !room.lostAt && !room.isReplaced
 
   function toggleFullScreen() {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => null)
@@ -115,7 +125,15 @@ export default function VideoStage({
             : `relative mx-auto w-full shrink-0 overflow-hidden rounded-card bg-[#16233f] shadow-[0_14px_34px_rgb(11_31_75/0.12)] ${frameClassName}`
         }
       >
-        <Feed {...main} placeholder={main === other ? otherPlaceholder : 'Camera off'} />
+        {main === other && isOtherDropped ? (
+          <RemoteDropped
+            name={droppedName(otherName)}
+            initials={initials(otherName)}
+            since={room.remoteLostAt}
+          />
+        ) : (
+          <Feed {...main} placeholder={main === other ? otherPlaceholder : 'Camera off'} />
+        )}
 
         {isFullScreen ? (
           <div className="absolute inset-x-6 top-5 flex items-center justify-between gap-4">
@@ -189,6 +207,7 @@ export default function VideoStage({
         {room.remoteAudio.map((audio) => (
           <MediaTrack key={audio.sid} track={audio} />
         ))}
+        <ConnectionOverlay room={room} />
       </div>
 
       <div className={isFullScreen ? 'absolute inset-x-0 bottom-6 flex justify-center' : ''}>

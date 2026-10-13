@@ -6,6 +6,9 @@ const STATES = {
   reconnecting: { label: 'Reconnecting…', className: 'bg-amber-soft text-amber', icon: Wifi },
   signalReconnecting: { label: 'Reconnecting…', className: 'bg-amber-soft text-amber', icon: Wifi },
   disconnected: { label: 'Disconnected', className: 'bg-danger-soft text-danger', icon: WifiOff },
+  // Lost and being rejoined by the app, or replaced by another tab.
+  lost: { label: 'Reconnecting…', className: 'bg-amber-soft text-amber', icon: Wifi },
+  replaced: { label: 'Disconnected', className: 'bg-danger-soft text-danger', icon: WifiOff },
 }
 
 // The video connection, in words and colour.
