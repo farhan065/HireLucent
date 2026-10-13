@@ -1,7 +1,7 @@
 import { CalendarDays, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { apiFile } from '../../lib/api.js'
+import { openCv } from '../../lib/jobs.js'
 import StatusChip from '../StatusChip.jsx'
 
 export const HEADING = 'px-5 py-2.5 text-left text-xs font-semibold uppercase tracking-wider'
@@ -25,20 +25,15 @@ export function Initials({ name }) {
   )
 }
 
-// Opens the CV in a new browser tab. The file needs the access token, so
-// it is downloaded first and then shown from memory.
+// Opens the CV in a new browser tab.
 export function ViewCvLink({ candidateId }) {
   const [error, setError] = useState('')
 
   async function handleClick() {
     setError('')
-    // Opened at once, so the browser does not block it as a pop-up.
-    const tab = window.open('', '_blank')
     try {
-      const file = await apiFile(`/candidates/${candidateId}/cv`)
-      tab.location = URL.createObjectURL(file)
+      await openCv(candidateId)
     } catch (openError) {
-      tab.close()
       setError(openError.message)
     }
   }
