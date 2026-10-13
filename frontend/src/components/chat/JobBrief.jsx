@@ -1,4 +1,4 @@
-import { Check, ExternalLink, Link2, Pencil } from 'lucide-react'
+import { Check, ExternalLink, Link2, Lock, Pencil } from 'lucide-react'
 import { useState } from 'react'
 import RequirementList from '../RequirementList.jsx'
 import SidePanel from '../SidePanel.jsx'
@@ -7,20 +7,23 @@ import WeightsBar from '../WeightsBar.jsx'
 import EditProfilePanel from './EditProfilePanel.jsx'
 import Markdown from './Markdown.jsx'
 
-function journeySteps(view) {
+const SCREENED_STAGES = ['cvs_screened', 'interviews_scheduled']
+
+// "stage" is the saved job's stage, if there is a saved job.
+function journeySteps(view, stage) {
   const { brief, items } = view
   return [
     { label: 'Role described', done: items.some((item) => item.kind === 'user') },
     { label: 'Description approved', done: brief.description?.status === 'approved' },
     { label: 'Requirements confirmed', done: brief.requirements_status === 'confirmed' },
     { label: 'Published', done: Boolean(brief.post_url) },
-    { label: 'CVs screened', done: false },
-    { label: 'Interviews scheduled', done: false },
+    { label: 'CVs screened', done: SCREENED_STAGES.includes(stage) },
+    { label: 'Interviews scheduled', done: stage === 'interviews_scheduled' },
   ]
 }
 
-function Journey({ view }) {
-  const steps = journeySteps(view)
+function Journey({ view, stage }) {
+  const steps = journeySteps(view, stage)
   const current = steps.findIndex((step) => !step.done)
   return (
     <ol className="flex flex-col gap-2.5">
@@ -91,7 +94,22 @@ function Section({ title, chip, watch, children }) {
   )
 }
 
-function EditButton({ onClick }) {
+// Disabled with a lock once interviews are scheduled. The note below the
+// requirements says why.
+function EditButton({ isLocked, onClick }) {
+  if (isLocked) {
+    return (
+      <button
+        type="button"
+        disabled
+        aria-describedby="rules-lock-note"
+        className="inline-flex min-h-[34px] cursor-not-allowed items-center gap-1.5 rounded-full border-[1.5px] border-line bg-mist px-3 text-[13.5px] font-semibold text-body/70"
+      >
+        <Lock className="size-3.5" aria-hidden="true" />
+        Edit
+      </button>
+    )
+  }
   return (
     <button
       type="button"
@@ -106,8 +124,9 @@ function EditButton({ onClick }) {
 
 // The current state of the job, beside the conversation. Changes are made in
 // the conversation, except the requirements and weights of a saved job,
-// which can also be edited here. "onProfileSaved" runs after such an edit.
-export default function JobBrief({ view, onProfileSaved }) {
+// which can also be edited here until interviews are scheduled ("isLocked").
+// "onProfileSaved" runs after such an edit.
+export default function JobBrief({ view, stage = null, isLocked = false, onProfileSaved }) {
   const [isReading, setIsReading] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const { brief } = view
@@ -125,7 +144,7 @@ export default function JobBrief({ view, onProfileSaved }) {
       </div>
 
       <Section title="Journey">
-        <Journey view={view} />
+        <Journey view={view} stage={stage} />
       </Section>
 
       <Section
@@ -162,7 +181,7 @@ export default function JobBrief({ view, onProfileSaved }) {
               <StatusChip tone={brief.requirements_status === 'confirmed' ? 'success' : 'info'}>
                 {brief.requirements_status === 'confirmed' ? 'Confirmed' : 'Proposed'}
               </StatusChip>
-              {canEdit && <EditButton onClick={() => setIsEditing(true)} />}
+              {canEdit && <EditButton isLocked={isLocked} onClick={() => setIsEditing(true)} />}
             </div>
           )
         }
@@ -177,7 +196,16 @@ export default function JobBrief({ view, onProfileSaved }) {
                 : 'none'}
               .
             </p>
-            {canEdit && (
+            {canEdit && isLocked && (
+              <p
+                id="rules-lock-note"
+                className="rounded-2xl bg-amber-soft px-3.5 py-3 text-[13.5px] leading-normal text-amber"
+              >
+                The rules are locked because interviews are scheduled for this job. Every
+                candidate you interview keeps the scores made with the same rules.
+              </p>
+            )}
+            {canEdit && !isLocked && (
               <p className="text-[12.5px] text-body/70">
                 Changing these after screening means screening every CV again.
               </p>

@@ -1,6 +1,7 @@
-import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
-import { apiFile } from '../../lib/api.js'
+import { Link } from 'react-router'
+import { openCv } from '../../lib/jobs.js'
 import StatusChip from '../StatusChip.jsx'
 
 export const HEADING = 'px-5 py-2.5 text-left text-xs font-semibold uppercase tracking-wider'
@@ -24,20 +25,15 @@ export function Initials({ name }) {
   )
 }
 
-// Opens the CV in a new browser tab. The file needs the access token, so
-// it is downloaded first and then shown from memory.
+// Opens the CV in a new browser tab.
 export function ViewCvLink({ candidateId }) {
   const [error, setError] = useState('')
 
   async function handleClick() {
     setError('')
-    // Opened at once, so the browser does not block it as a pop-up.
-    const tab = window.open('', '_blank')
     try {
-      const file = await apiFile(`/candidates/${candidateId}/cv`)
-      tab.location = URL.createObjectURL(file)
+      await openCv(candidateId)
     } catch (openError) {
-      tab.close()
       setError(openError.message)
     }
   }
@@ -58,6 +54,20 @@ export function ViewCvLink({ candidateId }) {
         </span>
       )}
     </span>
+  )
+}
+
+// Opens the Interviews tab, for a candidate who has an interview.
+export function SeeInterviewLink() {
+  return (
+    <Link
+      to="../interviews"
+      relative="path"
+      className="flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-full border-[1.5px] border-amber/30 bg-white px-3.5 text-sm font-semibold text-amber hover:bg-amber-soft"
+    >
+      <CalendarDays className="size-4" aria-hidden="true" />
+      See interview
+    </Link>
   )
 }
 

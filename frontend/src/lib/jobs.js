@@ -1,5 +1,19 @@
 // Shared helpers for showing jobs: their stage, their cards and their dates.
-import { apiRequest } from './api.js'
+import { apiFile, apiRequest } from './api.js'
+
+// Opens a candidate's CV in a new browser tab. The file needs the access
+// token, so it is downloaded first and then shown from memory. The tab is
+// opened at once, so the browser does not block it as a pop-up.
+export async function openCv(candidateId) {
+  const tab = window.open('', '_blank')
+  try {
+    const file = await apiFile(`/candidates/${candidateId}/cv`)
+    tab.location = URL.createObjectURL(file)
+  } catch (openError) {
+    tab.close()
+    throw openError
+  }
+}
 
 // The stage a job has reached, in the order of the Journey in the job brief.
 // "group" is the filter the stage belongs to on the Jobs page and Dashboard.
@@ -106,3 +120,7 @@ export function formatDate(value) {
 
 // How a shortlisted candidate is marked in every list.
 export const SHORTLISTED_CHIP = { tone: 'teal', label: 'Shortlisted' }
+
+// A candidate with an interview, marked in the same colour as on the
+// Interviews tab. Their shortlist cannot change until it is cancelled.
+export const INTERVIEW_CHIP = { tone: 'amber', label: 'Interview scheduled' }

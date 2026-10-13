@@ -27,3 +27,8 @@ google-auth==2.60.0
 google-auth-oauthlib==1.5.0
 google-api-python-client==2.201.0
 markdown-it-py==4.2.0
+livekit-api==1.2.1
+# Joins interview rooms to receive each person's audio (transcription worker).
+livekit==1.1.20
+# Time zone data for Windows, which has none built in.
+tzdata==2025.2

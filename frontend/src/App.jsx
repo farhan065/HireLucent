@@ -1,9 +1,10 @@
+import { lazy, Suspense } from 'react'
 import { Route, Routes } from 'react-router'
 import RequireInterviewer from './auth/RequireInterviewer.jsx'
 import AppLayout from './layouts/AppLayout.jsx'
-import AssistantPage from './pages/AssistantPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import ApplicationsTab from './pages/job/ApplicationsTab.jsx'
+import InterviewsTab from './pages/job/InterviewsTab.jsx'
 import ScreeningTab from './pages/job/ScreeningTab.jsx'
 import JobPage, { JobIndex } from './pages/JobPage.jsx'
 import JobsPage from './pages/JobsPage.jsx'
@@ -12,13 +13,37 @@ import LandingPage from './pages/LandingPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
 
+// The AI Agent and the video pages are loaded only when opened, so their
+// libraries do not slow down the rest of the app.
+const AssistantPage = lazy(() => import('./pages/AssistantPage.jsx'))
+const InterviewRoomPage = lazy(() => import('./pages/InterviewRoomPage.jsx'))
+// The candidate's private interview link. Candidates never sign in.
+const InterviewJoinPage = lazy(() => import('./pages/InterviewJoinPage.jsx'))
+
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/interview/:token"
+        element={
+          <Suspense fallback={null}>
+            <InterviewJoinPage />
+          </Suspense>
+        }
+      />
       {/* Everything under /app is for signed-in interviewers only. */}
       <Route element={<RequireInterviewer />}>
+        {/* The interview room fills the screen, without the sidebar. */}
+        <Route
+          path="/app/interviews/:sessionId/room"
+          element={
+            <Suspense fallback={null}>
+              <InterviewRoomPage />
+            </Suspense>
+          }
+        />
         <Route path="/app" element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="jobs" element={<JobsPage />} />
@@ -26,8 +51,16 @@ export default function App() {
             <Route index element={<JobIndex />} />
             <Route path="applications" element={<ApplicationsTab />} />
             <Route path="screening" element={<ScreeningTab />} />
+            <Route path="interviews" element={<InterviewsTab />} />
           </Route>
-          <Route path="assistant/:threadId?" element={<AssistantPage />} />
+          <Route
+            path="assistant/:threadId?"
+            element={
+              <Suspense fallback={null}>
+                <AssistantPage />
+              </Suspense>
+            }
+          />
           <Route path="knowledge" element={<KnowledgeBasePage />} />
         </Route>
       </Route>

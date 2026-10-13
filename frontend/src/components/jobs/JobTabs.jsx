@@ -47,8 +47,16 @@ function Tab({ number, label, to, isCurrent, isDone, badge }) {
 }
 
 // The stages of one job, in order. The same row is shown on the job's pages
-// and above its conversation with the AI Agent.
-export default function JobTabs({ job, threadId, waiting = 0, current }) {
+// and above its conversation with the AI Agent. "today" is the number of
+// interviews still to come today, "inWaitingRoom" the candidates waiting now.
+export default function JobTabs({
+  job,
+  threadId,
+  waiting = 0,
+  today = 0,
+  inWaitingRoom = 0,
+  current,
+}) {
   const stage = jobStage(job)
   const isPublished = job.status === 'published'
   const tabs = [
@@ -75,7 +83,25 @@ export default function JobTabs({ job, threadId, waiting = 0, current }) {
       to: `/app/jobs/${job.id}/screening`,
       isDone: stage === 'cvs_screened' || stage === 'interviews_scheduled',
     },
-    { key: 'interviews', label: 'Interviews' },
+    {
+      key: 'interviews',
+      label: 'Interviews',
+      // Open once the job is published. Until someone is shortlisted it
+      // explains what to do first.
+      to: isPublished ? `/app/jobs/${job.id}/interviews` : undefined,
+      badge:
+        inWaitingRoom > 0 ? (
+          <span className="rounded-full bg-success-soft px-2 py-0.5 text-xs font-semibold text-success">
+            {inWaitingRoom} waiting
+          </span>
+        ) : (
+          today > 0 && (
+            <span className="rounded-full bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber">
+              {today} today
+            </span>
+          )
+        ),
+    },
     { key: 'decision', label: 'Decision' },
   ]
 

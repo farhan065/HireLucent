@@ -85,6 +85,29 @@ services:
     networks:
       - hirelucent
 
+  mcp-google:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.mcp_servers.google_server"]
+    env_file: .env
+    environment:
+      LOG_SERVICE_NAME: mcp-google
+    volumes:
+      # The Google sign-in, read only.
+      - ./secrets:/secrets:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('localhost', 8003), timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - hirelucent
+
   mcp-blogger:
     build: ./mcp-blogger
     restart: unless-stopped
@@ -102,6 +125,38 @@ services:
       start_period: 10s
     networks:
       - hirelucent
+
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    environment:
+      # "key: secret", the same pair the backend uses to sign room tokens.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    networks:
+      - hirelucent
+
+  # Joins running interviews as a hidden listener and receives each person's
+  # audio separately, for speech-to-text. It stores no audio or video.
+  transcription-worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.transcription_worker"]
+    env_file: .env
+    environment:
+      LOG_SERVICE_NAME: transcription-worker
+    # Shares the livekit service's network, where the video server is
+    # localhost: the address it announces for media (see livekit.yaml).
+    network_mode: "service:livekit"
+    depends_on:
+      - livekit
+      - postgres
 
   chromadb:
     image: chromadb/chroma:1.5.3

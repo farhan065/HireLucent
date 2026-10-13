@@ -1,0 +1,215 @@
+import { Trash2, Video } from 'lucide-react'
+import { Link } from 'react-router'
+import {
+  dayLabel,
+  formatShortDate,
+  joinState,
+  minutesBetween,
+  opensLabel,
+  scoreLabel,
+  span,
+  waitingFor,
+} from '../../lib/interviews.js'
+import StatusChip from '../StatusChip.jsx'
+
+const GRID =
+  'grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.5fr)_minmax(0,1.1fr)_minmax(0,1.6fr)] items-center gap-4 px-6'
+const LINK = 'min-h-10 text-sm font-semibold'
+
+function minutesUntil(date, now) {
+  return Math.max(1, Math.ceil((new Date(date) - now) / 60000))
+}
+
+// The status chip, worked out from the stored status and the time now.
+function statusOf(interview, rules, now) {
+  if (interview.status === 'cancelled') return { tone: 'neutral', label: 'Cancelled' }
+  if (interview.status === 'completed') return { tone: 'success', label: 'Completed' }
+  if (interview.status === 'in_progress') return { tone: 'info', label: 'In progress' }
+  if (interview.candidate_waiting) {
+    return { tone: 'success', label: `Waiting · ${waitingFor(interview, now)}`, row: 'bg-success-soft/50' }
+  }
+  const state = joinState(interview, rules, now)
+  if (state === 'missed') return { tone: 'danger', label: 'Missed' }
+  if (state === 'open') {
+    const label =
+      new Date(interview.scheduled_start) > now
+        ? `Starts in ${minutesUntil(interview.scheduled_start, now)} min`
+        : 'Waiting to start'
+    return { tone: 'amber', label, row: 'bg-amber-soft/40' }
+  }
+  return { tone: 'amber', label: 'Scheduled' }
+}
+
+function When({ interview, now }) {
+  const { status, scheduled_start: start, scheduled_end: end } = interview
+  if (status === 'cancelled') {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[15px] text-body/70 line-through">{dayLabel(start, now)}</span>
+        <span className="text-[13.5px]">Cancelled on {formatShortDate(interview.cancelled_at)}</span>
+      </div>
+    )
+  }
+  const length =
+    status === 'completed' && interview.started_at && interview.ended_at
+      ? `took ${minutesBetween(interview.started_at, interview.ended_at)} min`
+      : `${minutesBetween(start, end)} min`
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[15px] text-navy">{dayLabel(start, now)}</span>
+      <span className="text-[13.5px]">
+        {span(start, end)} · {length}
+      </span>
+    </div>
+  )
+}
+
+// Opens the interview room once Join is open; before that it says when.
+function StartButton({ interview, rules, now }) {
+  if (joinState(interview, rules, now) !== 'open') {
+    return (
+      <button
+        type="button"
+        disabled
+        className="inline-flex min-h-10.5 cursor-not-allowed items-center whitespace-nowrap rounded-full bg-mist px-4.5 font-display text-sm font-bold text-body"
+      >
+        Opens {opensLabel(interview, rules, now)}
+      </button>
+    )
+  }
+  return (
+    <Link
+      to={`/app/interviews/${interview.id}/room`}
+      className="inline-flex min-h-10.5 items-center gap-2 whitespace-nowrap rounded-full bg-brand px-4.5 font-display text-sm font-bold text-white shadow-button hover:bg-brand-dark"
+    >
+      <Video className="size-4.5" aria-hidden="true" />
+      {interview.status === 'in_progress' ? 'Rejoin interview' : 'Start interview'}
+    </Link>
+  )
+}
+
+function Actions({
+  interview,
+  rules,
+  now,
+  canScheduleAgain,
+  onMove,
+  onCancel,
+  onScheduleAgain,
+  onDelete,
+}) {
+  const { status } = interview
+  if (status === 'cancelled') {
+    return (
+      <>
+        {canScheduleAgain && (
+          <button
+            type="button"
+            onClick={onScheduleAgain}
+            className={`${LINK} text-brand hover:text-brand-dark`}
+          >
+            Schedule again
+          </button>
+        )}
+        <button
+          type="button"
+          aria-label={`Delete the cancelled interview of ${interview.candidate_name}`}
+          title="Delete from the history"
+          onClick={onDelete}
+          className="flex size-10 shrink-0 items-center justify-center rounded-xl text-body hover:bg-danger-soft hover:text-danger"
+        >
+          <Trash2 className="size-4.5" aria-hidden="true" />
+        </button>
+      </>
+    )
+  }
+  if (status === 'completed') return null
+  const isMissed = joinState(interview, rules, now) === 'missed'
+  return (
+    <>
+      {status === 'scheduled' && (
+        <>
+          <button type="button" onClick={onMove} className={`${LINK} text-brand hover:text-brand-dark`}>
+            Reschedule
+          </button>
+          <button type="button" onClick={onCancel} className={`${LINK} text-danger hover:opacity-80`}>
+            Cancel
+          </button>
+        </>
+      )}
+      {!isMissed && <StartButton interview={interview} rules={rules} now={now} />}
+    </>
+  )
+}
+
+// Every interview of the job: upcoming first, then finished and cancelled.
+export default function InterviewList({
+  interviews,
+  scores,
+  rules,
+  now,
+  canScheduleAgain,
+  onMove,
+  onCancel,
+  onScheduleAgain,
+  onDelete,
+}) {
+  return (
+    <section
+      aria-label="Interviews"
+      className="overflow-hidden rounded-card border border-line bg-white shadow-card"
+    >
+      <div className="overflow-x-auto">
+        <div className="min-w-[860px]">
+          <div
+            className={`${GRID} border-b border-line bg-mist py-3.5 text-xs font-semibold uppercase tracking-wider`}
+          >
+            <span>Candidate</span>
+            <span>When (your time)</span>
+            <span>Status</span>
+            <span className="text-right">Actions</span>
+          </div>
+          {interviews.map((interview) => {
+            const status = statusOf(interview, rules, now)
+            const isCancelled = interview.status === 'cancelled'
+            return (
+              <div
+                key={interview.id}
+                className={`${GRID} border-b border-line/60 py-4.5 last:border-b-0 ${
+                  status.row ?? ''
+                }`}
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span
+                    className={`text-[15.5px] font-semibold ${
+                      isCancelled ? 'text-body/70' : 'text-navy'
+                    }`}
+                  >
+                    {interview.candidate_name}
+                  </span>
+                  <span className="text-[13px]">{scoreLabel(scores.get(interview.candidate_id))}</span>
+                </div>
+                <When interview={interview} now={now} />
+                <div>
+                  <StatusChip tone={status.tone}>{status.label}</StatusChip>
+                </div>
+                <div className="flex items-center justify-end gap-3.5">
+                  <Actions
+                    interview={interview}
+                    rules={rules}
+                    now={now}
+                    canScheduleAgain={canScheduleAgain(interview.candidate_id)}
+                    onMove={() => onMove(interview)}
+                    onCancel={() => onCancel(interview)}
+                    onScheduleAgain={() => onScheduleAgain(interview.candidate_id)}
+                    onDelete={() => onDelete(interview)}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </section>
+  )
+}

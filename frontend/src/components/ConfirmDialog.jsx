@@ -2,10 +2,14 @@ import { useEffect } from 'react'
 import Button from './Button.jsx'
 
 // Asks the interviewer to confirm an action that cannot be undone, or one
-// that changes many candidates at once.
+// that changes many candidates at once. "icon" and "lead" are shown beside
+// the title, the rest below it.
 export default function ConfirmDialog({
   title,
   confirmLabel,
+  cancelLabel = 'Cancel',
+  icon: Icon,
+  lead,
   busyLabel = 'Deleting…',
   confirmVariant = 'danger',
   isBusy = false,
@@ -32,9 +36,21 @@ export default function ConfirmDialog({
         aria-modal="true"
         aria-label={title}
         onClick={(event) => event.stopPropagation()}
-        className="flex w-full max-w-md animate-rise-in flex-col gap-4 rounded-card bg-white p-6 shadow-card"
+        className={`flex w-full animate-rise-in flex-col gap-4 rounded-card bg-white p-6 shadow-card ${
+          Icon ? 'max-w-xl' : 'max-w-md'
+        }`}
       >
-        <h2 className="text-xl font-extrabold tracking-tight">{title}</h2>
+        <div className="flex items-start gap-3.5">
+          {Icon && (
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-amber-soft text-amber">
+              <Icon className="size-5.5" aria-hidden="true" />
+            </span>
+          )}
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <h2 className="text-xl font-extrabold tracking-tight">{title}</h2>
+            {lead && <p className="text-[15px] leading-relaxed">{lead}</p>}
+          </div>
+        </div>
         <div className="flex flex-col gap-2 text-[15px] leading-relaxed">{children}</div>
         {error && (
           <p role="alert" className="text-sm font-semibold text-danger">
@@ -43,7 +59,7 @@ export default function ConfirmDialog({
         )}
         <div className="flex justify-end gap-3">
           <Button variant="soft" onClick={onCancel} disabled={isBusy}>
-            Cancel
+            {cancelLabel}
           </Button>
           <Button variant={confirmVariant} onClick={onConfirm} disabled={isBusy}>
             {isBusy ? busyLabel : confirmLabel}

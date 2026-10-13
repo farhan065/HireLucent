@@ -11,6 +11,8 @@ from app.api.routes import (
     graphs,
     health,
     intake,
+    interviews,
+    join,
     jobs,
     knowledge,
     screening,
@@ -27,6 +29,9 @@ api_router.include_router(jobs.router)
 api_router.include_router(intake.router)
 api_router.include_router(candidates.router)
 api_router.include_router(screening.router)
+api_router.include_router(interviews.router)
+api_router.include_router(interviews.session_router)
+api_router.include_router(join.router)
 api_router.include_router(chat.router)
 api_router.include_router(chat_ws.router)
 api_router.include_router(knowledge.router)

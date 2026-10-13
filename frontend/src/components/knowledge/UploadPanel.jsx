@@ -156,15 +156,22 @@ export default function UploadPanel({ onUpload }) {
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-1 basis-64 flex-col gap-1.5 text-sm font-semibold text-navy">
             <span>
-              Tags <span className="font-normal text-body">(optional, separated by commas)</span>
+              {kind === 'questions' ? 'Roles' : 'Tags'}{' '}
+              <span className="font-normal text-body">(optional, separated by commas)</span>
             </span>
             <input
               value={tags}
               onChange={(event) => setTags(event.target.value)}
               maxLength={200}
-              placeholder="backend, python"
+              placeholder={kind === 'questions' ? 'Backend Engineer' : 'backend, python'}
               className="h-11.5 rounded-2xl border-[1.5px] border-line px-3.5 text-[15px] font-normal text-navy placeholder:text-body/60"
             />
+            {kind === 'questions' && (
+              <span className="text-xs font-normal leading-relaxed text-body">
+                Type the job title, such as Backend Engineer. Separate several roles with commas.
+                Leave empty for general questions.
+              </span>
+            )}
           </label>
           <Button type="submit" disabled={!file || isUploading}>
             <Upload className="size-4.5" aria-hidden="true" />

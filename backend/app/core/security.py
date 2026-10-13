@@ -32,11 +32,14 @@ def create_access_token(
     role: str,
     expires_in: timedelta,
     session_id: int | None = None,
+    link: str | None = None,
 ) -> str:
     """Create a signed token.
 
     subject is the user ID for an interviewer, or the candidate ID for a
-    candidate. A candidate token also carries the one session it is valid for.
+    candidate. A candidate token also carries the one session it is valid for
+    and a short fingerprint of its join link, so it stops working when the
+    interview moves to a new link.
     """
     payload: dict[str, Any] = {
         "sub": subject,
@@ -45,6 +48,8 @@ def create_access_token(
     }
     if session_id is not None:
         payload["session_id"] = session_id
+    if link is not None:
+        payload["link"] = link
     return jwt.encode(payload, get_settings().jwt_secret, algorithm=JWT_ALGORITHM)
 
 

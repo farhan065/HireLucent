@@ -25,14 +25,15 @@ export function setAccessToken(token) {
   else sessionStorage.removeItem(TOKEN_KEY)
 }
 
-export async function apiRequest(path, { method = 'GET', body } = {}) {
+// "auth" is the token to send: the signed-in interviewer's by default, a
+// candidate's interview pass, or null for none.
+export async function apiRequest(path, { method = 'GET', body, auth = getAccessToken() } = {}) {
   // A FormData body is a file upload. The browser sets its content type.
   const isUpload = body instanceof FormData
   const headers = {}
   if (body !== undefined && !isUpload) headers['Content-Type'] = 'application/json'
 
-  const token = getAccessToken()
-  if (token) headers.Authorization = `Bearer ${token}`
+  if (auth) headers.Authorization = `Bearer ${auth}`
 
   let response
   try {

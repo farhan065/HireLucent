@@ -14,9 +14,9 @@ import {
   UnrankedRow,
   ViewCvLink,
 } from './candidates.jsx'
-import { SHORTLISTED_CHIP } from '../../lib/jobs.js'
+import { INTERVIEW_CHIP, SHORTLISTED_CHIP } from '../../lib/jobs.js'
 
-const ROW = 'grid grid-cols-[3.25rem_minmax(0,1.6fr)_minmax(0,1fr)] items-center gap-x-4 gap-y-2 px-5 lg:grid-cols-[3.25rem_minmax(0,1.6fr)_minmax(9rem,1fr)_minmax(0,1.3fr)_8rem_9.5rem]'
+const ROW = 'grid grid-cols-[3.25rem_minmax(0,1.6fr)_minmax(0,1fr)] items-center gap-x-4 gap-y-2 px-5 lg:grid-cols-[3.25rem_minmax(0,1.6fr)_minmax(9rem,1fr)_minmax(0,1.3fr)_10.5rem_9.5rem]'
 
 const RESULTS = {
   met: { label: 'Met', tone: 'success', icon: CircleCheck, color: 'text-success', line: 'border-success' },
@@ -138,9 +138,11 @@ function Evidence({ matches }) {
 function RankedRow({ candidate, isOpen, onToggle, isLocked, onChanged }) {
   const Chevron = isOpen ? ChevronDown : ChevronRight
   const chip =
-    candidate.status === 'shortlisted'
-      ? SHORTLISTED_CHIP
-      : { tone: 'success', label: candidate.scores ? 'Scored' : 'Matched' }
+    candidate.status === 'interview_scheduled'
+      ? INTERVIEW_CHIP
+      : candidate.status === 'shortlisted'
+        ? SHORTLISTED_CHIP
+        : { tone: 'success', label: candidate.scores ? 'Scored' : 'Matched' }
   return (
     <li id={`match-${candidate.id}`} className="scroll-mt-6 border-t border-line/60">
       <div className={`${ROW} py-3.5 ${isOpen ? 'bg-mist/60' : ''}`}>

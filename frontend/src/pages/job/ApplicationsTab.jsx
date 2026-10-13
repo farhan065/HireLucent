@@ -12,7 +12,7 @@ import RunPanel from '../../components/jobs/RunPanel.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import StatusChip from '../../components/StatusChip.jsx'
 import { useCandidates } from '../../hooks/useCandidates.js'
-import { formatDateTime, SHORTLISTED_CHIP } from '../../lib/jobs.js'
+import { formatDateTime, INTERVIEW_CHIP, SHORTLISTED_CHIP } from '../../lib/jobs.js'
 
 const INTAKE = 'cv_intake'
 
@@ -21,6 +21,7 @@ const STATUS_CHIPS = {
   screening_failed: { tone: 'danger', label: 'Could not be read' },
   excluded: { tone: 'warning', label: 'Excluded' },
   shortlisted: SHORTLISTED_CHIP,
+  interview_scheduled: INTERVIEW_CHIP,
 }
 const SCREENED_CHIP = { tone: 'success', label: 'Screened' }
 

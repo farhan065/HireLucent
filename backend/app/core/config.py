@@ -49,8 +49,16 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     ai_timeout_seconds: int = 60
     ai_max_attempts: int = 3
-    # The provider's limit for your model. Calls are paced to stay under it.
-    llm_requests_per_minute: int = Field(default=15, ge=1)
+    # The interview room's AI Agent chat gives up sooner, so a slow AI
+    # service never leaves the interviewer waiting for minutes.
+    room_ai_timeout_seconds: int = Field(default=30, ge=5)
+    room_ai_max_attempts: int = Field(default=2, ge=1)
+    # The provider's limit for your model, minus a small safety margin.
+    # Calls are paced to stay under it.
+    llm_requests_per_minute: int = Field(default=14, ge=1)
+    # CV screening may use only this many of those calls per minute, so the
+    # rest stay free for the AI Agent and the interview room.
+    llm_background_requests_per_minute: int = Field(default=10, ge=1)
 
     # Vector database for the Knowledge Base and CV matching.
     chroma_host: str = "chromadb"
@@ -69,12 +77,47 @@ class Settings(BaseSettings):
     # How close a stored job description must be to count as a reference.
     # Cosine distance: 0 is identical, 1 is unrelated.
     jd_reference_max_distance: float = Field(default=0.6, ge=0, le=2)
+    # How close a question in the question bank must be to the topic asked.
+    question_bank_max_distance: float = Field(default=0.6, ge=0, le=2)
 
     # The Blogger MCP server, which publishes approved job posts.
     mcp_blogger_url: str = "http://mcp-blogger:8002/mcp"
     blogger_blog_id: str = ""
     # The Google sign-in saved by scripts/google_auth.py.
     google_token_file: str = "/secrets/google_token.json"
+
+    # The Google MCP server, which sends interview emails and calendar
+    # invitations after the interviewer has approved them.
+    mcp_google_url: str = "http://mcp-google:8003/mcp"
+    mcp_google_port: int = 8003
+    # How interview emails are signed. The address is the Gmail account you
+    # signed in with; leave it empty to let Gmail fill it in.
+    email_sender_name: str = "HireLucent Careers"
+    email_sender_address: str = ""
+
+    # LiveKit, the video server. The URL is the address the browser uses.
+    # The key and secret sign room tokens and must match the livekit service.
+    livekit_url: str = "ws://localhost:7880"
+    # The same server as the backend reaches it, used to close a room when
+    # an interview ends.
+    livekit_api_url: str = "http://livekit:7880"
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    # The transcription worker runs inside the livekit service's network,
+    # where the video server is localhost (the address it announces).
+    capture_livekit_url: str = "ws://localhost:7880"
+    # How often the worker looks for interviews that started or ended.
+    capture_poll_seconds: float = Field(default=3, gt=0, le=60)
+    # How many minutes before an interview's start the candidate can join.
+    join_opens_minutes_before: int = Field(default=10, ge=0, le=60)
+    # How far ahead an interview must be scheduled. Set it to 1 while testing
+    # to send invitations and join almost at once.
+    interview_min_notice_minutes: int = Field(default=15, ge=0, le=1440)
+    # The time zone used in interview emails and for times typed to the AI
+    # Agent. Times are stored in UTC; screens show the viewer's local time.
+    app_timezone: str = "Asia/Dhaka"
+    # The address of the web app, used to build candidates' join links.
+    frontend_base_url: str = "http://localhost:3000"
 
     jwt_secret: str = Field(min_length=32)
     jwt_expire_minutes: int = 60

@@ -46,7 +46,10 @@ def read_job(job_id: int, db: Session = Depends(get_db)) -> Job:
     summary="Change a job's requirements and scoring weights",
     responses={
         **NOT_FOUND,
-        409: {"model": ErrorResponse, "description": "A fetch or screening is running"},
+        409: {
+            "model": ErrorResponse,
+            "description": "A fetch or screening is running, or the job has interviews",
+        },
     },
 )
 def update_job_profile(
@@ -54,7 +57,8 @@ def update_job_profile(
 ) -> Job:
     """Screening results made with the old rules are cleared, so every
     candidate is screened again with the new ones. The public post and the
-    description do not change."""
+    description do not change. Refused once the job has interviews, so every
+    interviewed candidate keeps scores made with the same rules."""
     return job_service.update_profile(
         db, job_id, payload.requirements, payload.scoring_weights
     )

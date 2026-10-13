@@ -20,7 +20,16 @@ class TimelineItem(BaseModel):
 
     id: str
     kind: Literal[
-        "user", "assistant", "note", "description", "requirements", "post", "published"
+        "user",
+        "assistant",
+        "note",
+        "description",
+        "requirements",
+        "post",
+        "published",
+        "schedule",
+        "reschedule",
+        "cancel_interview",
     ]
     # user, assistant and note: the text. description: the body in Markdown.
     # published: the address of the public post.
@@ -35,7 +44,12 @@ class TimelineItem(BaseModel):
     status: str | None = None
     # requirements: the requirements and scoring weights.
     # post: the title, description, job code and application form.
+    # schedule, reschedule, cancel_interview: the interviews, their times and
+    # an email preview.
     arguments: dict[str, Any] | None = None
+    # schedule, reschedule, cancel_interview, once approved: what happened,
+    # per candidate for a schedule.
+    result: Any = None
 
 
 class DescriptionBrief(BaseModel):

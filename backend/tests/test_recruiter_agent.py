@@ -155,7 +155,7 @@ def test_model_failure_gives_a_clear_message(monkeypatch) -> None:
         raise ConnectionError("no network")
 
     monkeypatch.setattr(recruiter, "get_agent_model", broken_model)
-    monkeypatch.setattr(recruiter, "run_with_retries", lambda operation, call: call())
+    monkeypatch.setattr(recruiter, "run_with_retries", lambda operation, call, **_: call())
     graph = recruiter.build_recruiter_graph(InMemorySaver())
     config = thread_config("t7")
 

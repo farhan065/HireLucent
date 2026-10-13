@@ -21,6 +21,7 @@ class Principal:
     subject_id: int
     role: str
     session_id: int | None = None
+    link: str | None = None
 
 
 def get_current_principal(
@@ -38,6 +39,7 @@ def get_current_principal(
         subject_id=int(payload["sub"]),
         role=payload["role"],
         session_id=payload.get("session_id"),
+        link=payload.get("link"),
     )
 
 

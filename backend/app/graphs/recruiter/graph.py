@@ -10,10 +10,18 @@
     call_tools -> agent           (tool result)
     call_tools -> handle_error    (too many failed attempts)
     handle_error -> respond -> end
+
+In an interview room the same graph runs in a read-only interview mode:
+load_context adds the interview's details, the model is given only the
+question bank search, and every other tool is refused in call_tools, so
+nothing can be changed and human_approval is never reached. The question
+bank search is always kept to the job's role by call_tools, never by the
+model.
 """
 
 import json
 import logging
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -28,15 +36,25 @@ from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
 from app.ai.client import run_with_retries
-from app.ai.models import get_chat_model
-from app.core.errors import AppError
+from app.ai.models import get_chat_model, get_room_chat_model
+from app.core.config import get_settings
+from app.core.errors import AppError, ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import MAX_ATTEMPTS, BaseState, capture_errors
 from app.graphs.checkpointer import get_checkpointer
-from app.graphs.recruiter.prompts import ERROR_REPLY, SYSTEM_PROMPT
+from app.graphs.recruiter.prompts import (
+    ERROR_REPLY,
+    INTERVIEW_PROMPT,
+    ROOM_BUSY_REPLY,
+    ROOM_ERROR_REPLY,
+    SYSTEM_PROMPT,
+)
 from app.rag import mcp_client
+from app.services import interview_context
+from app.services.interview_times import now_description
 from app.graphs.recruiter.tools import (
     EXTERNAL_ACTIONS,
+    INTERVIEW_TOOLS,
     PREPARERS,
     TOOL_HANDLERS,
     TOOL_SCHEMAS,
@@ -52,29 +70,87 @@ class RecruiterState(BaseState, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     user_id: int
     saved_job_id: int | None
+    # Set in an interview room: the interview, and what the AI is told
+    # about it, loaded again at the start of every turn.
+    interview_id: int | None
+    interview_details: str | None
+    interview_role: str | None
 
 
 SEARCH_UNAVAILABLE = "The search is not available right now. Continue without it."
+NOT_IN_INTERVIEW = "This tool is not available during an interview. Only answer."
+
+
+def _without_role(tool: dict) -> dict:
+    """The tool as the model sees it, without the role parameter, which the
+    application fills in itself."""
+    function = tool["function"]
+    parameters = dict(function.get("parameters") or {})
+    parameters["properties"] = {
+        name: value
+        for name, value in (parameters.get("properties") or {}).items()
+        if name != "role"
+    }
+    if "required" in parameters:
+        parameters["required"] = [name for name in parameters["required"] if name != "role"]
+    return {**tool, "function": {**function, "parameters": parameters}}
+
+
+def _mcp_tools(interview: bool) -> list[dict]:
+    """The MCP search tools for one mode: the question bank in an interview,
+    the job description search otherwise."""
+    return [
+        _without_role(tool) if interview else tool
+        for tool in mcp_client.tool_definitions()
+        if (tool["function"]["name"] in INTERVIEW_TOOLS) == interview
+    ]
 
 
 def get_agent_model() -> Runnable[LanguageModelInput, AIMessage]:
     """The chat model with the agent's tools attached: our own tools and
     the search tools offered by the MCP server."""
-    tools = [*TOOL_SCHEMAS, *mcp_client.tool_definitions()]
+    tools = [*TOOL_SCHEMAS, *_mcp_tools(interview=False)]
     return get_chat_model().bind_tools(tools)
 
 
+def get_interview_model() -> Runnable[LanguageModelInput, AIMessage]:
+    """The chat model for an interview room, with the question bank search
+    as its only tool. It waits less than the AI Agent page does."""
+    tools = _mcp_tools(interview=True)
+    model = get_room_chat_model()
+    return model.bind_tools(tools) if tools else model
+
+
+def _in_interview(state: RecruiterState) -> bool:
+    return bool(state.get("interview_id"))
+
+
 def load_context(state: RecruiterState) -> dict:
-    """Start each turn with a clean error state."""
-    return {"error": None, "attempts": 0}
+    """Start each turn with a clean error state. In an interview room, load
+    the interview's job and candidate details too."""
+    update: dict = {"error": None, "attempts": 0}
+    if _in_interview(state):
+        details, role = interview_context.for_session(state["interview_id"])
+        update.update({"interview_details": details, "interview_role": role})
+    return update
 
 
 @capture_errors
 def agent(state: RecruiterState) -> dict:
     """Ask the model what to do next: answer, or use a tool."""
-    messages = [SystemMessage(SYSTEM_PROMPT), *state["messages"]]
+    max_attempts = None
+    if _in_interview(state):
+        prompt = f"{INTERVIEW_PROMPT}{state.get('interview_details') or ''}"
+        model = get_interview_model()
+        # Fewer tries, so a slow AI service gives up within about a minute.
+        max_attempts = get_settings().room_ai_max_attempts
+    else:
+        # Today's date, so a day such as "Tuesday" means the right one.
+        prompt = f"{SYSTEM_PROMPT}\n{now_description(datetime.now(timezone.utc))}"
+        model = get_agent_model()
+    messages = [SystemMessage(prompt), *state["messages"]]
     response = run_with_retries(
-        "recruiter_agent", lambda: get_agent_model().invoke(messages)
+        "recruiter_agent", lambda: model.invoke(messages), max_attempts=max_attempts
     )
     return {"messages": [response]}
 
@@ -88,6 +164,10 @@ def route_after_agent(
     tool_calls = state["messages"][-1].tool_calls
     if not tool_calls:
         return "respond"
+    # In an interview nothing waits for approval: call_tools refuses
+    # anything but the question bank search.
+    if _in_interview(state):
+        return "call_tools"
     if any(call["name"] in EXTERNAL_ACTIONS for call in tool_calls):
         return "human_approval"
     return "call_tools"
@@ -103,7 +183,9 @@ def human_approval(
     shown complete, valid details.
     """
     request = state["messages"][-1]
-    call = request.tool_calls[0]
+    # The action to approve. If the model asked for other tools in the same
+    # reply, they are dropped: one action is approved at a time.
+    call = next(c for c in request.tool_calls if c["name"] in EXTERNAL_ACTIONS)
     name = call["name"]
     try:
         arguments = TOOL_SCHEMAS_BY_NAME[name].model_validate(call["args"]).model_dump()
@@ -125,7 +207,8 @@ def human_approval(
         # edited version, if any, replaces the checked details.
         final = arguments if name in PREPARERS else (edited or arguments)
         return Command(
-            goto="call_tools", update={"messages": [_with_arguments(request, final)]}
+            goto="call_tools",
+            update={"messages": [_with_arguments(request, call, final)]},
         )
 
     if edited:
@@ -133,7 +216,7 @@ def human_approval(
         # and ask again, without involving the model.
         return Command(
             goto="human_approval",
-            update={"messages": [_with_arguments(request, edited)]},
+            update={"messages": [_with_arguments(request, call, edited)]},
         )
 
     feedback = decision.get("feedback") or "No reason was given."
@@ -144,10 +227,10 @@ def human_approval(
     return Command(goto="agent", update={"messages": [rejection]})
 
 
-def _with_arguments(request: AIMessage, arguments: dict) -> AIMessage:
+def _with_arguments(request: AIMessage, call: dict, arguments: dict) -> AIMessage:
     """The same tool request with different arguments. Keeping the message
     id replaces the original, so the conversation stays consistent."""
-    call = {**request.tool_calls[0], "args": arguments}
+    call = {**call, "args": arguments}
     return AIMessage(content=request.content, tool_calls=[call], id=request.id)
 
 
@@ -157,13 +240,24 @@ def call_tools(state: RecruiterState) -> Command[Literal["agent", "handle_error"
     update: dict = {"messages": []}
 
     for call in state["messages"][-1].tool_calls:
+        if _in_interview(state) and call["name"] not in INTERVIEW_TOOLS:
+            attempts += 1
+            log_event(logger, "interview_tool_refused", level=logging.WARNING, tool=call["name"])
+            update["messages"].append(
+                ToolMessage(content=NOT_IN_INTERVIEW, tool_call_id=call["id"])
+            )
+            continue
         try:
             if call["name"] in TOOL_HANDLERS:
                 content, changes = TOOL_HANDLERS[call["name"]](call["args"], state)
                 update.update(changes)
             else:
-                # Any other tool belongs to the MCP server.
-                content = json.dumps(mcp_client.call_tool(call["name"], call["args"]))
+                # Any other tool belongs to the MCP server. In an interview
+                # the question bank is kept to the job's role.
+                arguments = dict(call["args"])
+                if _in_interview(state):
+                    arguments["role"] = state.get("interview_role") or ""
+                content = json.dumps(mcp_client.call_tool(call["name"], arguments))
         except Exception as exc:
             attempts += 1
             is_ours = call["name"] in TOOL_HANDLERS
@@ -197,8 +291,17 @@ def _describe_failure(exc: Exception) -> str:
 
 
 def handle_error(state: RecruiterState) -> dict:
-    """Give the interviewer a clear message when the turn cannot be completed."""
-    return {"messages": [AIMessage(ERROR_REPLY)], "error": None}
+    """Give the interviewer a clear message when the turn cannot be completed.
+
+    In an interview room the reply says whether the AI service was busy,
+    and is marked as failed so the room can show it differently."""
+    if not _in_interview(state):
+        return {"messages": [AIMessage(ERROR_REPLY)], "error": None}
+    is_busy = state.get("error") == ServiceUnavailableError.__name__
+    reply = AIMessage(
+        ROOM_BUSY_REPLY if is_busy else ROOM_ERROR_REPLY, additional_kwargs={"failed": True}
+    )
+    return {"messages": [reply], "error": None}
 
 
 def respond(state: RecruiterState) -> dict:
