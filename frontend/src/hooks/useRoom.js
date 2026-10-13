@@ -4,6 +4,10 @@ import { ConnectionQuality, DisconnectReason, Room, RoomEvent, Track } from 'liv
 const CAMERA_BUSY =
   'Your camera is in use by another tab or app, so you joined with the microphone only.'
 
+// Messages between the two people travel on this topic, straight from one
+// browser to the other. They are never stored.
+const MESSAGE_TOPIC = 'room-message'
+
 // Waits between attempts to rejoin after the connection was lost, in ms.
 const RETRY_DELAYS = [2000, 4000, 8000]
 const RETRY_DELAY_MAX = 10000
@@ -71,6 +75,9 @@ function retryDelay(attempt) {
 // keeps rejoining with a fresh pass for as long as the interview runs, and
 // restores the microphone and camera as they were. Leaving the page leaves
 // the room.
+//
+// The two people can also send each other text messages. They are kept
+// only while the page is open: a rejoin keeps them, a reload clears them.
 export function useRoom(connection, renewPass) {
   const roomRef = useRef(null)
   const passRef = useRef(null)
@@ -87,6 +94,15 @@ export function useRoom(connection, renewPass) {
   // Rejoining: how many tries so far, and a counter that opens a new room.
   const [retries, setRetries] = useState(0)
   const [joinCount, setJoinCount] = useState(0)
+  // Text messages, oldest first: { id, isMine, name, text, at }.
+  const [messages, setMessages] = useState([])
+  const messageCountRef = useRef(0)
+
+  const addMessage = useCallback((message) => {
+    messageCountRef.current += 1
+    const id = messageCountRef.current
+    setMessages((list) => [...list, { ...message, id, at: Date.now() }])
+  }, [])
 
   useEffect(() => {
     if (!connection) return undefined
@@ -125,6 +141,12 @@ export function useRoom(connection, renewPass) {
       if (!isCurrent || participant.isLocal) return
       if (quality === ConnectionQuality.Lost) setRemoteLostAt((at) => at ?? Date.now())
       else setRemoteLostAt(null)
+    })
+    room.registerTextStreamHandler(MESSAGE_TOPIC, async (reader, { identity }) => {
+      const text = await reader.readAll().catch(() => '')
+      if (!isCurrent || !text.trim()) return
+      const name = room.remoteParticipants.get(identity)?.name || identity
+      addMessage({ isMine: false, name, text })
     })
     room.on(RoomEvent.Disconnected, (reason) => {
       if (!isCurrent) return
@@ -168,7 +190,7 @@ export function useRoom(connection, renewPass) {
       isCurrent = false
       room.disconnect()
     }
-  }, [connection, joinCount])
+  }, [connection, joinCount, addMessage])
 
   // Get a fresh pass and open the room again. An interview that ended
   // meanwhile refuses the pass, which ends the room here too.
@@ -208,8 +230,28 @@ export function useRoom(connection, renewPass) {
     setView(next)
   }, [])
 
+  // Send a message to the other person. Fails when they are not in the
+  // room; only they receive it, not the hidden transcription worker.
+  const sendMessage = useCallback(
+    async (text) => {
+      const room = roomRef.current
+      const others = room ? [...room.remoteParticipants.keys()] : []
+      if (!room || room.state !== 'connected' || others.length === 0) {
+        throw new Error('The message could not be sent.')
+      }
+      await room.localParticipant.sendText(text, {
+        topic: MESSAGE_TOPIC,
+        destinationIdentities: others,
+      })
+      addMessage({ isMine: true, name: 'You', text })
+    },
+    [addMessage],
+  )
+
   return {
     ...view,
+    messages,
+    sendMessage,
     state,
     endReason,
     notice,
