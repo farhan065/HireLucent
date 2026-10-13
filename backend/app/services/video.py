@@ -33,14 +33,25 @@ def create_room_token(
     identity: str,
     name: str,
     valid_for: timedelta,
+    *,
+    hidden: bool = False,
+    can_publish: bool = True,
 ) -> str:
     """A token that lets one participant join one room, send their camera,
-    microphone and screen, and receive the other participant's."""
+    microphone and screen, and receive the other participant's.
+
+    The transcription worker joins hidden and without publishing: the two
+    people in the interview never see it, and it only listens."""
     settings = get_settings()
     if not settings.livekit_api_key or not settings.livekit_api_secret:
         raise ServiceUnavailableError(NOT_CONFIGURED)
     grants = api.VideoGrants(
-        room_join=True, room=room, can_publish=True, can_subscribe=True
+        room_join=True,
+        room=room,
+        can_publish=can_publish,
+        can_publish_data=can_publish,
+        can_subscribe=True,
+        hidden=hidden,
     )
     return (
         api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
