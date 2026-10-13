@@ -168,6 +168,11 @@ EXTERNAL_ACTIONS = {
     "CancelInterview",
 }
 
+# The question bank search on the RAG MCP server. It is the only tool the
+# agent has during an interview, when it may read but never act.
+QUESTION_BANK_TOOL = "search_question_bank"
+INTERVIEW_TOOLS = {QUESTION_BANK_TOOL}
+
 # Work done before the interviewer is asked: the checked arguments go in and
 # the full details to approve come out. Because these details are built by
 # the app, they are used as approved and cannot be replaced from the browser.

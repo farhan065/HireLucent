@@ -10,6 +10,13 @@
     call_tools -> agent           (tool result)
     call_tools -> handle_error    (too many failed attempts)
     handle_error -> respond -> end
+
+In an interview room the same graph runs in a read-only interview mode:
+load_context adds the interview's details, the model is given only the
+question bank search, and every other tool is refused in call_tools, so
+nothing can be changed and human_approval is never reached. The question
+bank search is always kept to the job's role by call_tools, never by the
+model.
 """
 
 import json
@@ -34,11 +41,13 @@ from app.core.errors import AppError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import MAX_ATTEMPTS, BaseState, capture_errors
 from app.graphs.checkpointer import get_checkpointer
-from app.graphs.recruiter.prompts import ERROR_REPLY, SYSTEM_PROMPT
+from app.graphs.recruiter.prompts import ERROR_REPLY, INTERVIEW_PROMPT, SYSTEM_PROMPT
 from app.rag import mcp_client
+from app.services import interview_context
 from app.services.interview_times import now_description
 from app.graphs.recruiter.tools import (
     EXTERNAL_ACTIONS,
+    INTERVIEW_TOOLS,
     PREPARERS,
     TOOL_HANDLERS,
     TOOL_SCHEMAS,
@@ -54,32 +63,82 @@ class RecruiterState(BaseState, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     user_id: int
     saved_job_id: int | None
+    # Set in an interview room: the interview, and what the AI is told
+    # about it, loaded again at the start of every turn.
+    interview_id: int | None
+    interview_details: str | None
+    interview_role: str | None
 
 
 SEARCH_UNAVAILABLE = "The search is not available right now. Continue without it."
+NOT_IN_INTERVIEW = "This tool is not available during an interview. Only answer."
+
+
+def _without_role(tool: dict) -> dict:
+    """The tool as the model sees it, without the role parameter, which the
+    application fills in itself."""
+    function = tool["function"]
+    parameters = dict(function.get("parameters") or {})
+    parameters["properties"] = {
+        name: value
+        for name, value in (parameters.get("properties") or {}).items()
+        if name != "role"
+    }
+    if "required" in parameters:
+        parameters["required"] = [name for name in parameters["required"] if name != "role"]
+    return {**tool, "function": {**function, "parameters": parameters}}
+
+
+def _mcp_tools(interview: bool) -> list[dict]:
+    """The MCP search tools for one mode: the question bank in an interview,
+    the job description search otherwise."""
+    return [
+        _without_role(tool) if interview else tool
+        for tool in mcp_client.tool_definitions()
+        if (tool["function"]["name"] in INTERVIEW_TOOLS) == interview
+    ]
 
 
 def get_agent_model() -> Runnable[LanguageModelInput, AIMessage]:
     """The chat model with the agent's tools attached: our own tools and
     the search tools offered by the MCP server."""
-    tools = [*TOOL_SCHEMAS, *mcp_client.tool_definitions()]
+    tools = [*TOOL_SCHEMAS, *_mcp_tools(interview=False)]
     return get_chat_model().bind_tools(tools)
 
 
+def get_interview_model() -> Runnable[LanguageModelInput, AIMessage]:
+    """The chat model for an interview room, with the question bank search
+    as its only tool."""
+    tools = _mcp_tools(interview=True)
+    return get_chat_model().bind_tools(tools) if tools else get_chat_model()
+
+
+def _in_interview(state: RecruiterState) -> bool:
+    return bool(state.get("interview_id"))
+
+
 def load_context(state: RecruiterState) -> dict:
-    """Start each turn with a clean error state."""
-    return {"error": None, "attempts": 0}
+    """Start each turn with a clean error state. In an interview room, load
+    the interview's job and candidate details too."""
+    update: dict = {"error": None, "attempts": 0}
+    if _in_interview(state):
+        details, role = interview_context.for_session(state["interview_id"])
+        update.update({"interview_details": details, "interview_role": role})
+    return update
 
 
 @capture_errors
 def agent(state: RecruiterState) -> dict:
     """Ask the model what to do next: answer, or use a tool."""
-    # Today's date, so a day such as "Tuesday" means the right one.
-    prompt = f"{SYSTEM_PROMPT}\n{now_description(datetime.now(timezone.utc))}"
+    if _in_interview(state):
+        prompt = f"{INTERVIEW_PROMPT}{state.get('interview_details') or ''}"
+        model = get_interview_model()
+    else:
+        # Today's date, so a day such as "Tuesday" means the right one.
+        prompt = f"{SYSTEM_PROMPT}\n{now_description(datetime.now(timezone.utc))}"
+        model = get_agent_model()
     messages = [SystemMessage(prompt), *state["messages"]]
-    response = run_with_retries(
-        "recruiter_agent", lambda: get_agent_model().invoke(messages)
-    )
+    response = run_with_retries("recruiter_agent", lambda: model.invoke(messages))
     return {"messages": [response]}
 
 
@@ -92,6 +151,10 @@ def route_after_agent(
     tool_calls = state["messages"][-1].tool_calls
     if not tool_calls:
         return "respond"
+    # In an interview nothing waits for approval: call_tools refuses
+    # anything but the question bank search.
+    if _in_interview(state):
+        return "call_tools"
     if any(call["name"] in EXTERNAL_ACTIONS for call in tool_calls):
         return "human_approval"
     return "call_tools"
@@ -164,13 +227,24 @@ def call_tools(state: RecruiterState) -> Command[Literal["agent", "handle_error"
     update: dict = {"messages": []}
 
     for call in state["messages"][-1].tool_calls:
+        if _in_interview(state) and call["name"] not in INTERVIEW_TOOLS:
+            attempts += 1
+            log_event(logger, "interview_tool_refused", level=logging.WARNING, tool=call["name"])
+            update["messages"].append(
+                ToolMessage(content=NOT_IN_INTERVIEW, tool_call_id=call["id"])
+            )
+            continue
         try:
             if call["name"] in TOOL_HANDLERS:
                 content, changes = TOOL_HANDLERS[call["name"]](call["args"], state)
                 update.update(changes)
             else:
-                # Any other tool belongs to the MCP server.
-                content = json.dumps(mcp_client.call_tool(call["name"], call["args"]))
+                # Any other tool belongs to the MCP server. In an interview
+                # the question bank is kept to the job's role.
+                arguments = dict(call["args"])
+                if _in_interview(state):
+                    arguments["role"] = state.get("interview_role") or ""
+                content = json.dumps(mcp_client.call_tool(call["name"], arguments))
         except Exception as exc:
             attempts += 1
             is_ours = call["name"] in TOOL_HANDLERS

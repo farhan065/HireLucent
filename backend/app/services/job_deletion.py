@@ -12,9 +12,14 @@ from app.core.errors import ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.graphs.checkpointer import get_checkpointer
 from app.graphs.screening import store as screening_store
-from app.models import Candidate, Conversation, RemovedApplication, Task
+from app.models import Candidate, Conversation, InterviewSession, RemovedApplication, Task
 from app.rag import store as rag_store
-from app.services import job_service, screening_service, task_service
+from app.services import (
+    interview_chat_service,
+    job_service,
+    screening_service,
+    task_service,
+)
 
 logger = get_logger(__name__)
 
@@ -23,7 +28,7 @@ HAS_JOB_MESSAGE = "This conversation has a saved job. Delete the job instead."
 
 def delete_job(db: Session, job_id: int) -> None:
     """Remove a job, its candidates, their CV files and screening data, its
-    conversation and its background tasks. This cannot be undone.
+    conversation, its interviews' chats and its background tasks. This cannot be undone.
 
     The public job post and the application form are outside the
     application and are not touched.
@@ -40,6 +45,10 @@ def delete_job(db: Session, job_id: int) -> None:
         )
     )
     threads += [screening_service.thread_id(task_id) for task_id in screening_tasks]
+    interviews = db.scalars(
+        select(InterviewSession.id).where(InterviewSession.job_id == job_id)
+    )
+    threads += [interview_chat_service.thread_id(session_id) for session_id in interviews]
 
     _delete_cv_vectors({"job_id": job_id})
     db.execute(delete(Conversation).where(Conversation.job_id == job_id))
