@@ -1,8 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ConnectionQuality, DisconnectReason, Room, RoomEvent, Track } from 'livekit-client'
+import {
+  ConnectionQuality,
+  DisconnectReason,
+  MediaDeviceFailure,
+  Room,
+  RoomEvent,
+  Track,
+} from 'livekit-client'
 
-const CAMERA_BUSY =
-  'Your camera is in use by another tab or app, so you joined with the microphone only.'
+// Why the camera or microphone could not start, in words the person can act
+// on. "device" is "camera" or "microphone".
+const DEVICE_PROBLEMS = {
+  [MediaDeviceFailure.PermissionDenied]: (device) =>
+    `The browser is not allowed to use your ${device}. Allow the ${device} for this site ` +
+    'in the browser\'s site settings (the icon left of the address bar), then turn it on.',
+  [MediaDeviceFailure.DeviceInUse]: (device) =>
+    `Your ${device} is in use by another tab or app. Close it there, then turn it on here.`,
+  [MediaDeviceFailure.NotFound]: (device) => `No ${device} was found. Connect one, then turn it on.`,
+  [MediaDeviceFailure.Other]: (device) =>
+    `Your ${device} could not be started. Check it, then turn it on.`,
+}
+
+function deviceProblem(error, device) {
+  const failure = MediaDeviceFailure.getFailure(error) ?? MediaDeviceFailure.Other
+  return DEVICE_PROBLEMS[failure](device)
+}
 
 // Messages between the two people travel on this topic, straight from one
 // browser to the other. They are never stored.
@@ -87,7 +109,8 @@ export function useRoom(connection, renewPass) {
   const [state, setState] = useState('connecting')
   // "ended" when the room was closed because the interview ended.
   const [endReason, setEndReason] = useState(null)
-  const [notice, setNotice] = useState('')
+  // A problem with the camera or microphone, for each device.
+  const [problems, setProblems] = useState({ camera: '', microphone: '' })
   // When this person's connection dropped, and when the other person's did.
   const [lostAt, setLostAt] = useState(null)
   const [remoteLostAt, setRemoteLostAt] = useState(null)
@@ -175,12 +198,20 @@ export function useRoom(connection, renewPass) {
       setRetries(0)
       // Whoever is already in the room is here; a drop is noticed later.
       if (room.remoteParticipants.size > 0) setRemoteLostAt(null)
+      // A camera or microphone that cannot start does not stop the join;
+      // the notice says why and what to do.
+      const found = { camera: '', microphone: '' }
       try {
         await room.localParticipant.setCameraEnabled(camera)
-      } catch {
-        if (isCurrent) setNotice(CAMERA_BUSY)
+      } catch (cameraError) {
+        found.camera = deviceProblem(cameraError, 'camera')
       }
-      await room.localParticipant.setMicrophoneEnabled(microphone).catch(() => null)
+      try {
+        await room.localParticipant.setMicrophoneEnabled(microphone)
+      } catch (microphoneError) {
+        found.microphone = deviceProblem(microphoneError, 'microphone')
+      }
+      if (isCurrent) setProblems(found)
       isReady = true
       update()
     }
@@ -217,13 +248,16 @@ export function useRoom(connection, renewPass) {
     }
   }, [state, endReason, retries, rejoin])
 
-  const run = useCallback(async (action) => {
+  // Run a control. "device" names the camera or microphone, so a failure to
+  // turn it on says why; a cancelled screen picker changes nothing.
+  const run = useCallback(async (action, device = null) => {
     const room = roomRef.current
     if (!room) return
     try {
       await action(room.localParticipant)
-    } catch {
-      // A cancelled screen picker or a refused camera changes nothing.
+      if (device) setProblems((current) => ({ ...current, [device]: '' }))
+    } catch (error) {
+      if (device) setProblems((current) => ({ ...current, [device]: deviceProblem(error, device) }))
     }
     const next = snapshot(room)
     devicesRef.current = { microphone: next.isMicrophoneOn, camera: next.isCameraOn }
@@ -254,14 +288,15 @@ export function useRoom(connection, renewPass) {
     sendMessage,
     state,
     endReason,
-    notice,
+    notice: [problems.camera, problems.microphone].filter(Boolean).join(' '),
     lostAt: state === 'connected' ? null : lostAt,
     remoteLostAt,
     isReplaced: state === 'replaced',
     rejoin,
     toggleMicrophone: () =>
-      run((local) => local.setMicrophoneEnabled(!local.isMicrophoneEnabled)),
-    toggleCamera: () => run((local) => local.setCameraEnabled(!local.isCameraEnabled)),
+      run((local) => local.setMicrophoneEnabled(!local.isMicrophoneEnabled), 'microphone'),
+    toggleCamera: () =>
+      run((local) => local.setCameraEnabled(!local.isCameraEnabled), 'camera'),
     toggleScreenShare: () =>
       run((local) => local.setScreenShareEnabled(!local.isScreenShareEnabled, { audio: true })),
     leave: () => roomRef.current?.disconnect(),
