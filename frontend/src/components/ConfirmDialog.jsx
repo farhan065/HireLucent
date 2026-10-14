@@ -3,7 +3,8 @@ import Button from './Button.jsx'
 
 // Asks the interviewer to confirm an action that cannot be undone, or one
 // that changes many candidates at once. "icon" and "lead" are shown beside
-// the title, the rest below it.
+// the title, the rest below it. "confirmDisabled" holds the action back, for
+// example while a message is empty.
 export default function ConfirmDialog({
   title,
   confirmLabel,
@@ -13,6 +14,8 @@ export default function ConfirmDialog({
   busyLabel = 'Deleting…',
   confirmVariant = 'danger',
   isBusy = false,
+  confirmDisabled = false,
+  isWide = false,
   error = '',
   onConfirm,
   onCancel,
@@ -36,8 +39,8 @@ export default function ConfirmDialog({
         aria-modal="true"
         aria-label={title}
         onClick={(event) => event.stopPropagation()}
-        className={`flex w-full animate-rise-in flex-col gap-4 rounded-card bg-white p-6 shadow-card ${
-          Icon ? 'max-w-xl' : 'max-w-md'
+        className={`flex max-h-[calc(100dvh-2rem)] w-full animate-rise-in flex-col gap-4 overflow-y-auto rounded-card bg-white p-6 shadow-card ${
+          Icon || isWide ? 'max-w-xl' : 'max-w-md'
         }`}
       >
         <div className="flex items-start gap-3.5">
@@ -61,7 +64,11 @@ export default function ConfirmDialog({
           <Button variant="soft" onClick={onCancel} disabled={isBusy}>
             {cancelLabel}
           </Button>
-          <Button variant={confirmVariant} onClick={onConfirm} disabled={isBusy}>
+          <Button
+            variant={confirmVariant}
+            onClick={onConfirm}
+            disabled={isBusy || confirmDisabled}
+          >
             {isBusy ? busyLabel : confirmLabel}
           </Button>
         </div>

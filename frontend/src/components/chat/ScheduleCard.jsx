@@ -161,8 +161,9 @@ function ScheduleResult({ results, timeZone, jobId }) {
 }
 
 // The schedule the AI Agent proposes. Nothing is sent until the interviewer
-// approves. Changed times go back to the server to be checked first, and the
-// card comes back with the checked schedule, which starts the edits afresh.
+// approves. Changed times or a changed message go back to the server to be
+// checked first, and the card comes back with the checked schedule and its
+// new preview, which starts the edits afresh.
 export default function ScheduleCard(props) {
   return <Schedule key={JSON.stringify(props.item.arguments)} {...props} />
 }
@@ -171,12 +172,32 @@ function Schedule({ item, canAct, jobId, onApprove, onCheck, onRequestChanges })
   const args = item.arguments ?? {}
   const original = args.interviews ?? []
   const [rows, setRows] = useState(original)
+  // The message being edited, or null.
+  const [draft, setDraft] = useState(null)
   const isWaiting = item.status === 'waiting'
   const isEditing = isWaiting && canAct
   const isEdited =
     JSON.stringify(rows.map(editable)) !== JSON.stringify(original.map(editable))
   const chip = CARD_STATUS[item.status] ?? CARD_STATUS.changed
   const count = rows.length
+  // The interviewer's own message, or null for the default one.
+  const message = args.message ?? null
+  const email = {
+    preview: args.email_preview,
+    message: message ?? args.default_message ?? '',
+    noun: 'invitation',
+    title: 'The invitation',
+    previewLabel: `Preview for ${original[0]?.candidate_name ?? 'the candidate'}`,
+    fieldLabel: count === 1 ? 'Message to the candidate' : 'Message to the candidates',
+    hint: 'The greeting with each name, the time, the Join link, the tips and the signature are added automatically. Do not type them here.',
+    footnote:
+      'The highlighted part is your message. Each candidate gets their own name and private link.',
+  }
+
+  // Changed times or a new message go back to the server to be checked.
+  function check(changes) {
+    onCheck({ interviews: rows.map(editable), message, ...changes })
+  }
 
   function change(index, changes) {
     setRows((current) => current.map((row, at) => (at === index ? { ...row, ...changes } : row)))
@@ -203,7 +224,7 @@ function Schedule({ item, canAct, jobId, onApprove, onCheck, onRequestChanges })
             </div>
           </div>
           <StatusChip tone={chip.tone}>
-            {isEdited && isWaiting ? 'Edited by you' : chip.label}
+            {(isEdited || message) && isWaiting ? 'Edited by you' : chip.label}
           </StatusChip>
         </header>
 
@@ -233,7 +254,10 @@ function Schedule({ item, canAct, jobId, onApprove, onCheck, onRequestChanges })
 
         {isWaiting && (
           <WhenYouApprove
-            preview={args.email_preview}
+            email={email}
+            draft={draft}
+            onDraft={setDraft}
+            onSaveMessage={isEditing ? (text) => check({ message: text }) : null}
             lines={[
               {
                 icon: 'mail',
@@ -254,9 +278,11 @@ function Schedule({ item, canAct, jobId, onApprove, onCheck, onRequestChanges })
         {isEditing && (
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3.5">
             <span className="text-sm">
-              {isEdited
-                ? 'Your new times are checked before anything is sent.'
-                : 'or type what to change below'}
+              {draft !== null
+                ? 'Save the message to see it in the preview, then approve.'
+                : isEdited
+                  ? 'Your new times are checked before anything is sent.'
+                  : 'or type what to change below'}
             </span>
             <div className="flex flex-wrap gap-2.5">
               {isEdited ? (
@@ -264,16 +290,14 @@ function Schedule({ item, canAct, jobId, onApprove, onCheck, onRequestChanges })
                   <Button variant="soft" onClick={() => setRows(original)}>
                     Undo changes
                   </Button>
-                  <Button onClick={() => onCheck({ interviews: rows.map(editable) })}>
-                    Check the new times
-                  </Button>
+                  <Button onClick={() => check()}>Check the new times</Button>
                 </>
               ) : (
                 <>
                   <Button variant="outline" onClick={onRequestChanges}>
                     Request changes
                   </Button>
-                  <Button onClick={onApprove}>
+                  <Button onClick={onApprove} disabled={draft !== null}>
                     Approve and send {count === 1 ? 'the invite' : `${count} invites`}
                   </Button>
                 </>
