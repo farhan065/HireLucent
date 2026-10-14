@@ -127,7 +127,10 @@ def check_new(
     if candidate is None:
         raise NotFoundError("This candidate does not exist.")
     if candidate.status not in SCHEDULABLE:
-        raise ConflictError("Only shortlisted candidates can be scheduled for an interview.")
+        raise ConflictError(
+            "Only shortlisted candidates can be scheduled for an interview. "
+            "Shortlist them on the Screening tab first."
+        )
     if _active_count(db, InterviewSession.candidate_id == candidate_id):
         raise ConflictError("This candidate already has an upcoming interview.")
     _ensure_free(db, created_by, start, end)

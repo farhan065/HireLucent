@@ -140,7 +140,7 @@ def publish_job(arguments: dict[str, Any], state: dict[str, Any]) -> tuple[str, 
 TOOL_SCHEMAS: list[type[BaseModel]] = [
     SaveJob,
     PublishJob,
-    interview_tools.GetShortlistedCandidates,
+    interview_tools.GetCandidates,
     interview_tools.ScheduleInterviews,
     interview_tools.RescheduleInterview,
     interview_tools.CancelInterview,
@@ -152,7 +152,7 @@ ToolHandler = Callable[[dict[str, Any], dict[str, Any]], tuple[str, dict]]
 TOOL_HANDLERS: dict[str, ToolHandler] = {
     "SaveJob": save_job,
     "PublishJob": publish_job,
-    "GetShortlistedCandidates": interview_tools.get_shortlisted,
+    "GetCandidates": interview_tools.get_candidates,
     "ScheduleInterviews": interview_tools.schedule_interviews,
     "RescheduleInterview": interview_tools.reschedule_interview,
     "CancelInterview": interview_tools.cancel_interview,

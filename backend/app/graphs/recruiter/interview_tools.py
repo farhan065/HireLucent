@@ -1,13 +1,15 @@
 """The Recruiter Agent's interview tools.
 
-GetShortlistedCandidates is read-only. The other three send, change or
-cancel calendar invitations, so they always wait for the interviewer's
-approval. Before the interviewer is asked, a preparer turns the model's
-dates and times into exact times, checks every rule and builds a preview
-of the invitation, so the card shows exactly what will be sent.
+GetCandidates is read-only. The other three send, change or cancel calendar
+invitations, so they always wait for the interviewer's approval. Before the
+interviewer is asked, a preparer turns the model's dates and times into
+exact times, checks every rule and builds a preview of the invitation, so
+the card shows exactly what will be sent. The interviewer can change the
+message paragraph on the card or by asking the agent.
 
-The model only ever sees candidate IDs, names, scores and times. Email
-addresses stay in the database and go only to the Google MCP server.
+The model only ever sees candidate IDs, names, scores, statuses and times.
+Email addresses, phone numbers and links stay in the database; email
+addresses go only to the Google MCP server.
 """
 
 import json
@@ -22,6 +24,7 @@ from app.core.errors import AppError, ConflictError
 from app.db.session import SessionLocal
 from app.models import Candidate, InterviewSession, Job, ScreeningResult
 from app.models.enums import CandidateStatus, SessionStatus
+from app.schemas.interview import EmailMessage
 from app.services import interview_emails, scheduling_service, session_service
 from app.services.interview_times import app_zone, describe, parse_local, zone_label
 from app.services.scheduling_service import Slot
@@ -34,12 +37,31 @@ NO_JOB = "This conversation has no saved job yet, so there is no one to intervie
 DATE = Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="YYYY-MM-DD")
 TIME = Field(pattern=r"^\d{2}:\d{2}$", description="24-hour HH:MM")
 LENGTH = Field(ge=15, le=120, description="Length in minutes")
+MESSAGE = Field(
+    default=None,
+    description=(
+        "Only when the interviewer asks to change the message to the candidate: "
+        "the message paragraph as plain text. The greeting, time, join link and "
+        "signature are added by the app, so never include them."
+    ),
+)
+MAX_LISTED = 50
+
+# Candidates who have been ranked: screened and not excluded.
+RANKED = (
+    CandidateStatus.SCREENED,
+    CandidateStatus.SHORTLISTED,
+    CandidateStatus.SELECTED,
+    CandidateStatus.INTERVIEW_SCHEDULED,
+    CandidateStatus.ASSESSED,
+)
 
 
-class GetShortlistedCandidates(BaseModel):
-    """List this job's shortlisted candidates with their candidate_id, name,
-    final score, rank and any interview already scheduled. Use it before
-    scheduling, and never guess a candidate_id."""
+class GetCandidates(BaseModel):
+    """List this job's ranked candidates, best first (at most 50), with their
+    candidate_id, name, final score, rank and interview status. Use it before
+    scheduling or when asked about candidates, and never guess a
+    candidate_id."""
 
 
 class InterviewSlot(BaseModel):
@@ -55,18 +77,22 @@ class ScheduleInterviews(BaseModel):
     each candidate is sent an email and a calendar invitation."""
 
     interviews: list[InterviewSlot] = Field(min_length=1, max_length=20)
+    message: EmailMessage | None = MESSAGE
 
 
 class RescheduleInterview(InterviewSlot):
     """Move one candidate's interview that has not started to a new time.
     The candidate is sent the new time and a new link."""
 
+    message: EmailMessage | None = MESSAGE
+
 
 class CancelInterview(BaseModel):
     """Cancel one candidate's interview that has not started. The candidate
-    is told by email and through the calendar."""
+    is told through the calendar."""
 
     candidate_id: int
+    message: EmailMessage | None = MESSAGE
 
 
 def _job_id(state: dict[str, Any]) -> int:
@@ -120,9 +146,17 @@ def _zone(moment: datetime) -> dict[str, str]:
     return {"time_zone": app_zone().key, "time_zone_label": zone_label(moment)}
 
 
-def _preview(invitation: interview_emails.Invitation) -> dict[str, str]:
-    """The calendar invitation as the candidate will see it."""
-    return {"subject": invitation.title, "text": invitation.description}
+def _email(
+    kind: str, name: str, job_title: str, start: datetime, end: datetime, message: str | None
+) -> dict[str, Any]:
+    """The card's email preview, the interviewer's own message (None for
+    the default) and the default message, which the card's editor offers."""
+    preview = interview_emails.preview(kind, name, job_title, start, end, message)
+    return {
+        "message": message,
+        "default_message": preview["default_message"],
+        "email_preview": {"subject": preview["subject"], "text": preview["text"]},
+    }
 
 
 def check_batch(rows: list[dict[str, Any]]) -> None:
@@ -139,46 +173,75 @@ def check_batch(rows: list[dict[str, Any]]) -> None:
             )
 
 
-# --- GetShortlistedCandidates ---
+# --- GetCandidates ---
 
 
-def shortlisted_rows(db: Session, job_id: int) -> list[dict[str, Any]]:
-    """The candidates the interviewer can schedule, best first."""
-    candidates = db.scalars(
-        select(Candidate)
-        .join(ScreeningResult, isouter=True)
-        .where(
-            Candidate.job_id == job_id,
-            Candidate.status.in_(
-                (CandidateStatus.SHORTLISTED, CandidateStatus.INTERVIEW_SCHEDULED)
-            ),
+def interview_status(
+    candidate: Candidate, sessions: list[InterviewSession], now: datetime
+) -> tuple[str, str | None]:
+    """The candidate's interview status and its time, from their interviews
+    that were not cancelled. An interview still to come or under way counts
+    before an earlier one that has finished."""
+    if candidate.status == CandidateStatus.SCREENED:
+        return "not_shortlisted", None
+    for session in sessions:
+        when = describe(session.scheduled_start, session.scheduled_end)
+        if session.status == SessionStatus.IN_PROGRESS:
+            return "interview_in_progress", when
+        if session.status == SessionStatus.SCHEDULED:
+            missed = session.scheduled_end < now
+            return ("interview_missed" if missed else "interview_scheduled"), when
+    finished = [s for s in sessions if s.status == SessionStatus.COMPLETED]
+    if finished:
+        last = max(finished, key=lambda s: s.scheduled_start)
+        return "interviewed", describe(last.scheduled_start, last.scheduled_end)
+    return "shortlisted_not_invited", None
+
+
+def candidate_rows(db: Session, job_id: int) -> tuple[list[dict[str, Any]], int]:
+    """The job's ranked candidates, best first, at most MAX_LISTED, and how
+    many are ranked in all."""
+    candidates = list(
+        db.scalars(
+            select(Candidate)
+            .join(ScreeningResult, isouter=True)
+            .where(Candidate.job_id == job_id, Candidate.status.in_(RANKED))
+            .order_by(ScreeningResult.final_rank.asc().nulls_last(), Candidate.id)
         )
-        .order_by(ScreeningResult.final_rank)
     )
+    shown = candidates[:MAX_LISTED]
+    sessions = db.scalars(
+        select(InterviewSession).where(
+            InterviewSession.job_id == job_id,
+            InterviewSession.candidate_id.in_([c.id for c in shown]),
+            InterviewSession.status != SessionStatus.CANCELLED,
+        )
+    )
+    by_candidate: dict[int, list[InterviewSession]] = {}
+    for session in sessions:
+        by_candidate.setdefault(session.candidate_id, []).append(session)
+    now = session_service.now_utc()
     rows = []
-    for candidate in candidates:
-        upcoming = session_service.find_scheduled(db, job_id, candidate.id)
+    for candidate in shown:
+        status, when = interview_status(candidate, by_candidate.get(candidate.id, []), now)
         rows.append(
             {
                 "candidate_id": candidate.id,
                 "name": candidate.full_name,
                 **_scores(candidate),
-                "interview": (
-                    describe(upcoming.scheduled_start, upcoming.scheduled_end)
-                    if upcoming
-                    else None
-                ),
+                "status": status,
+                "interview": when,
             }
         )
-    return rows
+    return rows, len(candidates)
 
 
-def get_shortlisted(arguments: dict[str, Any], state: dict[str, Any]) -> tuple[str, dict]:
+def get_candidates(arguments: dict[str, Any], state: dict[str, Any]) -> tuple[str, dict]:
     with SessionLocal() as db:
-        rows = shortlisted_rows(db, _job_id(state))
+        rows, total = candidate_rows(db, _job_id(state))
     if not rows:
-        return "No candidates are shortlisted for this job yet.", {}
-    return json.dumps(rows), {}
+        return "No candidates of this job have been screened and ranked yet.", {}
+    return json.dumps({"ranked": total, "shown": len(rows), "candidates": rows}), {}
 
 
 # --- ScheduleInterviews ---
@@ -199,18 +262,20 @@ def prepare_schedule(arguments: dict[str, Any], state: dict[str, Any]) -> dict[s
             rows.append({**_row(candidate.full_name, slot, start, end), **_scores(candidate)})
         check_batch(rows)
         first = rows[0]
-        example = interview_emails.invitation(
-            first["candidate_name"],
-            job.title,
-            datetime.fromisoformat(first["start"]),
-            datetime.fromisoformat(first["end"]),
-            interview_emails.PREVIEW_LINK,
-        )
+        start = datetime.fromisoformat(first["start"])
+        end = datetime.fromisoformat(first["end"])
         return {
             "job_title": job.title,
-            **_zone(datetime.fromisoformat(first["start"])),
+            **_zone(start),
             "interviews": rows,
-            "email_preview": _preview(example),
+            **_email(
+                interview_emails.INVITATION,
+                first["candidate_name"],
+                job.title,
+                start,
+                end,
+                arguments.get("message"),
+            ),
         }
 
 
@@ -224,7 +289,9 @@ def schedule_interviews(arguments: dict[str, Any], state: dict[str, Any]) -> tup
         for row in arguments["interviews"]
     ]
     with SessionLocal() as db:
-        outcomes = scheduling_service.schedule(db, _job_id(state), slots, state["user_id"])
+        outcomes = scheduling_service.schedule(
+            db, _job_id(state), slots, state["user_id"], arguments.get("message")
+        )
     results = [
         {
             "candidate_id": outcome.candidate_id,
@@ -263,9 +330,6 @@ def prepare_reschedule(arguments: dict[str, Any], state: dict[str, Any]) -> dict
         session = _scheduled_session(db, job_id, candidate)
         start, end = _times(arguments)
         session_service.check_move(db, session, start, end)
-        example = interview_emails.moved(
-            candidate.full_name, job.title, start, end, interview_emails.PREVIEW_LINK
-        )
         return {
             **_row(candidate.full_name, arguments, start, end),
             **_zone(start),
@@ -274,7 +338,14 @@ def prepare_reschedule(arguments: dict[str, Any], state: dict[str, Any]) -> dict
             "previous_start": session.scheduled_start.isoformat(),
             "previous_end": session.scheduled_end.isoformat(),
             "previous_when": describe(session.scheduled_start, session.scheduled_end),
-            "email_preview": _preview(example),
+            **_email(
+                interview_emails.MOVED,
+                candidate.full_name,
+                job.title,
+                start,
+                end,
+                arguments.get("message"),
+            ),
         }
 
 
@@ -285,6 +356,7 @@ def reschedule_interview(arguments: dict[str, Any], state: dict[str, Any]) -> tu
             arguments["session_id"],
             datetime.fromisoformat(arguments["start"]),
             datetime.fromisoformat(arguments["end"]),
+            arguments.get("message"),
         )
     result = {
         "candidate_name": arguments["candidate_name"],
@@ -305,8 +377,7 @@ def prepare_cancel(arguments: dict[str, Any], state: dict[str, Any]) -> dict[str
         session = _scheduled_session(db, job_id, candidate)
         if session.status != SessionStatus.SCHEDULED:
             raise ConflictError("Only an interview that has not started can be cancelled.")
-        # Google's own cancellation notice tells the candidate, so there is
-        # no text of ours to preview.
+        # Google's cancellation notice shows this text to the candidate.
         return {
             "candidate_id": candidate.id,
             "candidate_name": candidate.full_name,
@@ -316,12 +387,20 @@ def prepare_cancel(arguments: dict[str, Any], state: dict[str, Any]) -> dict[str
             "start": session.scheduled_start.isoformat(),
             "end": session.scheduled_end.isoformat(),
             "when": describe(session.scheduled_start, session.scheduled_end),
+            **_email(
+                interview_emails.CANCELLED,
+                candidate.full_name,
+                job.title,
+                session.scheduled_start,
+                session.scheduled_end,
+                arguments.get("message"),
+            ),
         }
 
 
 def cancel_interview(arguments: dict[str, Any], state: dict[str, Any]) -> tuple[str, dict]:
     with SessionLocal() as db:
-        change = scheduling_service.cancel(db, arguments["session_id"])
+        change = scheduling_service.cancel(db, arguments["session_id"], arguments.get("message"))
     result = {
         "candidate_name": arguments["candidate_name"],
         "when": arguments["when"],

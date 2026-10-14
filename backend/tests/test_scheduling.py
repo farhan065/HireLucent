@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from pydantic import ValidationError
 
 from app.core.errors import ConflictError, ServiceUnavailableError
 from app.core.security import create_access_token
@@ -60,21 +61,84 @@ def test_the_agent_is_told_the_local_date() -> None:
 # --- Calendar invitation ---
 
 
-def test_invitation_starts_with_the_link_and_has_the_time_and_consent_note() -> None:
+def _order(text: str, *parts: str) -> list[int]:
+    return [text.index(part) for part in parts]
+
+
+def test_invitation_has_the_message_then_the_time_then_the_link() -> None:
     invitation = interview_emails.invitation("Test", "Backend Engineer", START, END, LINK)
+    text = invitation.description
 
     assert invitation.title == "HireLucent video interview – Backend Engineer"
-    assert invitation.description.startswith(f"Join the interview: {LINK}")
-    assert "3:00–3:45 PM (Dhaka, GMT+6)" in invitation.description
-    assert "45-minute" in invitation.description
-    assert "not recorded" in invitation.description
+    assert text.startswith("Hello Test,\n\nThank you for applying for the Backend Engineer")
+    assert "45-minute" in text
+    positions = _order(
+        text, "Thank you", "When: ", f"Join the interview: {LINK}", "Before the interview",
+        "not recorded", "Best regards",
+    )
+    assert positions == sorted(positions)
+    assert "3:00–3:45 PM (Dhaka, GMT+6)" in text
+
+
+def test_the_interviewers_message_replaces_only_the_default() -> None:
+    message = "Please have your portfolio ready to share on screen."
+    text = interview_emails.invitation(
+        "Test", "Backend Engineer", START, END, LINK, message
+    ).description
+
+    assert "Thank you for applying" not in text
+    positions = _order(text, "Hello Test,", message, "When: ", "Join the interview: ")
+    assert positions == sorted(positions)
 
 
 def test_moved_invitation_says_the_old_link_stops_working() -> None:
-    invitation = interview_emails.moved("Test", "Backend Engineer", START, END, LINK)
+    text = interview_emails.moved("Test", "Backend Engineer", START, END, LINK).description
 
-    assert invitation.description.startswith(f"Join the interview: {LINK}")
-    assert "no longer works" in invitation.description
+    positions = _order(text, "has moved to a new time", "New time: ", "Join the interview: ")
+    assert positions == sorted(positions)
+    assert "earlier invitation no longer works" in text
+
+
+def test_cancellation_keeps_the_fixed_sentence_and_uses_the_message() -> None:
+    text = interview_emails.cancelled("Test", "Backend Engineer", START, END, "We will call you.")
+
+    assert "has been cancelled" in text
+    assert "We will call you." in text
+    assert "hiring team will contact you" not in text
+    assert "/interview/" not in text
+
+
+def test_a_message_is_tidied() -> None:
+    assert interview_emails.clean_message("  Hello there.  \r\n\n\n\nThanks.  ") == (
+        "Hello there.\n\nThanks."
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "problem"),
+    [
+        ("   ", "cannot be empty"),
+        ("a" * 1501, "at most 1500"),
+        ("Please <b>bring</b> your CV", "plain text"),
+    ],
+)
+def test_a_bad_message_is_refused(message, problem) -> None:
+    with pytest.raises(ValueError, match=problem):
+        interview_emails.clean_message(message)
+
+
+def test_a_message_of_1500_characters_is_fine() -> None:
+    assert len(interview_emails.clean_message("a" * 1500)) == 1500
+
+
+def test_a_preview_names_the_message_and_the_default() -> None:
+    preview = interview_emails.preview(
+        interview_emails.CANCELLED, "Test", "Backend Engineer", START, END
+    )
+
+    assert preview["message"] == preview["default_message"]
+    assert preview["default_message"] == "The hiring team will contact you about the next steps."
+    assert preview["message"] in preview["text"]
 
 
 # --- Scheduling service ---
@@ -145,10 +209,28 @@ def test_scheduling_sends_only_the_calendar_invitation(monkeypatch, google) -> N
     assert event["attendee"] == "candidate@example.com"
     assert event["time_zone"] == "Asia/Dhaka"
     assert event["start"] == "2026-10-14T15:00:00+06:00"
-    first_line = event["description"].splitlines()[0]
-    assert first_line.startswith("Join the interview: ")
-    assert first_line.endswith("/interview/secret-token")
+    assert "Join the interview: http://localhost:3000/interview/secret-token" in (
+        event["description"]
+    )
     assert session.calendar_event_id == "event-1"
+
+
+def test_scheduling_sends_the_interviewers_message(monkeypatch, google) -> None:
+    job, candidate = _job_and_candidate()
+    db = FakeDB({(Job, 2): job, (Candidate, 5): candidate})
+    monkeypatch.setattr(
+        scheduling_service.session_service,
+        "create_session",
+        lambda *args, **kwargs: (_session(candidate), "secret-token"),
+    )
+
+    scheduling_service.schedule(
+        db, 2, [Slot(5, START, END)], created_by=1, message="Bring your portfolio."
+    )
+
+    description = google["calls"][0][1]["description"]
+    assert "Bring your portfolio." in description
+    assert "Thank you for applying" not in description
 
 
 def test_failed_calendar_removes_the_interview(monkeypatch, google) -> None:
@@ -223,12 +305,13 @@ def test_cancellation_notice_says_cancelled_without_a_link(monkeypatch, google) 
     session = _session(candidate)
     monkeypatch.setattr(scheduling_service.session_service, "cancel", lambda db, i: session)
 
-    change = scheduling_service.cancel(FakeDB({(Job, 2): job}), 9)
+    change = scheduling_service.cancel(FakeDB({(Job, 2): job}), 9, "We will call you.")
 
     assert change.warning is None
     [(tool, arguments)] = google["calls"]
     assert tool == "cancel_calendar_event" and arguments["event_id"] == "event-1"
     assert "has been cancelled" in arguments["description"]
+    assert "We will call you." in arguments["description"]
     assert "/interview/" not in arguments["description"]
 
 
@@ -250,7 +333,9 @@ def test_a_move_updates_the_invitation_with_the_new_link(monkeypatch, google) ->
     assert change.warning is None
     [(tool, event)] = google["calls"]
     assert tool == "update_calendar_event"
-    assert "/interview/new-token" in event["description"].splitlines()[0]
+    assert "Join the interview: http://localhost:3000/interview/new-token" in (
+        event["description"]
+    )
 
 
 # --- The agent's interview tools ---
@@ -258,9 +343,9 @@ def test_a_move_updates_the_invitation_with_the_new_link(monkeypatch, google) ->
 
 def test_interview_actions_wait_for_approval() -> None:
     assert {"ScheduleInterviews", "RescheduleInterview", "CancelInterview"} <= EXTERNAL_ACTIONS
-    assert "GetShortlistedCandidates" not in EXTERNAL_ACTIONS
+    assert "GetCandidates" not in EXTERNAL_ACTIONS
     assert {"ScheduleInterviews", "RescheduleInterview", "CancelInterview"} <= set(PREPARERS)
-    assert "GetShortlistedCandidates" in TOOL_HANDLERS
+    assert "GetCandidates" in TOOL_HANDLERS
 
 
 @contextmanager
@@ -288,7 +373,109 @@ def test_schedule_card_has_exact_times_and_an_email_preview(monkeypatch) -> None
     assert row["when"].startswith("Wednesday 14 October 2026, 3:00–3:45 PM")
     assert card["time_zone_label"] == "Dhaka, GMT+6"
     assert "[private link]" in card["email_preview"]["text"]
+    assert card["message"] is None
+    assert card["default_message"].startswith("Thank you for applying")
+    assert card["default_message"] in card["email_preview"]["text"]
     assert "candidate@example.com" not in json.dumps(card)
+
+
+def test_schedule_card_shows_the_interviewers_message(monkeypatch) -> None:
+    job, candidate = _job_and_candidate()
+    db = FakeDB({(Job, 2): job, (Candidate, 5): candidate})
+    monkeypatch.setattr(interview_tools, "SessionLocal", lambda: _fake_session_local(db))
+    monkeypatch.setattr(interview_tools.session_service, "check_new", lambda *a, **k: candidate)
+
+    card = interview_tools.prepare_schedule(
+        {"interviews": [{"candidate_id": 5, "date": "2026-10-14", "start_time": "15:00",
+                         "duration_minutes": 45}],
+         "message": "Bring your portfolio."},
+        {"saved_job_id": 2, "user_id": 1},
+    )
+
+    assert card["message"] == "Bring your portfolio."
+    assert "Bring your portfolio." in card["email_preview"]["text"]
+    assert "Thank you for applying" not in card["email_preview"]["text"]
+
+
+def test_the_cancel_card_has_a_preview_without_a_link(monkeypatch) -> None:
+    job, candidate = _job_and_candidate()
+    session = _session(candidate)
+    db = FakeDB({(Job, 2): job, (Candidate, 5): candidate})
+    monkeypatch.setattr(interview_tools, "SessionLocal", lambda: _fake_session_local(db))
+    monkeypatch.setattr(interview_tools.session_service, "find_scheduled", lambda *a: session)
+
+    card = interview_tools.prepare_cancel({"candidate_id": 5}, {"saved_job_id": 2})
+
+    text = card["email_preview"]["text"]
+    assert "has been cancelled" in text
+    assert card["default_message"] in text
+    assert "[private link]" not in text
+
+
+def test_the_agent_cannot_send_html_in_a_message() -> None:
+    with pytest.raises(ValidationError):
+        interview_tools.CancelInterview.model_validate(
+            {"candidate_id": 5, "message": "<script>x</script>"}
+        )
+
+
+# --- GetCandidates: each candidate's interview status ---
+
+NOW = START + timedelta(days=1)
+
+
+def _candidate(status: CandidateStatus) -> Candidate:
+    return Candidate(id=5, job_id=2, full_name="Test", status=status)
+
+
+def _interview(status: SessionStatus, start: datetime) -> InterviewSession:
+    return InterviewSession(
+        candidate_id=5, job_id=2, status=status, scheduled_start=start,
+        scheduled_end=start + timedelta(minutes=45),
+    )
+
+
+def test_a_screened_candidate_is_not_shortlisted() -> None:
+    status, when = interview_tools.interview_status(
+        _candidate(CandidateStatus.SCREENED), [], NOW
+    )
+
+    assert (status, when) == ("not_shortlisted", None)
+
+
+def test_a_shortlisted_candidate_without_interviews_is_not_invited() -> None:
+    status, _ = interview_tools.interview_status(_candidate(CandidateStatus.SHORTLISTED), [], NOW)
+
+    assert status == "shortlisted_not_invited"
+
+
+def test_an_interviewed_candidate_is_reported_as_interviewed() -> None:
+    finished = _interview(SessionStatus.COMPLETED, START)
+
+    status, when = interview_tools.interview_status(
+        _candidate(CandidateStatus.INTERVIEW_SCHEDULED), [finished], NOW
+    )
+
+    assert status == "interviewed"
+    assert when.startswith("Wednesday 14 October 2026")
+
+
+@pytest.mark.parametrize(
+    ("session_status", "start", "expected"),
+    [
+        (SessionStatus.SCHEDULED, NOW + timedelta(days=1), "interview_scheduled"),
+        (SessionStatus.SCHEDULED, NOW - timedelta(hours=2), "interview_missed"),
+        (SessionStatus.IN_PROGRESS, NOW, "interview_in_progress"),
+    ],
+)
+def test_an_open_interview_counts_before_a_finished_one(session_status, start, expected) -> None:
+    sessions = [_interview(SessionStatus.COMPLETED, START), _interview(session_status, start)]
+
+    status, when = interview_tools.interview_status(
+        _candidate(CandidateStatus.INTERVIEW_SCHEDULED), sessions, NOW
+    )
+
+    assert status == expected and when
 
 
 def test_a_rule_problem_names_the_candidate(monkeypatch) -> None:
@@ -330,7 +517,7 @@ def test_back_to_back_interviews_are_fine() -> None:
 
 def test_scheduling_needs_a_saved_job() -> None:
     with pytest.raises(ConflictError, match="no saved job"):
-        interview_tools.get_shortlisted({}, {"user_id": 1})
+        interview_tools.get_candidates({}, {"user_id": 1})
 
 
 def test_conversation_shows_the_schedule_card_with_its_result() -> None:
@@ -380,8 +567,8 @@ def _body(*candidate_ids: int) -> dict:
 def test_schedule_endpoint_returns_one_result_per_candidate(client, monkeypatch) -> None:
     seen = {}
 
-    def fake_schedule(db, job_id, slots, created_by):
-        seen.update(job_id=job_id, slots=slots, created_by=created_by)
+    def fake_schedule(db, job_id, slots, created_by, message):
+        seen.update(job_id=job_id, slots=slots, created_by=created_by, message=message)
         return []
 
     monkeypatch.setattr(scheduling_service, "schedule", fake_schedule)
@@ -391,6 +578,90 @@ def test_schedule_endpoint_returns_one_result_per_candidate(client, monkeypatch)
     assert response.status_code == 200
     assert seen["job_id"] == 2 and seen["created_by"] == 1
     assert seen["slots"] == [Slot(5, START, END)]
+    assert seen["message"] is None
+
+
+def test_schedule_endpoint_passes_the_message_on(client, monkeypatch) -> None:
+    seen = {}
+    monkeypatch.setattr(
+        scheduling_service,
+        "schedule",
+        lambda db, job_id, slots, created_by, message: seen.update(message=message) or [],
+    )
+    body = {**_body(5), "message": "  Bring your portfolio.  "}
+
+    response = client.post("/jobs/2/interviews", json=body, headers=_auth(UserRole.INTERVIEWER))
+
+    assert response.status_code == 200
+    assert seen["message"] == "Bring your portfolio."
+
+
+@pytest.mark.parametrize("message", ["   ", "a" * 1501, "<b>Hi</b>"])
+def test_a_bad_message_is_refused_by_the_endpoints(client, message) -> None:
+    headers = _auth(UserRole.INTERVIEWER)
+    times = {"start": START.isoformat(), "end": END.isoformat()}
+
+    assert client.post(
+        "/jobs/2/interviews", json={**_body(5), "message": message}, headers=headers
+    ).status_code == 422
+    assert client.put(
+        "/interviews/9", json={**times, "message": message}, headers=headers
+    ).status_code == 422
+    assert client.post(
+        "/interviews/9/cancel", json={"message": message}, headers=headers
+    ).status_code == 422
+
+
+def test_cancel_works_with_and_without_a_message(client, monkeypatch) -> None:
+    seen = []
+    job, candidate = _job_and_candidate()
+    change = scheduling_service._change(_session(candidate), None)
+    monkeypatch.setattr(
+        scheduling_service, "cancel", lambda db, i, message: seen.append(message) or change
+    )
+    headers = _auth(UserRole.INTERVIEWER)
+
+    assert client.post("/interviews/9/cancel", headers=headers).status_code == 200
+    assert client.post(
+        "/interviews/9/cancel", json={"message": "We will call you."}, headers=headers
+    ).status_code == 200
+    assert seen == [None, "We will call you."]
+
+
+def test_preview_endpoint_returns_the_email(client, monkeypatch) -> None:
+    job, candidate = _job_and_candidate()
+    db = FakeDB({(Job, 2): job, (Candidate, 5): candidate})
+    client.app.dependency_overrides[get_db] = lambda: db
+    body = {"kind": "invitation", "candidate_id": 5, "start": START.isoformat(),
+            "end": END.isoformat(), "message": "Bring your portfolio."}
+
+    response = client.post(
+        "/jobs/2/interviews/preview", json=body, headers=_auth(UserRole.INTERVIEWER)
+    )
+
+    assert response.status_code == 200
+    preview = response.json()
+    assert preview["subject"] == "HireLucent video interview – Backend Engineer"
+    assert preview["text"].startswith("Hello Test Candidate,\n\nBring your portfolio.")
+    assert "[private link]" in preview["text"]
+    assert preview["default_message"].startswith("Thank you for applying")
+    assert "candidate@example.com" not in response.text
+
+
+def test_preview_refuses_a_candidate_of_another_job(client) -> None:
+    job, candidate = _job_and_candidate()
+    candidate.job_id = 3
+    client.app.dependency_overrides[get_db] = lambda: FakeDB(
+        {(Job, 2): job, (Candidate, 5): candidate}
+    )
+    body = {"kind": "cancelled", "candidate_id": 5, "start": START.isoformat(),
+            "end": END.isoformat()}
+
+    response = client.post(
+        "/jobs/2/interviews/preview", json=body, headers=_auth(UserRole.INTERVIEWER)
+    )
+
+    assert response.status_code == 404
 
 
 def test_the_same_candidate_twice_is_refused(client) -> None:
