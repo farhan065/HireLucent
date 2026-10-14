@@ -14,14 +14,17 @@ from app.graphs.recruiter.graph import get_recruiter_graph
 from app.models import InterviewSession, Job
 from app.schemas.error import ErrorResponse
 from app.schemas.interview import (
+    CancelRequest,
+    EmailPreview,
+    EmailPreviewRequest,
     InterviewChange,
     InterviewChatMessage,
     InterviewChatRequest,
     InterviewRoomInfo,
     InterviewRules,
     InterviewSessionSummary,
-    InterviewTime,
     QuestionAsked,
+    RescheduleRequest,
     ScheduleOutcome,
     ScheduleRequest,
     SuggestedQuestion,
@@ -75,11 +78,31 @@ def schedule_interviews(
     principal: Principal = Depends(require_interviewer),
     db: Session = Depends(get_db),
 ) -> list[ScheduleOutcome]:
-    """Each candidate gets a calendar invitation and an email with a private
-    join link. Returns one result per candidate; one failure does not stop
-    the others."""
+    """Each candidate gets a calendar invitation by email with a private
+    join link, and the interviewer's message if one is given. Returns one
+    result per candidate; one failure does not stop the others."""
     slots = [Slot(item.candidate_id, item.start, item.end) for item in payload.interviews]
-    return scheduling_service.schedule(db, job_id, slots, principal.subject_id)
+    return scheduling_service.schedule(
+        db, job_id, slots, principal.subject_id, payload.message
+    )
+
+
+@router.post(
+    "/interviews/preview",
+    response_model=EmailPreview,
+    summary="Preview the email a candidate would get",
+    responses={404: {"model": ErrorResponse, "description": "Job or candidate not found"}},
+)
+def preview_email(
+    job_id: int, payload: EmailPreviewRequest, db: Session = Depends(get_db)
+) -> dict[str, str]:
+    """The invitation, updated invitation or cancellation text, with
+    "[private link]" in place of the link, and the default message. Nothing
+    is saved or sent."""
+    return scheduling_service.preview(
+        db, job_id, payload.kind, payload.candidate_id, payload.start, payload.end,
+        payload.message,
+    )
 
 
 @session_router.get(
@@ -229,11 +252,13 @@ def send_chat(
     responses=SESSION_ERRORS,
 )
 def reschedule_interview(
-    session_id: int, payload: InterviewTime, db: Session = Depends(get_db)
+    session_id: int, payload: RescheduleRequest, db: Session = Depends(get_db)
 ) -> InterviewChange:
     """The candidate gets the new time and a new link; the old link stops
     working."""
-    return scheduling_service.reschedule(db, session_id, payload.start, payload.end)
+    return scheduling_service.reschedule(
+        db, session_id, payload.start, payload.end, payload.message
+    )
 
 
 @session_router.post(
@@ -242,10 +267,15 @@ def reschedule_interview(
     summary="Cancel an interview",
     responses=SESSION_ERRORS,
 )
-def cancel_interview(session_id: int, db: Session = Depends(get_db)) -> InterviewChange:
-    """The link stops working and the candidate is told by email and
-    through the calendar."""
-    return scheduling_service.cancel(db, session_id)
+def cancel_interview(
+    session_id: int,
+    payload: CancelRequest | None = None,
+    db: Session = Depends(get_db),
+) -> InterviewChange:
+    """The link stops working and Google Calendar tells the candidate, with
+    the interviewer's message if one is given."""
+    message = payload.message if payload else None
+    return scheduling_service.cancel(db, session_id, message)
 
 
 @session_router.delete(

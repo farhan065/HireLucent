@@ -1,9 +1,19 @@
 """Schemas for interview sessions."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+
+from app.services.interview_emails import clean_message
+
+# The interviewer's own message paragraph in the email: plain text, not
+# empty, at most 1500 characters.
+EmailMessage = Annotated[str, AfterValidator(clean_message)]
+MESSAGE_FIELD = Field(
+    default=None,
+    description="The interviewer's own message paragraph. Leave out for the default.",
+)
 
 
 class InterviewSessionSummary(BaseModel):
@@ -49,9 +59,11 @@ class ScheduleSlot(InterviewTime):
 
 
 class ScheduleRequest(BaseModel):
-    """Interviews to schedule for a job, at most 20 at once."""
+    """Interviews to schedule for a job, at most 20 at once, with one
+    message for every candidate."""
 
     interviews: list[ScheduleSlot] = Field(min_length=1, max_length=20)
+    message: EmailMessage | None = MESSAGE_FIELD
 
     @field_validator("interviews")
     @classmethod
@@ -60,6 +72,35 @@ class ScheduleRequest(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("Each candidate can be scheduled only once at a time.")
         return interviews
+
+
+class RescheduleRequest(InterviewTime):
+    """An interview's new time, with an optional message."""
+
+    message: EmailMessage | None = MESSAGE_FIELD
+
+
+class CancelRequest(BaseModel):
+    message: EmailMessage | None = MESSAGE_FIELD
+
+
+class EmailPreviewRequest(InterviewTime):
+    """The email one candidate would get. For a cancellation, the times are
+    the interview's current ones."""
+
+    kind: Literal["invitation", "moved", "cancelled"]
+    candidate_id: int
+    message: EmailMessage | None = MESSAGE_FIELD
+
+
+class EmailPreview(BaseModel):
+    """An email as the candidate will see it, with "[private link]" in
+    place of their link."""
+
+    subject: str
+    text: str
+    message: str = Field(description="The message paragraph used in the email.")
+    default_message: str
 
 
 class ScheduleOutcome(BaseModel):
