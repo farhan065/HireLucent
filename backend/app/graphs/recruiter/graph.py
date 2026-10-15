@@ -221,25 +221,10 @@ def human_approval(
 
     feedback = decision.get("feedback") or "No reason was given."
     rejection = ToolMessage(
-        content=f"The interviewer did not approve this. Their feedback: {feedback}"
-        + _current_message(arguments),
+        content=f"The interviewer did not approve this. Their feedback: {feedback}",
         tool_call_id=call["id"],
     )
     return Command(goto="agent", update={"messages": [rejection]})
-
-
-def _current_message(arguments: dict) -> str:
-    """For an interview card: the message the candidate would get now, so
-    the model can rewrite it when the interviewer asks for a change. The
-    model never sees the default message otherwise."""
-    if "default_message" not in arguments:
-        return ""
-    current = arguments.get("message") or arguments["default_message"]
-    return (
-        f'\nThe current message to the candidate is: "{current}". To change it, '
-        "call the same tool again with the same details and the new text in "
-        '"message".'
-    )
 
 
 def _with_arguments(request: AIMessage, call: dict, arguments: dict) -> AIMessage:
