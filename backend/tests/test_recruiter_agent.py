@@ -199,7 +199,7 @@ def test_search_runs_without_approval_and_its_result_reaches_the_model(
         calls.append((name, arguments))
         return [{"source": "backend.txt", "similarity": 0.8, "text": "Template text"}]
 
-    monkeypatch.setattr(recruiter.mcp_client, "call_tool", fake_call_tool)
+    monkeypatch.setattr(recruiter.mcp_client, "call_agent_tool", fake_call_tool)
     graph = graph_with_replies(monkeypatch, [search_call(), AIMessage(DRAFT_ONE)])
     config = thread_config("t8")
 
@@ -216,7 +216,7 @@ def test_the_assistant_continues_when_search_is_unavailable(monkeypatch) -> None
     def broken_call_tool(name: str, arguments: dict) -> list[dict]:
         raise ConnectionError("server down")
 
-    monkeypatch.setattr(recruiter.mcp_client, "call_tool", broken_call_tool)
+    monkeypatch.setattr(recruiter.mcp_client, "call_agent_tool", broken_call_tool)
     graph = graph_with_replies(monkeypatch, [search_call(), AIMessage(DRAFT_ONE)])
     config = thread_config("t9")
 

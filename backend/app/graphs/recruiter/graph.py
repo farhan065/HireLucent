@@ -49,7 +49,7 @@ from app.graphs.recruiter.prompts import (
     ROOM_ERROR_REPLY,
     SYSTEM_PROMPT,
 )
-from app.rag import mcp_client
+from app.mcp_clients import client as mcp_client
 from app.services import interview_context
 from app.services.interview_times import now_description
 from app.graphs.recruiter.tools import (
@@ -101,7 +101,7 @@ def _mcp_tools(interview: bool) -> list[dict]:
     the job description search otherwise."""
     return [
         _without_role(tool) if interview else tool
-        for tool in mcp_client.tool_definitions()
+        for tool in mcp_client.agent_tool_definitions()
         if (tool["function"]["name"] in INTERVIEW_TOOLS) == interview
     ]
 
@@ -221,10 +221,25 @@ def human_approval(
 
     feedback = decision.get("feedback") or "No reason was given."
     rejection = ToolMessage(
-        content=f"The interviewer did not approve this. Their feedback: {feedback}",
+        content=f"The interviewer did not approve this. Their feedback: {feedback}"
+        + _current_message(arguments),
         tool_call_id=call["id"],
     )
     return Command(goto="agent", update={"messages": [rejection]})
+
+
+def _current_message(arguments: dict) -> str:
+    """For an interview card: the message the candidate would get now, so
+    the model can rewrite it when the interviewer asks for a change. The
+    model never sees the default message otherwise."""
+    if "default_message" not in arguments:
+        return ""
+    current = arguments.get("message") or arguments["default_message"]
+    return (
+        f'\nThe current message to the candidate is: "{current}". To change it, '
+        "call the same tool again with the same details and the new text in "
+        '"message".'
+    )
 
 
 def _with_arguments(request: AIMessage, call: dict, arguments: dict) -> AIMessage:
@@ -257,7 +272,7 @@ def call_tools(state: RecruiterState) -> Command[Literal["agent", "handle_error"
                 arguments = dict(call["args"])
                 if _in_interview(state):
                     arguments["role"] = state.get("interview_role") or ""
-                content = json.dumps(mcp_client.call_tool(call["name"], arguments))
+                content = json.dumps(mcp_client.call_agent_tool(call["name"], arguments))
         except Exception as exc:
             attempts += 1
             is_ours = call["name"] in TOOL_HANDLERS

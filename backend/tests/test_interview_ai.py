@@ -253,7 +253,7 @@ def test_bank_answers_are_marked_and_kept_to_the_role(monkeypatch: pytest.Monkey
         searched.append(arguments)
         return [{"question": "How do you roll back?", "source": "q.txt"}]
 
-    monkeypatch.setattr(recruiter.mcp_client, "call_tool", fake_call)
+    monkeypatch.setattr(recruiter.mcp_client, "call_agent_tool", fake_call)
     graph = _interview_graph(
         monkeypatch,
         [
@@ -322,7 +322,7 @@ def test_each_mode_gets_its_own_search_tool(monkeypatch: pytest.MonkeyPatch) -> 
         {"type": "function", "function": {"name": name, "parameters": parameters}}
         for name in ("search_jd_references", "search_question_bank")
     ]
-    monkeypatch.setattr(recruiter.mcp_client, "tool_definitions", lambda: tools)
+    monkeypatch.setattr(recruiter.mcp_client, "agent_tool_definitions", lambda: tools)
 
     interview_tools = recruiter._mcp_tools(interview=True)
     assert [t["function"]["name"] for t in interview_tools] == ["search_question_bank"]
