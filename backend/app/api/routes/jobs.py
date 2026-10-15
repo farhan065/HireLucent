@@ -99,7 +99,10 @@ def read_job_activity(job_id: int, db: Session = Depends(get_db)) -> JobActivity
     summary="Delete a job and everything stored for it",
     responses={
         **NOT_FOUND,
-        409: {"model": ErrorResponse, "description": "A task is running for the job"},
+        409: {
+            "model": ErrorResponse,
+            "description": "A task is running, or the job has upcoming interviews",
+        },
     },
 )
 def delete_job(job_id: int, db: Session = Depends(get_db)) -> None:

@@ -18,12 +18,17 @@ from app.services import (
     interview_chat_service,
     job_service,
     screening_service,
+    session_service,
     task_service,
 )
 
 logger = get_logger(__name__)
 
 HAS_JOB_MESSAGE = "This conversation has a saved job. Delete the job instead."
+OPEN_INTERVIEWS = (
+    "This job has upcoming interviews. Cancel them on the Interviews tab before "
+    "deleting the job."
+)
 
 
 def delete_job(db: Session, job_id: int) -> None:
@@ -31,10 +36,14 @@ def delete_job(db: Session, job_id: int) -> None:
     conversation, its interviews' chats and its background tasks. This cannot be undone.
 
     The public job post and the application form are outside the
-    application and are not touched.
+    application and are not touched. A job with an upcoming or running
+    interview cannot be deleted: its candidates hold calendar invitations,
+    which only cancelling the interviews withdraws.
     """
     job = job_service.get_job(db, job_id)
     task_service.ensure_idle(db, job_id)
+    if session_service.has_open_interviews(db, job_id):
+        raise ConflictError(OPEN_INTERVIEWS)
 
     threads = list(
         db.scalars(select(Conversation.thread_id).where(Conversation.job_id == job_id))
