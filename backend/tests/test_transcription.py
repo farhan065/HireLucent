@@ -4,6 +4,7 @@ Deepgram, so no network or key is needed) and the transcript endpoint."""
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
@@ -81,6 +82,20 @@ def test_interim_text_is_not_saved() -> None:
 
     assert builder.handle(_result("I built a", 0, 1, final=False)) is None
     assert builder.flush() is None
+
+
+def test_the_words_being_spoken_are_kept_until_the_turn_is_saved() -> None:
+    builder = _builder()
+
+    builder.handle(_result("I built a", 1.0, 1.0, final=False))
+    assert builder.live_text == "I built a"
+    builder.handle(_result("I built a REST API", 1.0, 1.5))
+    builder.handle(_result("with", 2.5, 0.3, final=False))
+    assert builder.live_text == "I built a REST API with"
+    assert builder.live_start_ms == 1000
+
+    builder.handle(_result("with FastAPI.", 2.5, 1.0, pause=True))
+    assert builder.live_text == ""
 
 
 def test_final_pieces_become_one_turn_at_a_pause() -> None:
@@ -202,11 +217,18 @@ class FakeDeepgram:
                 return
 
 
-def _run_sink(monkeypatch: pytest.MonkeyPatch, fake: FakeDeepgram, seconds: float) -> list:
+def _run_sink(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeDeepgram, seconds: float, sent: list | None = None
+) -> list:
     saved: list[Turn] = []
 
-    async def save(turn: Turn) -> None:
+    async def save(turn: Turn) -> int:
         saved.append(turn)
+        return len(saved)
+
+    async def publish(event: dict) -> None:
+        if sent is not None:
+            sent.append(event)
 
     async def scenario() -> None:
         async with serve(fake.handler, "127.0.0.1", 0) as server:
@@ -216,7 +238,9 @@ def _run_sink(monkeypatch: pytest.MonkeyPatch, fake: FakeDeepgram, seconds: floa
             monkeypatch.setattr(settings, "deepgram_api_key", "test-key")
             monkeypatch.setattr(deepgram, "FIRST_RETRY_SECONDS", 0.01)
             monkeypatch.setattr(deepgram, "MAX_RETRY_SECONDS", 0.05)
-            sink = deepgram.DeepgramSink(9, "interviewer", datetime.now(timezone.utc), [], save)
+            sink = deepgram.DeepgramSink(
+                9, "interviewer", datetime.now(timezone.utc), [], save, publish
+            )
             # Audio arrives in 10 ms frames, as from the video room.
             frame = bytes(deepgram.CHUNK_BYTES // 10)
             for _ in range(int(seconds * 100)):
@@ -229,15 +253,32 @@ def _run_sink(monkeypatch: pytest.MonkeyPatch, fake: FakeDeepgram, seconds: floa
     return saved
 
 
-def test_speech_is_sent_and_each_turn_saved(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_speech_is_sent_and_each_turn_saved(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
     fake = FakeDeepgram()
+    sent: list[dict] = []
 
-    saved = _run_sink(monkeypatch, fake, seconds=1.5)
+    saved = _run_sink(monkeypatch, fake, seconds=1.5, sent=sent)
 
     assert fake.headers == ["Token test-key"]
     assert fake.audio_bytes == deepgram.CHUNK_BYTES * 15
     assert fake.closed_by_client is True
     assert [(turn.speaker, turn.text) for turn in saved] == [("interviewer", "answer 1")]
+    # The saved turn goes to the interviewer's screen with its id.
+    assert sent[0] == {
+        "type": "turn",
+        "id": 1,
+        "speaker": "interviewer",
+        "start_ms": sent[0]["start_ms"],
+        "end_ms": sent[0]["end_ms"],
+        "text": "answer 1",
+    }
+    # Each saved turn is logged with numbers only, never its words.
+    [logged] = [r for r in caplog.records if r.getMessage() == "transcript_turn_saved"]
+    assert logged.fields["speaker"] == "interviewer" and logged.fields["words"] == 2
+    assert "answer" not in str(logged.fields)
 
 
 def test_a_dropped_connection_is_opened_again(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -318,3 +359,30 @@ def test_candidate_cannot_read_the_transcript(client: TestClient) -> None:
     response = client.get("/interviews/9/transcript", headers=_auth(UserRole.CANDIDATE))
 
     assert response.status_code == 403
+
+
+# --- The status the interviewer's screen shows ---
+
+
+@pytest.mark.parametrize(
+    ("provider", "key", "problem", "expected"),
+    [
+        ("deepgram", "key", False, "listening"),
+        ("deepgram", "key", True, "paused"),
+        ("deepgram", "", False, "off"),
+        ("off", "key", False, "off"),
+    ],
+)
+def test_the_status_says_whether_transcription_works(
+    monkeypatch: pytest.MonkeyPatch, provider: str, key: str, problem: bool, expected: str
+) -> None:
+    pytest.importorskip("livekit.rtc")
+    from app.workers import transcription_worker as worker
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "stt_provider", provider)
+    monkeypatch.setattr(settings, "deepgram_api_key", key)
+    listener = worker.InterviewListener.__new__(worker.InterviewListener)
+    listener._sinks = {"candidate": SimpleNamespace(has_problem=problem)}
+
+    assert listener.status() == expected

@@ -55,7 +55,9 @@ def test_only_numbers_are_logged(caplog: pytest.LogCaptureFixture) -> None:
     }
 
 
-def test_the_worker_pass_is_hidden_and_listen_only(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_worker_pass_is_hidden_and_sends_no_audio_or_video(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "livekit_api_key", "devkey")
     monkeypatch.setattr(settings, "livekit_api_secret", SECRET)
@@ -67,12 +69,14 @@ def test_the_worker_pass_is_hidden_and_listen_only(monkeypatch: pytest.MonkeyPat
         timedelta(minutes=5),
         hidden=True,
         can_publish=False,
+        can_publish_data=True,
     )
 
     grants = jwt.decode(token, SECRET, algorithms=["HS256"])["video"]
     assert grants["room"] == "interview-9" and grants["hidden"] is True
     assert grants["canSubscribe"] is True
-    assert grants["canPublish"] is False and grants["canPublishData"] is False
+    # It sends the live transcript as data, never audio or video.
+    assert grants["canPublish"] is False and grants["canPublishData"] is True
 
 
 # --- One stream per person ---

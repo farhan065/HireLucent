@@ -2,10 +2,13 @@
 
 The worker hands each person's audio to a DeepgramSink. The sink sends the
 audio in small pieces and reads back the text. Final text becomes turns
-(see turns.py), which are saved as soon as each one is complete.
+(see turns.py), which are saved as soon as each one is complete. The words
+of the turn still being spoken, and each saved turn, are also handed to
+the worker, which sends them to the interviewer's screen.
 
 - Raw audio is never stored. It is sent and dropped.
-- The text is never logged; only counts and timings are.
+- The text is never logged: each saved turn is logged with its speaker,
+  times and number of words only.
 - Deepgram is asked not to keep the audio for improving its models.
 - If the connection drops, the sink connects again. Audio from the last
   thirty seconds waits in a queue meanwhile, so short drops lose nothing.
@@ -43,7 +46,10 @@ MAX_RETRY_SECONDS = 30
 # How long closing may take to collect the last words.
 CLOSE_TIMEOUT_SECONDS = 10
 
-SaveTurn = Callable[[Turn], Awaitable[None]]
+# Saves a turn and returns its id.
+SaveTurn = Callable[[Turn], Awaitable[int]]
+# Sends one live transcript event to the interviewer's screen.
+Publish = Callable[[dict], Awaitable[None]]
 
 
 def listen_url(keyterms: list[str]) -> str:
@@ -76,12 +82,16 @@ class DeepgramSink:
         started_at: datetime,
         keyterms: list[str],
         save: SaveTurn,
+        publish: Publish | None = None,
     ):
         self.session_id = session_id
         self.speaker = speaker
         self.started_at = started_at
         self.keyterms = keyterms
         self.save = save
+        self.publish = publish
+        # True while the connection to Deepgram is down and being retried.
+        self.has_problem = False
         self.turns = 0
         self.dropped_chunks = 0
         self._buffer = bytearray()
@@ -146,6 +156,7 @@ class DeepgramSink:
                         keyterms=len(self.keyterms),
                     )
                     wait = FIRST_RETRY_SECONDS
+                    self.has_problem = False
                     if await self._stream(connection):
                         return
             except InvalidStatus as exc:
@@ -155,6 +166,7 @@ class DeepgramSink:
                 self._log_problem("stt_disconnected", error_type=type(exc).__name__, retry_in=wait)
             if self._closing:
                 return
+            self.has_problem = True
             await asyncio.sleep(wait)
             wait = min(wait * 2, MAX_RETRY_SECONDS)
 
@@ -176,9 +188,10 @@ class DeepgramSink:
         try:
             async for raw in connection:
                 if isinstance(raw, str):
-                    await self._save(builder.handle(json.loads(raw)))
+                    await self._handle(builder, json.loads(raw))
         finally:
             await self._save(builder.flush())
+            await self._send_live(builder)
             if not sender.done():
                 sender.cancel()
             await asyncio.gather(sender, return_exceptions=True)
@@ -200,11 +213,61 @@ class DeepgramSink:
             clock.add(len(chunk) / (SAMPLE_RATE * 2), ended_at)
             await connection.send(chunk)
 
+    async def _handle(self, builder: TurnBuilder, message: dict) -> None:
+        """Save a finished turn, and send the words still being spoken
+        whenever they change."""
+        before = builder.live_text
+        await self._save(builder.handle(message))
+        if builder.live_text != before:
+            await self._send_live(builder)
+
+    async def _send_live(self, builder: TurnBuilder) -> None:
+        """The words of the current turn so far; empty text clears them."""
+        await self._publish(
+            {
+                "type": "live",
+                "speaker": self.speaker,
+                "start_ms": builder.live_start_ms,
+                "text": builder.live_text,
+            }
+        )
+
     async def _save(self, turn: Turn | None) -> None:
         if turn is None:
             return
         try:
-            await self.save(turn)
-            self.turns += 1
+            turn_id = await self.save(turn)
         except Exception as exc:
             self._log_problem("transcript_turn_not_saved", error_type=type(exc).__name__)
+            return
+        self.turns += 1
+        # Numbers only: what was said is never logged.
+        log_event(
+            logger,
+            "transcript_turn_saved",
+            session_id=self.session_id,
+            speaker=self.speaker,
+            start_ms=turn.start_ms,
+            end_ms=turn.end_ms,
+            words=len(turn.text.split()),
+        )
+        await self._publish(
+            {
+                "type": "turn",
+                "id": turn_id,
+                "speaker": turn.speaker,
+                "start_ms": turn.start_ms,
+                "end_ms": turn.end_ms,
+                "text": turn.text,
+            }
+        )
+
+    async def _publish(self, event: dict) -> None:
+        """Send to the interviewer's screen. A failure only affects the live
+        view: the turn is already saved and loads again from the database."""
+        if self.publish is None:
+            return
+        try:
+            await self.publish(event)
+        except Exception:
+            pass

@@ -85,14 +85,20 @@ def open_sink(
     started_at: datetime,
     keyterms: list[str],
     save: deepgram.SaveTurn,
+    publish: deepgram.Publish | None = None,
 ) -> AudioSink:
     """The sink for one person's audio in one interview."""
-    settings = get_settings()
-    if settings.stt_provider == "deepgram":
-        if settings.deepgram_api_key:
-            return deepgram.DeepgramSink(session_id, speaker, started_at, keyterms, save)
+    if stt_enabled():
+        return deepgram.DeepgramSink(session_id, speaker, started_at, keyterms, save, publish)
+    if get_settings().stt_provider == "deepgram":
         log_event(logger, "stt_not_configured", level=logging.WARNING, session_id=session_id)
     return MeterSink(session_id, speaker)
+
+
+def stt_enabled() -> bool:
+    """True when speech is turned into text: Deepgram chosen, with a key."""
+    settings = get_settings()
+    return settings.stt_provider == "deepgram" and bool(settings.deepgram_api_key)
 
 
 def plan(running: set[int], listening: set[int]) -> tuple[set[int], set[int]]:

@@ -66,7 +66,8 @@ class AudioClock:
 
 
 class TurnBuilder:
-    """Joins one person's final pieces into turns."""
+    """Joins one person's final pieces into turns, and keeps the words of
+    the turn still being spoken for the live transcript."""
 
     def __init__(self, speaker: str, clock: AudioClock):
         self.speaker = speaker
@@ -74,6 +75,19 @@ class TurnBuilder:
         self._texts: list[str] = []
         self._start = 0.0
         self._end = 0.0
+        # The latest interim text, which may still change.
+        self._interim = ""
+        self._interim_start = 0.0
+
+    @property
+    def live_text(self) -> str:
+        """Everything said in the current turn so far: its final pieces and
+        the interim words after them. Empty between turns."""
+        return " ".join([*self._texts, self._interim]).strip()
+
+    @property
+    def live_start_ms(self) -> int:
+        return self.clock.elapsed_ms(self._start if self._texts else self._interim_start)
 
     def handle(self, message: dict) -> Turn | None:
         """Read one message from the service. Returns a turn when one is
@@ -81,10 +95,15 @@ class TurnBuilder:
         kind = message.get("type")
         if kind == "UtteranceEnd":
             return self.flush()
-        if kind != "Results" or not message.get("is_final"):
+        if kind != "Results":
             return None
         alternatives = message.get("channel", {}).get("alternatives") or [{}]
         text = (alternatives[0].get("transcript") or "").strip()
+        if not message.get("is_final"):
+            self._interim = text
+            self._interim_start = float(message.get("start", 0))
+            return None
+        self._interim = ""
         if text:
             start = float(message.get("start", 0))
             if not self._texts:
@@ -97,6 +116,7 @@ class TurnBuilder:
 
     def flush(self) -> Turn | None:
         """The turn so far, if any, and start a new one."""
+        self._interim = ""
         if not self._texts:
             return None
         turn = Turn(
