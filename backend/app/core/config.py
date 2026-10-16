@@ -108,6 +108,15 @@ class Settings(BaseSettings):
     capture_livekit_url: str = "ws://localhost:7880"
     # How often the worker looks for interviews that started or ended.
     capture_poll_seconds: float = Field(default=3, gt=0, le=60)
+    # Speech-to-text for interviews. "deepgram" turns each person's speech
+    # into text; "off" only measures the audio, so no key is needed.
+    stt_provider: Literal["deepgram", "off"] = "deepgram"
+    deepgram_api_key: str = ""
+    deepgram_url: str = "wss://api.deepgram.com/v1/listen"
+    deepgram_model: str = "nova-3"
+    # Send the job's requirement keywords to the speech-to-text service, so
+    # technical words are recognised better. False transcribes without them.
+    stt_keyterms: bool = True
     # How many minutes before an interview's start the candidate can join.
     join_opens_minutes_before: int = Field(default=10, ge=0, le=60)
     # How far ahead an interview must be scheduled. Set it to 1 while testing
