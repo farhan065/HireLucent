@@ -31,8 +31,8 @@ def test_running_interviews_are_joined_and_ended_ones_left() -> None:
 def test_speech_and_silence_are_measured_separately() -> None:
     sink = capture.MeterSink(9, "candidate")
 
-    sink.push(_pcm(4000, 2.0), capture.SAMPLE_RATE)
-    sink.push(_pcm(0, 1.0), capture.SAMPLE_RATE)
+    asyncio.run(sink.push(_pcm(4000, 2.0), capture.SAMPLE_RATE))
+    asyncio.run(sink.push(_pcm(0, 1.0), capture.SAMPLE_RATE))
 
     assert sink.seconds == pytest.approx(3.0)
     assert sink.speech_seconds == pytest.approx(2.0)
@@ -42,8 +42,8 @@ def test_only_numbers_are_logged(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO)
     sink = capture.MeterSink(9, "interviewer")
 
-    sink.push(_pcm(4000, capture.REPORT_EVERY_SECONDS), capture.SAMPLE_RATE)
-    sink.close()
+    asyncio.run(sink.push(_pcm(4000, capture.REPORT_EVERY_SECONDS), capture.SAMPLE_RATE))
+    asyncio.run(sink.close())
 
     events = [record.getMessage() for record in caplog.records]
     assert events == ["audio_stream_started", "audio_stream_progress", "audio_stream_finished"]
