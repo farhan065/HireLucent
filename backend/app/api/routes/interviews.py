@@ -29,6 +29,7 @@ from app.schemas.interview import (
     ScheduleRequest,
     SuggestedQuestion,
 )
+from app.schemas.transcript import Transcript
 from app.schemas.video import RoomTokenResponse
 from app.services import (
     interview_chat_service,
@@ -36,6 +37,7 @@ from app.services import (
     room_service,
     scheduling_service,
     session_service,
+    transcript_service,
 )
 from app.services.scheduling_service import Slot
 
@@ -172,6 +174,19 @@ def admit_candidate(session_id: int, db: Session = Depends(get_db)) -> Interview
 def end_interview(session_id: int, db: Session = Depends(get_db)) -> InterviewSession:
     """Closes the video room; the candidate's link stops working."""
     return room_service.end(db, session_id)
+
+
+@session_router.get(
+    "/{session_id}/transcript",
+    response_model=Transcript,
+    summary="Read the interview transcript",
+    responses={404: {"model": ErrorResponse, "description": "Interview not found"}},
+)
+def read_transcript(session_id: int, db: Session = Depends(get_db)) -> dict:
+    """Every saved turn, in the order spoken, with the speaker, the time from
+    the start and the clock time. Turns are saved while the interview runs,
+    so this works during the interview and after it."""
+    return transcript_service.read_transcript(db, session_id)
 
 
 AI_ERRORS = {**ROOM_ERRORS, 503: {"model": ErrorResponse, "description": "AI unavailable"}}
