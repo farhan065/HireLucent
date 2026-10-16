@@ -4,7 +4,6 @@ import {
   CircleAlert,
   Lightbulb,
   MessageSquareText,
-  ScrollText,
   UserRound,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
@@ -14,6 +13,7 @@ import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import CandidateProfile from '../components/room/CandidateProfile.jsx'
 import ConnectionChip from '../components/room/ConnectionChip.jsx'
 import InterviewChat from '../components/room/InterviewChat.jsx'
+import LiveTranscript from '../components/room/LiveTranscript.jsx'
 import RoomControls from '../components/room/RoomControls.jsx'
 import RoomMessages from '../components/room/RoomMessages.jsx'
 import SuggestedQuestions from '../components/room/SuggestedQuestions.jsx'
@@ -21,6 +21,7 @@ import VideoStage from '../components/room/VideoStage.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
 import { useRoom } from '../hooks/useRoom.js'
+import { useTranscript } from '../hooks/useTranscript.js'
 import { useUnread } from '../hooks/useUnread.js'
 import { apiRequest } from '../lib/api.js'
 import { clock, minutesBetween, waitingFor } from '../lib/interviews.js'
@@ -61,26 +62,6 @@ function Timer({ interview, now }) {
       {elapsed(interview.started_at, now)} of {length}:00 ·{' '}
       {over > 0 ? `${over} min over` : `ends ${clock(plannedEnd)}`}
     </span>
-  )
-}
-
-// A panel the next steps fill in, shown now so the room keeps its shape.
-function ComingSoon({ icon: Icon, title, note, className = '', children }) {
-  return (
-    <section
-      className={`flex min-h-0 flex-col overflow-hidden rounded-card border border-line bg-white shadow-card ${className}`}
-    >
-      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line px-4 py-3">
-        <span className="flex items-center gap-2 font-display text-[15px] font-bold text-navy">
-          <Icon className="size-4.5 text-brand" aria-hidden="true" />
-          {title}
-        </span>
-        {note && <span className="text-xs">{note}</span>}
-      </header>
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-y-auto px-6 py-6 text-center text-sm">
-        {children}
-      </div>
-    </section>
   )
 }
 
@@ -231,7 +212,7 @@ function ChatPanel({ sessionId, candidateName, room }) {
 // The interviewer's interview room: the candidate and suggested questions
 // on the left, the video with the live transcript below it in the middle,
 // and the read-only AI Agent chat and messages with the candidate on the
-// right. The transcript arrives with Module 5.
+// right.
 export default function InterviewRoomPage() {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -278,6 +259,7 @@ export default function InterviewRoomPage() {
 
   const backTo = jobId ? `/app/jobs/${jobId}/interviews` : '/app/jobs'
   const status = info?.interview.status
+  const transcript = useTranscript(sessionId, room, status === 'in_progress')
   // Ended somewhere else, for example in another tab.
   useEffect(() => {
     const isOver = status === 'completed' || status === 'cancelled' || room.endReason === 'ended'
@@ -414,15 +396,12 @@ export default function InterviewRoomPage() {
               />
             )}
           />
-          <ComingSoon
-            icon={ScrollText}
-            title="Live transcript"
-            note="Only you see this"
-            className="min-h-40 flex-1 lg:min-h-0"
-          >
-            <p className="font-semibold text-navy">The live transcript appears here</p>
-            <p>Each person&apos;s words are written down once speech-to-text is added.</p>
-          </ComingSoon>
+          <LiveTranscript
+            transcript={transcript}
+            candidateName={interview.candidate_name}
+            startedAt={interview.started_at}
+            className="min-h-60 flex-1 lg:min-h-0"
+          />
         </div>
 
         <ChatPanel

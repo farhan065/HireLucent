@@ -120,6 +120,9 @@ export function useRoom(connection, renewPass) {
   // Text messages, oldest first: { id, isMine, name, text, at }.
   const [messages, setMessages] = useState([])
   const messageCountRef = useRef(0)
+  // Handlers for data sent to this person on a topic, such as the live
+  // transcript. They stay registered when the room is opened again.
+  const dataHandlersRef = useRef(new Map())
 
   const addMessage = useCallback((message) => {
     messageCountRef.current += 1
@@ -164,6 +167,10 @@ export function useRoom(connection, renewPass) {
       if (!isCurrent || participant.isLocal) return
       if (quality === ConnectionQuality.Lost) setRemoteLostAt((at) => at ?? Date.now())
       else setRemoteLostAt(null)
+    })
+    room.on(RoomEvent.DataReceived, (payload, participant, kind, topic, encryption, identity) => {
+      const handler = dataHandlersRef.current.get(topic)
+      if (isCurrent && handler) handler(payload, identity ?? participant?.identity)
     })
     room.registerTextStreamHandler(MESSAGE_TOPIC, async (reader, { identity }) => {
       const text = await reader.readAll().catch(() => '')
@@ -282,10 +289,20 @@ export function useRoom(connection, renewPass) {
     [addMessage],
   )
 
+  // Receive data on a topic: handler(payload, senderIdentity). Returns a
+  // function that stops it.
+  const onData = useCallback((topic, handler) => {
+    dataHandlersRef.current.set(topic, handler)
+    return () => {
+      if (dataHandlersRef.current.get(topic) === handler) dataHandlersRef.current.delete(topic)
+    }
+  }, [])
+
   return {
     ...view,
     messages,
     sendMessage,
+    onData,
     state,
     endReason,
     notice: [problems.camera, problems.microphone].filter(Boolean).join(' '),
