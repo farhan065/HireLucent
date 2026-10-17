@@ -12,6 +12,7 @@ import KnowledgeBasePage from './pages/KnowledgeBasePage.jsx'
 import LandingPage from './pages/LandingPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
+import TranscriptPage from './pages/TranscriptPage.jsx'
 
 // The AI Agent and the video pages are loaded only when opened, so their
 // libraries do not slow down the rest of the app.
@@ -53,6 +54,7 @@ export default function App() {
             <Route path="screening" element={<ScreeningTab />} />
             <Route path="interviews" element={<InterviewsTab />} />
           </Route>
+          <Route path="interviews/:sessionId/transcript" element={<TranscriptPage />} />
           <Route
             path="assistant/:threadId?"
             element={

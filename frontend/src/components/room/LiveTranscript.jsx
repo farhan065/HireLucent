@@ -50,7 +50,7 @@ function transcriptRows(turns, live) {
   return rows
 }
 
-function Avatar({ isInterviewer, candidateName }) {
+export function Avatar({ isInterviewer, candidateName }) {
   return (
     <span
       aria-hidden="true"
