@@ -37,6 +37,11 @@ export function markAsked(sessionId, questionId, asked) {
   })
 }
 
+// Every turn of the interview transcript saved so far, oldest first.
+export function readTranscript(sessionId) {
+  return apiRequest(`/interviews/${sessionId}/transcript`)
+}
+
 // The room's read-only chat with the AI Agent.
 export function readChat(sessionId) {
   return apiRequest(`/interviews/${sessionId}/chat`)
@@ -56,4 +61,14 @@ export function elapsed(since, now = new Date()) {
   const seconds = Math.max(0, Math.floor((now - new Date(since)) / 1000))
   const minutes = Math.floor(seconds / 60)
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+// "12:31" or "1:02:05": a time in milliseconds from the start of the
+// interview, as the transcript shows it.
+export function fromStart(ms) {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const rest = String(seconds % 60).padStart(2, '0')
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`
 }

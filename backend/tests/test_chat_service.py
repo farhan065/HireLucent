@@ -211,7 +211,7 @@ def test_approval_without_a_pending_action_is_refused(monkeypatch) -> None:
 def test_a_draft_written_from_a_template_shows_its_source(monkeypatch) -> None:
     monkeypatch.setattr(
         recruiter.mcp_client,
-        "call_tool",
+        "call_agent_tool",
         lambda name, arguments: [{"source": "backend.txt", "similarity": 0.8, "text": "T"}],
     )
     graph = graph_with_replies(
@@ -230,7 +230,7 @@ def test_a_draft_written_from_a_template_shows_its_source(monkeypatch) -> None:
 
 
 def test_a_search_with_no_match_shows_no_source(monkeypatch) -> None:
-    monkeypatch.setattr(recruiter.mcp_client, "call_tool", lambda name, arguments: [])
+    monkeypatch.setattr(recruiter.mcp_client, "call_agent_tool", lambda name, arguments: [])
     graph = graph_with_replies(monkeypatch, [search_call(), AIMessage(DRAFT_ONE)])
 
     view = chat_service.send_message(graph, 1, None, "I need a pastry chef")
@@ -243,7 +243,7 @@ def test_an_unavailable_search_shows_no_source(monkeypatch) -> None:
     def broken_call_tool(name: str, arguments: dict) -> list[dict]:
         raise ConnectionError("server down")
 
-    monkeypatch.setattr(recruiter.mcp_client, "call_tool", broken_call_tool)
+    monkeypatch.setattr(recruiter.mcp_client, "call_agent_tool", broken_call_tool)
     graph = graph_with_replies(monkeypatch, [search_call(), AIMessage(DRAFT_ONE)])
 
     view = chat_service.send_message(graph, 1, None, "I need a backend engineer")

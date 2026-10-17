@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { CARD_STATUS, rangeLabel } from '../../lib/interviews.js'
 import Button from '../Button.jsx'
 import StatusChip from '../StatusChip.jsx'
@@ -14,16 +15,46 @@ function Detail({ label, children }) {
   )
 }
 
+// The email's wording around the message editor.
+function emailFor(args, name, isMove) {
+  const shared = {
+    preview: args.email_preview,
+    message: args.message ?? args.default_message ?? '',
+    fieldLabel: `Message to ${name}`,
+  }
+  if (isMove) {
+    return {
+      ...shared,
+      noun: 'invitation',
+      title: 'The updated invitation',
+      previewLabel: `Preview for ${name}`,
+      hint: 'The greeting, the new time, the Join link, the tips and the signature are added automatically. Do not type them here.',
+      footnote: 'The highlighted part is your message. They get their own new private link.',
+    }
+  }
+  return {
+    ...shared,
+    noun: 'message',
+    previewLabel: 'Cancellation message',
+    hint: 'The greeting, the cancelled time and the signature are added automatically. Do not type them here.',
+    footnote: 'Only the highlighted part can be changed.',
+  }
+}
+
 // The agent's request to move or cancel one interview. "kind" is
 // "reschedule" or "cancel_interview". Nothing is sent until the interviewer
-// approves.
+// approves. A changed message goes back to the server to be checked, and the
+// card comes back with the new preview.
 export default function InterviewChangeCard({
   item,
   canAct,
   onApprove,
   onReject,
   onRequestChanges,
+  onCheck,
 }) {
+  // The message being edited, or null.
+  const [draft, setDraft] = useState(null)
   const args = item.arguments ?? {}
   const isMove = item.kind === 'reschedule'
   const isWaiting = item.status === 'waiting'
@@ -33,6 +64,19 @@ export default function InterviewChangeCard({
   const when = rangeLabel(args.start, args.end, zone) || args.when
   const zoneNote = args.time_zone_label ? ` (${args.time_zone_label})` : ''
   const result = item.result
+  const canEdit = isWaiting && canAct
+
+  function saveMessage(message) {
+    const details = isMove
+      ? {
+          candidate_id: args.candidate_id,
+          date: args.date,
+          start_time: args.start_time,
+          duration_minutes: args.duration_minutes,
+        }
+      : { candidate_id: args.candidate_id }
+    onCheck({ ...details, message })
+  }
 
   const title = isMove
     ? isWaiting
@@ -75,7 +119,10 @@ export default function InterviewChangeCard({
 
       {isWaiting && (
         <WhenYouApprove
-          preview={args.email_preview}
+          email={emailFor(args, name, isMove)}
+          draft={draft}
+          onDraft={setDraft}
+          onSaveMessage={canEdit ? saveMessage : null}
           lines={
             isMove
               ? [
@@ -87,7 +134,10 @@ export default function InterviewChangeCard({
                   { icon: 'lock', text: 'The old link stops working.' },
                 ]
               : [
-                  { icon: 'mail', text: `${name} gets Google Calendar's cancellation notice.` },
+                  {
+                    icon: 'mail',
+                    text: `${name} gets Google Calendar's cancellation notice, with the message below.`,
+                  },
                   { icon: 'calendar', text: 'The interview is removed from their calendar.' },
                   {
                     icon: 'lock',
@@ -112,23 +162,29 @@ export default function InterviewChangeCard({
         </div>
       )}
 
-      {isWaiting && canAct && (
+      {canEdit && (
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3.5">
-          <span className="text-sm">or type what to change below</span>
+          <span className="text-sm">
+            {draft !== null
+              ? 'Save the message to see it in the preview, then approve.'
+              : 'or type what to change below'}
+          </span>
           <div className="flex flex-wrap gap-2.5">
             {isMove ? (
               <>
                 <Button variant="outline" onClick={onRequestChanges}>
                   Request changes
                 </Button>
-                <Button onClick={onApprove}>Approve and send the new time</Button>
+                <Button onClick={onApprove} disabled={draft !== null}>
+                  Approve and send the new time
+                </Button>
               </>
             ) : (
               <>
                 <Button variant="outline" onClick={() => onReject(KEEP_FEEDBACK)}>
                   Keep the interview
                 </Button>
-                <Button variant="danger" onClick={onApprove}>
+                <Button variant="danger" onClick={onApprove} disabled={draft !== null}>
                   Approve and cancel
                 </Button>
               </>

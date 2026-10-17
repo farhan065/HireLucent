@@ -27,7 +27,9 @@ const PLACEHOLDERS = {
 
 // The message box with suggested replies above it. "inputRef" lets the
 // page put the cursor in the box, for example after "Request changes".
-export default function Composer({ stage, isDisabled, onSend, inputRef }) {
+// "placeholder" replaces the stage's hint, for example while an interview
+// card waits for approval.
+export default function Composer({ stage, isDisabled, onSend, inputRef, placeholder }) {
   const [text, setText] = useState('')
 
   function submit(message) {
@@ -72,7 +74,7 @@ export default function Composer({ stage, isDisabled, onSend, inputRef }) {
           onChange={(event) => setText(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
-            PLACEHOLDERS[stage] ?? 'Tell the assistant what to change…'
+            placeholder ?? PLACEHOLDERS[stage] ?? 'Tell the assistant what to change…'
           }
           className="max-h-40 min-h-11 flex-1 resize-none bg-transparent py-2.5 text-[15px] text-navy outline-none placeholder:text-body/60"
         />

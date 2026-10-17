@@ -1,19 +1,29 @@
-"""The transcription worker: each person's audio from running interviews.
+"""The transcription worker: each person's speech in running interviews,
+turned into text.
 
 Every few seconds it looks for interviews in progress. For each one it joins
 the interview's video room as a hidden, listen-only participant, so the two
 people never see it, and receives the interviewer's and the candidate's
 microphones as two separate streams. Video is never received. Each stream
-goes to an audio sink (see capture.py). When an interview ends, the worker
-leaves its room.
+goes to an audio sink (see capture.py), which transcribes it; every finished
+turn is saved at once with its speaker and time. When an interview ends,
+the worker leaves its room.
 
-If the worker restarts, or loses a room, it joins again on the next check.
+The live transcript is sent over the room to the interviewer only, never to
+the candidate: the words still being spoken, each saved turn, and every few
+seconds a status ("listening", "paused" or "off") so the screen can tell
+when transcription is not working.
+
+If the worker restarts, or loses a room, it joins again on the next check,
+and the turns saved so far are kept.
 
 Run with:  python -m app.workers.transcription_worker
 """
 
 import asyncio
+import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from livekit import rtc
@@ -24,13 +34,25 @@ from app.core.logging import configure_logging, get_logger, log_event
 from app.db.session import SessionLocal
 from app.models import InterviewSession
 from app.models.enums import SessionStatus
-from app.services import video
+from app.services import transcript_service, video
 from app.services.room_service import PASS_EXTRA
 from app.workers import capture
+from app.workers.turns import Turn
 
 logger = get_logger(__name__)
 
 IDENTITY = "transcription-worker"
+# The live transcript goes on this topic, to the interviewer only.
+TRANSCRIPT_TOPIC = "transcript"
+INTERVIEWER = "interviewer"
+# How often the status is sent.
+STATUS_SECONDS = 5
+
+
+@dataclass(frozen=True)
+class RunningInterview:
+    scheduled_end: datetime
+    started_at: datetime
 
 
 class InterviewListener:
@@ -40,18 +62,25 @@ class InterviewListener:
     microphone track. Their old stream is closed first, so each person
     always has exactly one stream."""
 
-    def __init__(self, session_id: int, scheduled_end: datetime):
+    def __init__(self, session_id: int, interview: RunningInterview):
         self.session_id = session_id
-        self.scheduled_end = scheduled_end
+        self.scheduled_end = interview.scheduled_end
+        self.started_at = interview.started_at
+        self.keyterms: list[str] = []
         self.room = rtc.Room()
         # Per speaker: the microphone track being captured and its task.
         self._streams: dict[str, tuple[str, asyncio.Task]] = {}
+        # Per speaker: the sink their audio goes to, while it is open.
+        self._sinks: dict[str, capture.AudioSink] = {}
+        self._status_task: asyncio.Task | None = None
 
     @property
     def is_connected(self) -> bool:
         return self.room.isconnected()
 
     async def start(self) -> None:
+        if get_settings().stt_keyterms:
+            self.keyterms = await asyncio.to_thread(load_keyterms, self.session_id)
         now = datetime.now(timezone.utc)
         token = video.create_room_token(
             video.room_name(self.session_id),
@@ -60,6 +89,7 @@ class InterviewListener:
             max(self.scheduled_end, now) + PASS_EXTRA - now,
             hidden=True,
             can_publish=False,
+            can_publish_data=True,
         )
         self.room.on("track_published", self._on_published)
         self.room.on("track_subscribed", self._on_subscribed)
@@ -71,6 +101,7 @@ class InterviewListener:
         for participant in self.room.remote_participants.values():
             for publication in participant.track_publications.values():
                 self._on_published(publication, participant)
+        self._status_task = asyncio.create_task(self._send_status())
         log_event(logger, "interview_audio_joined", session_id=self.session_id)
 
     def _on_published(
@@ -124,18 +155,61 @@ class InterviewListener:
 
     async def _capture(self, track: rtc.Track, speaker: str) -> None:
         """Pass one person's audio to its sink until their track ends."""
-        sink = capture.open_sink(self.session_id, speaker)
+        sink = capture.open_sink(
+            self.session_id,
+            speaker,
+            self.started_at,
+            self.keyterms,
+            self._save_turn,
+            self._publish,
+        )
+        self._sinks[speaker] = sink
         stream = rtc.AudioStream(
             track, sample_rate=capture.SAMPLE_RATE, num_channels=capture.CHANNELS
         )
         try:
             async for event in stream:
-                sink.push(bytes(event.frame.data), event.frame.sample_rate)
+                await sink.push(bytes(event.frame.data), event.frame.sample_rate)
         finally:
-            sink.close()
+            if self._sinks.get(speaker) is sink:
+                del self._sinks[speaker]
+            await sink.close()
             await stream.aclose()
 
+    async def _save_turn(self, turn: Turn) -> int:
+        return await asyncio.to_thread(save_turn, self.session_id, turn)
+
+    async def _publish(self, event: dict) -> None:
+        """Send one live transcript event to the interviewer only."""
+        await self.room.local_participant.publish_data(
+            json.dumps(event),
+            reliable=True,
+            topic=TRANSCRIPT_TOPIC,
+            destination_identities=[INTERVIEWER],
+        )
+
+    def status(self) -> str:
+        """The live transcript's state: "off" without speech-to-text,
+        "paused" while a connection to it is being retried, otherwise
+        "listening"."""
+        if not capture.stt_enabled():
+            return "off"
+        if any(getattr(sink, "has_problem", False) for sink in self._sinks.values()):
+            return "paused"
+        return "listening"
+
+    async def _send_status(self) -> None:
+        while True:
+            try:
+                await self._publish({"type": "status", "state": self.status()})
+            except Exception:
+                # The interviewer may not be in the room right now.
+                pass
+            await asyncio.sleep(STATUS_SECONDS)
+
     async def stop(self) -> None:
+        if self._status_task:
+            self._status_task.cancel()
         tasks = [task for _, task in self._streams.values()]
         for task in tasks:
             task.cancel()
@@ -144,21 +218,45 @@ class InterviewListener:
         log_event(logger, "interview_audio_left", session_id=self.session_id)
 
 
-def running_interviews() -> dict[int, datetime]:
-    """Interviews in progress, with their planned end."""
+def running_interviews() -> dict[int, RunningInterview]:
+    """Interviews in progress, with their planned end and real start."""
     with SessionLocal() as db:
         rows = db.execute(
-            select(InterviewSession.id, InterviewSession.scheduled_end).where(
-                InterviewSession.status == SessionStatus.IN_PROGRESS
-            )
+            select(
+                InterviewSession.id,
+                InterviewSession.scheduled_end,
+                InterviewSession.started_at,
+                InterviewSession.scheduled_start,
+            ).where(InterviewSession.status == SessionStatus.IN_PROGRESS)
         )
-        return {session_id: end for session_id, end in rows}
+        return {
+            session_id: RunningInterview(end, started or planned)
+            for session_id, end, started, planned in rows
+        }
+
+
+def load_keyterms(session_id: int) -> list[str]:
+    with SessionLocal() as db:
+        return transcript_service.keyterms_for_session(db, session_id)
+
+
+def save_turn(session_id: int, turn: Turn) -> int:
+    with SessionLocal() as db:
+        return transcript_service.add_turn(
+            db, session_id, turn.speaker, turn.start_ms, turn.end_ms, turn.text
+        ).id
 
 
 async def run() -> None:
     settings = get_settings()
     listeners: dict[int, InterviewListener] = {}
-    log_event(logger, "transcription_worker_started")
+    log_event(
+        logger,
+        "transcription_worker_started",
+        stt_provider=settings.stt_provider,
+        stt_key_set=capture.stt_enabled(),
+        stt_keyterms=settings.stt_keyterms,
+    )
     while True:
         try:
             running = await asyncio.to_thread(running_interviews)

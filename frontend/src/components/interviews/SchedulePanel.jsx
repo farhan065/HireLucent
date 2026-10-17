@@ -13,6 +13,7 @@ import {
   fromInputs,
   invites,
   isActive,
+  messageProblem,
   minutesBetween,
   moveInterview,
   scheduleInterviews,
@@ -24,6 +25,7 @@ import {
 import Button from '../Button.jsx'
 import ConfirmDialog from '../ConfirmDialog.jsx'
 import SidePanel from '../SidePanel.jsx'
+import { DialogMessage } from './EmailMessage.jsx'
 
 const FIELD =
   'min-h-11.5 w-full rounded-xl border-[1.5px] border-line bg-white px-3.5 text-[15px] text-navy focus:border-brand focus:outline-none'
@@ -177,6 +179,9 @@ export default function SchedulePanel({
   const [isBusy, setIsBusy] = useState(false)
   const [error, setError] = useState('')
   const [outcomes, setOutcomes] = useState(null)
+  // The interviewer's own message for the email, or null for the default.
+  const [message, setMessage] = useState(null)
+  const messageError = message == null ? '' : messageProblem(message)
 
   // Shortlisted candidates and those with an upcoming interview, best first.
   const upcoming = new Map(
@@ -226,6 +231,7 @@ export default function SchedulePanel({
           interview.id,
           slot.start.toISOString(),
           slot.end.toISOString(),
+          message,
         )
         onDone(change.warning)
         onClose()
@@ -238,6 +244,7 @@ export default function SchedulePanel({
           start: slot.start.toISOString(),
           end: slot.end.toISOString(),
         })),
+        message,
       )
       setOutcomes(result)
       setIsConfirming(false)
@@ -393,6 +400,7 @@ export default function SchedulePanel({
           busyLabel="Sending…"
           confirmVariant="primary"
           isBusy={isBusy}
+          confirmDisabled={Boolean(messageError)}
           error={error}
           onConfirm={send}
           onCancel={() => {
@@ -417,6 +425,21 @@ export default function SchedulePanel({
               <strong className="font-semibold text-navy">{zone}</strong>
             </span>
           </div>
+          <DialogMessage
+            jobId={job.id}
+            kind={isMove ? 'moved' : 'invitation'}
+            candidateId={slots[0].candidate.id}
+            candidateName={slots[0].candidate.full_name}
+            start={slots[0].start}
+            end={slots[0].end}
+            label={
+              slots.length === 1
+                ? `Message to ${slots[0].candidate.full_name}`
+                : 'Message to the candidates'
+            }
+            message={message}
+            onChange={setMessage}
+          />
           {!isMove && (
             <p className="text-[13.5px]">
               After this, the requirements and weights for this job can no longer be changed.

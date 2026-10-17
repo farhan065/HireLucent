@@ -36,12 +36,14 @@ def create_room_token(
     *,
     hidden: bool = False,
     can_publish: bool = True,
+    can_publish_data: bool | None = None,
 ) -> str:
     """A token that lets one participant join one room, send their camera,
     microphone and screen, and receive the other participant's.
 
-    The transcription worker joins hidden and without publishing: the two
-    people in the interview never see it, and it only listens."""
+    The transcription worker joins hidden and without publishing audio or
+    video: the two people in the interview never see it. It may send data,
+    which is how the live transcript reaches the interviewer."""
     settings = get_settings()
     if not settings.livekit_api_key or not settings.livekit_api_secret:
         raise ServiceUnavailableError(NOT_CONFIGURED)
@@ -49,7 +51,7 @@ def create_room_token(
         room_join=True,
         room=room,
         can_publish=can_publish,
-        can_publish_data=can_publish,
+        can_publish_data=can_publish if can_publish_data is None else can_publish_data,
         can_subscribe=True,
         hidden=hidden,
     )

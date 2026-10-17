@@ -8,7 +8,6 @@ import pytest
 from app.mcp_clients import client
 from app.mcp_clients.client import ToolNotAllowedError
 from app.mcp_clients.registry import mcp_servers
-from app.rag import mcp_client
 
 SEARCH_TOOL = {"type": "function", "function": {"name": "search_jd_references"}}
 
@@ -41,7 +40,7 @@ def test_an_unknown_server_is_refused() -> None:
 
 def test_the_agent_cannot_call_a_publishing_tool() -> None:
     with pytest.raises(ToolNotAllowedError):
-        mcp_client.call_tool("create_post", {"title": "x"})
+        client.call_agent_tool("create_post", {"title": "x"})
 
 
 # --- Tools offered to the agent ---
@@ -58,7 +57,7 @@ def test_only_tools_of_offered_servers_reach_the_agent(
 
     monkeypatch.setattr(client, "_list_tools", listed)
 
-    assert mcp_client.tool_definitions() == [SEARCH_TOOL]
+    assert client.agent_tool_definitions() == [SEARCH_TOOL]
     assert asked == ["rag"]
 
 
@@ -98,7 +97,7 @@ def test_no_tools_are_offered_when_the_server_is_down(
 
     monkeypatch.setattr(client, "_list_tools", unreachable)
 
-    assert mcp_client.tool_definitions() == []
+    assert client.agent_tool_definitions() == []
 
 
 def test_tools_are_fetched_once_and_reused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,8 +109,8 @@ def test_tools_are_fetched_once_and_reused(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(client, "_list_tools", listed)
 
-    first = mcp_client.tool_definitions()
-    second = mcp_client.tool_definitions()
+    first = client.agent_tool_definitions()
+    second = client.agent_tool_definitions()
 
     assert first == second
     assert len(fetches) == 1
@@ -125,10 +124,10 @@ def test_a_failed_fetch_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
         return [SEARCH_TOOL]
 
     monkeypatch.setattr(client, "_list_tools", unreachable)
-    assert mcp_client.tool_definitions() == []
+    assert client.agent_tool_definitions() == []
 
     monkeypatch.setattr(client, "_list_tools", listed)
-    assert len(mcp_client.tool_definitions()) == 1
+    assert len(client.agent_tool_definitions()) == 1
 
 
 # --- Calling the agent's tools ---
@@ -143,7 +142,7 @@ def test_an_agent_tool_call_goes_to_its_server(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(client, "call_tool", fake_call)
 
-    assert mcp_client.call_tool("search_jd_references", {"query": "python"}) == ["ref"]
+    assert client.call_agent_tool("search_jd_references", {"query": "python"}) == ["ref"]
     assert calls == [("rag", "search_jd_references", {"query": "python"})]
 
 
@@ -155,4 +154,4 @@ def test_a_tool_error_is_raised(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     with pytest.raises(RuntimeError):
-        mcp_client.call_tool("search_jd_references", {"query": "python"})
+        client.call_agent_tool("search_jd_references", {"query": "python"})

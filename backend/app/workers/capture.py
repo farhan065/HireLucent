@@ -3,23 +3,28 @@ be tested on its own.
 
 Each person in an interview has their own audio stream, labelled by who
 they are, so speech is never mixed and never guessed. A stream is handed to
-an audio sink: today the sink only measures how much audio arrived and how
-much of it was speech; in Module 5 the speech-to-text sink takes its place.
+an audio sink: the sink of the chosen speech-to-text service (deepgram.py or
+assemblyai.py, picked by STT_PROVIDER), or, when speech-to-text is off or
+its key is missing, a sink that only measures how much audio arrived.
 
-Raw audio is never stored. Each piece is measured in memory and dropped, and
-only the numbers are logged.
+Raw audio is never stored. Each piece is handled in memory and dropped, and
+only numbers are logged.
 """
 
+import logging
+from datetime import datetime
 from typing import Protocol
 
 import numpy as np
 
+from app.core.config import get_settings
 from app.core.logging import get_logger, log_event
+from app.workers import assemblyai, deepgram, stt_stream
 
 logger = get_logger(__name__)
 
 # Audio as speech-to-text services expect it: 16 kHz, one channel, 16-bit.
-SAMPLE_RATE = 16000
+SAMPLE_RATE = stt_stream.SAMPLE_RATE
 CHANNELS = 1
 # The people whose audio is captured, by their identity in the room.
 SPEAKERS = {"interviewer", "candidate"}
@@ -32,9 +37,9 @@ REPORT_EVERY_SECONDS = 30
 class AudioSink(Protocol):
     """Where one person's audio goes, one piece at a time."""
 
-    def push(self, pcm: bytes, sample_rate: int) -> None: ...
+    async def push(self, pcm: bytes, sample_rate: int) -> None: ...
 
-    def close(self) -> None: ...
+    async def close(self) -> None: ...
 
 
 class MeterSink:
@@ -48,7 +53,7 @@ class MeterSink:
         self._next_report = REPORT_EVERY_SECONDS
         log_event(logger, "audio_stream_started", session_id=session_id, speaker=speaker)
 
-    def push(self, pcm: bytes, sample_rate: int) -> None:
+    async def push(self, pcm: bytes, sample_rate: int) -> None:
         samples = np.frombuffer(pcm, dtype=np.int16)
         if samples.size == 0:
             return
@@ -61,7 +66,7 @@ class MeterSink:
             self._next_report += REPORT_EVERY_SECONDS
             self._log("audio_stream_progress")
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self._log("audio_stream_finished")
 
     def _log(self, event: str) -> None:
@@ -75,9 +80,38 @@ class MeterSink:
         )
 
 
-def open_sink(session_id: int, speaker: str) -> AudioSink:
+# The speech-to-text services, by their STT_PROVIDER name.
+SINKS = {"deepgram": deepgram.DeepgramSink, "assemblyai": assemblyai.AssemblyAISink}
+
+
+def open_sink(
+    session_id: int,
+    speaker: str,
+    started_at: datetime,
+    keyterms: list[str],
+    save: stt_stream.SaveTurn,
+    publish: stt_stream.Publish | None = None,
+) -> AudioSink:
     """The sink for one person's audio in one interview."""
+    sink_class = SINKS.get(get_settings().stt_provider)
+    if stt_enabled():
+        return sink_class(session_id, speaker, started_at, keyterms, save, publish)
+    if sink_class:
+        log_event(
+            logger,
+            "stt_not_configured",
+            level=logging.WARNING,
+            session_id=session_id,
+            provider=get_settings().stt_provider,
+        )
     return MeterSink(session_id, speaker)
+
+
+def stt_enabled() -> bool:
+    """True when speech is turned into text: a service chosen, with its key."""
+    settings = get_settings()
+    keys = {"deepgram": settings.deepgram_api_key, "assemblyai": settings.assemblyai_api_key}
+    return bool(keys.get(settings.stt_provider))
 
 
 def plan(running: set[int], listening: set[int]) -> tuple[set[int], set[int]]:

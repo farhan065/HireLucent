@@ -66,17 +66,24 @@ def join_link(token: str) -> str:
 
 
 def schedule(
-    db: Session, job_id: int, slots: list[Slot], created_by: int
+    db: Session,
+    job_id: int,
+    slots: list[Slot],
+    created_by: int,
+    message: str | None = None,
 ) -> list[ScheduleOutcome]:
     """Schedule each candidate in turn. One candidate's failure does not
-    stop the others."""
+    stop the others. "message" is the interviewer's own message for every
+    candidate; without it, each gets the default message."""
     job = db.get(Job, job_id)
     if job is None:
         raise NotFoundError("This job does not exist.")
-    return [_schedule_one(db, job, slot, created_by) for slot in slots]
+    return [_schedule_one(db, job, slot, created_by, message) for slot in slots]
 
 
-def _schedule_one(db: Session, job: Job, slot: Slot, created_by: int) -> ScheduleOutcome:
+def _schedule_one(
+    db: Session, job: Job, slot: Slot, created_by: int, message: str | None
+) -> ScheduleOutcome:
     candidate = db.get(Candidate, slot.candidate_id)
     if candidate is None or candidate.job_id != job.id:
         return _failed(slot, "Unknown candidate", NOT_IN_JOB)
@@ -88,7 +95,7 @@ def _schedule_one(db: Session, job: Job, slot: Slot, created_by: int) -> Schedul
         return _failed(slot, candidate.full_name, exc.message)
 
     invitation = interview_emails.invitation(
-        candidate.full_name, job.title, slot.start, slot.end, join_link(token)
+        candidate.full_name, job.title, slot.start, slot.end, join_link(token), message
     )
     try:
         event = _google(
@@ -118,7 +125,11 @@ def _schedule_one(db: Session, job: Job, slot: Slot, created_by: int) -> Schedul
 
 
 def reschedule(
-    db: Session, session_id: int, start: datetime, end: datetime
+    db: Session,
+    session_id: int,
+    start: datetime,
+    end: datetime,
+    message: str | None = None,
 ) -> InterviewChange:
     """Move an interview. The calendar event gets the new time and a new
     link, and Google emails the candidate the updated invitation; the old
@@ -133,7 +144,7 @@ def reschedule(
     session, token = session_service.reschedule(db, session_id, start, end)
     job = db.get(Job, session.job_id)
     invitation = interview_emails.moved(
-        session.candidate.full_name, job.title, start, end, join_link(token)
+        session.candidate.full_name, job.title, start, end, join_link(token), message
     )
     try:
         if not session.calendar_event_id:
@@ -160,14 +171,18 @@ def reschedule(
     return _change(session, None)
 
 
-def cancel(db: Session, session_id: int) -> InterviewChange:
+def cancel(db: Session, session_id: int, message: str | None = None) -> InterviewChange:
     """Cancel an interview. Google emails the candidate its cancellation
     notice. The cancellation stands even if Google cannot be reached; a
     warning then says the candidate was not told."""
     session = session_service.cancel(db, session_id)
     job = db.get(Job, session.job_id)
     description = interview_emails.cancelled(
-        session.candidate.full_name, job.title, session.scheduled_start, session.scheduled_end
+        session.candidate.full_name,
+        job.title,
+        session.scheduled_start,
+        session.scheduled_end,
+        message,
     )
     try:
         if not session.calendar_event_id:
@@ -179,6 +194,26 @@ def cancel(db: Session, session_id: int) -> InterviewChange:
     except ServiceUnavailableError:
         return _change(session, NOT_TOLD)
     return _change(session, None)
+
+
+def preview(
+    db: Session,
+    job_id: int,
+    kind: str,
+    candidate_id: int,
+    start: datetime,
+    end: datetime,
+    message: str | None = None,
+) -> dict[str, str]:
+    """The email one candidate of the job would get, for the confirm
+    dialogs. Nothing is saved or sent."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise NotFoundError("This job does not exist.")
+    candidate = db.get(Candidate, candidate_id)
+    if candidate is None or candidate.job_id != job_id:
+        raise NotFoundError(NOT_IN_JOB)
+    return interview_emails.preview(kind, candidate.full_name, job.title, start, end, message)
 
 
 def _google(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:

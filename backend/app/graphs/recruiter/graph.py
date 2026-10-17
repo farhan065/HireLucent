@@ -49,7 +49,7 @@ from app.graphs.recruiter.prompts import (
     ROOM_ERROR_REPLY,
     SYSTEM_PROMPT,
 )
-from app.rag import mcp_client
+from app.mcp_clients import client as mcp_client
 from app.services import interview_context
 from app.services.interview_times import now_description
 from app.graphs.recruiter.tools import (
@@ -101,7 +101,7 @@ def _mcp_tools(interview: bool) -> list[dict]:
     the job description search otherwise."""
     return [
         _without_role(tool) if interview else tool
-        for tool in mcp_client.tool_definitions()
+        for tool in mcp_client.agent_tool_definitions()
         if (tool["function"]["name"] in INTERVIEW_TOOLS) == interview
     ]
 
@@ -257,7 +257,7 @@ def call_tools(state: RecruiterState) -> Command[Literal["agent", "handle_error"
                 arguments = dict(call["args"])
                 if _in_interview(state):
                     arguments["role"] = state.get("interview_role") or ""
-                content = json.dumps(mcp_client.call_tool(call["name"], arguments))
+                content = json.dumps(mcp_client.call_agent_tool(call["name"], arguments))
         except Exception as exc:
             attempts += 1
             is_ours = call["name"] in TOOL_HANDLERS

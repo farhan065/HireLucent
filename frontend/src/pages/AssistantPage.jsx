@@ -15,6 +15,9 @@ import { jobStage } from '../lib/jobs.js'
 import { getLastThread, setLastThread } from '../lib/stages.js'
 
 const APPROVE_MESSAGE = 'I approve this job description.'
+const INTERVIEW_CARDS = ['schedule', 'reschedule', 'cancel_interview']
+const INTERVIEW_PLACEHOLDER =
+  'Or type what to change, for example "make the message more formal"'
 
 const STATUS_LABELS = {
   connecting: { text: 'Connecting…', dot: 'bg-warning' },
@@ -78,6 +81,9 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
   const { view, status, error, isBusy } = conversation
   const connection = STATUS_LABELS[status]
   const stage = view?.stage ?? 'describing'
+  const isInterviewCardWaiting = (view?.items ?? []).some(
+    (item) => INTERVIEW_CARDS.includes(item.kind) && item.status === 'waiting',
+  )
   const isEmpty = !view && !isBusy
   // Once the job is saved, its stage tabs are shown above the conversation.
   // The job loads again when it is published and after each interview
@@ -182,6 +188,7 @@ function Conversation({ threadId, conversationKey, firstMessage }) {
                 stage={stage}
                 isDisabled={isBusy || status !== 'connected'}
                 onSend={conversation.sendMessage}
+                placeholder={isInterviewCardWaiting ? INTERVIEW_PLACEHOLDER : undefined}
               />
             </div>
           </div>

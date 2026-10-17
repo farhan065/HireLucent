@@ -127,7 +127,10 @@ def check_new(
     if candidate is None:
         raise NotFoundError("This candidate does not exist.")
     if candidate.status not in SCHEDULABLE:
-        raise ConflictError("Only shortlisted candidates can be scheduled for an interview.")
+        raise ConflictError(
+            "Only shortlisted candidates can be scheduled for an interview. "
+            "Shortlist them on the Screening tab first."
+        )
     if _active_count(db, InterviewSession.candidate_id == candidate_id):
         raise ConflictError("This candidate already has an upcoming interview.")
     _ensure_free(db, created_by, start, end)
@@ -282,6 +285,11 @@ def find_by_token(db: Session, token: str) -> InterviewSession | None:
     return db.scalar(
         select(InterviewSession).where(InterviewSession.join_token_hash == hash_token(token))
     )
+
+
+def has_open_interviews(db: Session, job_id: int) -> bool:
+    """True while the job has an interview that is scheduled or under way."""
+    return bool(_active_count(db, InterviewSession.job_id == job_id))
 
 
 def ensure_rules_can_change(db: Session, job_id: int) -> None:

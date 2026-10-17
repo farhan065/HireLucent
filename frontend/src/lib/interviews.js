@@ -8,16 +8,38 @@ export const LENGTHS = [30, 45, 60]
 export const BREAKS = [0, 15, 30]
 export const MAX_DAYS_AHEAD = 60
 
-export function scheduleInterviews(jobId, interviews) {
-  return apiRequest(`/jobs/${jobId}/interviews`, { method: 'POST', body: { interviews } })
+// "message" is the interviewer's own message paragraph in the email, or
+// null for the default one.
+export function scheduleInterviews(jobId, interviews, message = null) {
+  return apiRequest(`/jobs/${jobId}/interviews`, {
+    method: 'POST',
+    body: { interviews, message },
+  })
 }
 
-export function moveInterview(sessionId, start, end) {
-  return apiRequest(`/interviews/${sessionId}`, { method: 'PUT', body: { start, end } })
+export function moveInterview(sessionId, start, end, message = null) {
+  return apiRequest(`/interviews/${sessionId}`, { method: 'PUT', body: { start, end, message } })
 }
 
-export function cancelInterview(sessionId) {
-  return apiRequest(`/interviews/${sessionId}/cancel`, { method: 'POST' })
+export function cancelInterview(sessionId, message = null) {
+  return apiRequest(`/interviews/${sessionId}/cancel`, { method: 'POST', body: { message } })
+}
+
+export const MAX_MESSAGE = 1500
+
+// Why an email message cannot be sent, or '' when it can.
+export function messageProblem(text) {
+  if (!text.trim()) return 'The message cannot be empty.'
+  if (text.trim().length > MAX_MESSAGE) {
+    return `The message can be at most ${MAX_MESSAGE} characters.`
+  }
+  return ''
+}
+
+// The email one candidate would get: "kind" is "invitation", "moved" or
+// "cancelled". Nothing is sent.
+export function previewEmail(jobId, body) {
+  return apiRequest(`/jobs/${jobId}/interviews/preview`, { method: 'POST', body })
 }
 
 // Only a cancelled interview can be deleted.

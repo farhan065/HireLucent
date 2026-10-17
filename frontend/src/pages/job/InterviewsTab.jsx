@@ -4,6 +4,7 @@ import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
 import ConfirmDialog from '../../components/ConfirmDialog.jsx'
 import InterviewList from '../../components/interviews/InterviewList.jsx'
+import { DialogMessage } from '../../components/interviews/EmailMessage.jsx'
 import SchedulePanel from '../../components/interviews/SchedulePanel.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import { useCandidates } from '../../hooks/useCandidates.js'
@@ -12,6 +13,7 @@ import {
   clock,
   deleteInterview,
   isActive,
+  messageProblem,
   scoreLabel,
   shortDay,
   sortInterviews,
@@ -203,6 +205,9 @@ export default function InterviewsTab() {
   const [cancelling, setCancelling] = useState(null)
   const [isBusy, setIsBusy] = useState(false)
   const [cancelError, setCancelError] = useState('')
+  // The interviewer's own message for the cancellation, or null for the
+  // default.
+  const [cancelMessage, setCancelMessage] = useState(null)
   const [notice, setNotice] = useState(null)
   const [view, setView] = useState('upcoming')
   const [deleting, setDeleting] = useState(null)
@@ -241,7 +246,7 @@ export default function InterviewsTab() {
     setIsBusy(true)
     setCancelError('')
     try {
-      const change = await cancelInterview(cancelling.id)
+      const change = await cancelInterview(cancelling.id, cancelMessage)
       setNotice(
         change.warning
           ? { tone: 'warning', text: change.warning }
@@ -319,6 +324,7 @@ export default function InterviewsTab() {
           onMove={(interview) => setPanel({ interview })}
           onCancel={(interview) => {
             setCancelError('')
+            setCancelMessage(null)
             setCancelling(interview)
           }}
           onScheduleAgain={(candidateId) => setPanel({ preselected: [candidateId] })}
@@ -359,6 +365,8 @@ export default function InterviewsTab() {
           confirmLabel="Cancel interview"
           busyLabel="Cancelling…"
           isBusy={isBusy}
+          confirmDisabled={cancelMessage != null && Boolean(messageProblem(cancelMessage))}
+          isWide
           error={cancelError}
           onConfirm={confirmCancel}
           onCancel={() => setCancelling(null)}
@@ -369,9 +377,20 @@ export default function InterviewsTab() {
             {span(cancelling.scheduled_start, cancelling.scheduled_end)}
           </p>
           <p>
-            Google Calendar sends them a cancellation notice. Their link stops working, and they
-            go back on the shortlist.
+            Google Calendar sends them a cancellation notice with the message below. Their link
+            stops working, and they go back on the shortlist.
           </p>
+          <DialogMessage
+            jobId={job.id}
+            kind="cancelled"
+            candidateId={cancelling.candidate_id}
+            candidateName={cancelling.candidate_name}
+            start={new Date(cancelling.scheduled_start)}
+            end={new Date(cancelling.scheduled_end)}
+            label={`Message to ${cancelling.candidate_name}`}
+            message={cancelMessage}
+            onChange={setCancelMessage}
+          />
         </ConfirmDialog>
       )}
 

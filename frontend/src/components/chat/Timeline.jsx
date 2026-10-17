@@ -95,6 +95,7 @@ function TimelineItem({
           onApprove={onApproveAction}
           onReject={onRejectAction}
           onRequestChanges={onRequestChanges}
+          onCheck={onEditAction}
         />
       </AssistantRow>
     )
