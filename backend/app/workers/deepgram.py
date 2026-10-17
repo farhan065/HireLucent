@@ -12,6 +12,10 @@ the worker, which sends them to the interviewer's screen.
 - Deepgram is asked not to keep the audio for improving its models.
 - If the connection drops, the sink connects again. Audio from the last
   thirty seconds waits in a queue meanwhile, so short drops lose nothing.
+- A message that cannot be read, or an error message, is skipped and
+  logged by its kind only; the connection carries on.
+- The delay between speaking and the text arriving is measured, and only
+  its numbers are logged when the stream finishes.
 """
 
 import asyncio
@@ -26,7 +30,7 @@ from websockets.exceptions import InvalidStatus, WebSocketException
 
 from app.core.config import get_settings
 from app.core.logging import get_logger, log_event
-from app.workers.turns import AudioClock, Turn, TurnBuilder
+from app.workers.turns import AudioClock, DelayMeter, Turn, TurnBuilder
 
 logger = get_logger(__name__)
 
@@ -41,8 +45,10 @@ QUEUE_CHUNKS = 300
 # for example while a person is muted. A keep-alive message prevents that.
 KEEP_ALIVE_SECONDS = 4
 # Waits between connection attempts start here and double up to the maximum.
+# The maximum is short, so the sink is back within seconds of the network
+# returning, well before the thirty-second queue fills and audio is lost.
 FIRST_RETRY_SECONDS = 1
-MAX_RETRY_SECONDS = 30
+MAX_RETRY_SECONDS = 5
 # How long closing may take to collect the last words.
 CLOSE_TIMEOUT_SECONDS = 10
 
@@ -50,6 +56,12 @@ CLOSE_TIMEOUT_SECONDS = 10
 SaveTurn = Callable[[Turn], Awaitable[int]]
 # Sends one live transcript event to the interviewer's screen.
 Publish = Callable[[dict], Awaitable[None]]
+
+
+def next_wait(wait: float) -> float:
+    """The wait before the next connection attempt: double the last one,
+    never more than the maximum."""
+    return min(wait * 2, MAX_RETRY_SECONDS)
 
 
 def listen_url(keyterms: list[str]) -> str:
@@ -94,6 +106,8 @@ class DeepgramSink:
         self.has_problem = False
         self.turns = 0
         self.dropped_chunks = 0
+        self.skipped_messages = 0
+        self.delays = DelayMeter()
         self._buffer = bytearray()
         # Pieces of audio with the time each one ended; None means "close".
         self._queue: asyncio.Queue[tuple[bytes, datetime] | None] = asyncio.Queue(QUEUE_CHUNKS)
@@ -135,6 +149,8 @@ class DeepgramSink:
             speaker=self.speaker,
             turns=self.turns,
             dropped_chunks=self.dropped_chunks,
+            skipped_messages=self.skipped_messages,
+            **self.delays.summary(),
         )
 
     async def _run(self) -> None:
@@ -168,7 +184,7 @@ class DeepgramSink:
                 return
             self.has_problem = True
             await asyncio.sleep(wait)
-            wait = min(wait * 2, MAX_RETRY_SECONDS)
+            wait = next_wait(wait)
 
     def _log_problem(self, event: str, **fields) -> None:
         log_event(
@@ -188,7 +204,7 @@ class DeepgramSink:
         try:
             async for raw in connection:
                 if isinstance(raw, str):
-                    await self._handle(builder, json.loads(raw))
+                    await self._read(builder, raw)
         finally:
             await self._save(builder.flush())
             await self._send_live(builder)
@@ -213,13 +229,41 @@ class DeepgramSink:
             clock.add(len(chunk) / (SAMPLE_RATE * 2), ended_at)
             await connection.send(chunk)
 
+    async def _read(self, builder: TurnBuilder, raw: str) -> None:
+        """Handle one message. One that cannot be read is skipped, so a bad
+        message never ends the connection or loses the turn being built."""
+        try:
+            message = json.loads(raw)
+            if message.get("type") == "Error":
+                # Its wording is not logged; Deepgram closes the connection
+                # itself if the error is serious, and the sink connects again.
+                self._log_problem("stt_error_message")
+                return
+            await self._handle(builder, message)
+        except (ValueError, TypeError, AttributeError) as exc:
+            self.skipped_messages += 1
+            self._log_problem("stt_message_skipped", error_type=type(exc).__name__)
+
     async def _handle(self, builder: TurnBuilder, message: dict) -> None:
         """Save a finished turn, and send the words still being spoken
         whenever they change."""
+        self._measure(builder.clock, message)
         before = builder.live_text
         await self._save(builder.handle(message))
         if builder.live_text != before:
             await self._send_live(builder)
+
+    def _measure(self, clock: AudioClock, message: dict) -> None:
+        """Record how long the text took to arrive after its last word was
+        spoken. Results without words (silence) are not counted."""
+        if message.get("type") != "Results":
+            return
+        alternatives = message.get("channel", {}).get("alternatives") or [{}]
+        if not (alternatives[0].get("transcript") or "").strip():
+            return
+        spoken_end = float(message.get("start", 0)) + float(message.get("duration", 0))
+        kind = "final" if message.get("is_final") else "live"
+        self.delays.add(kind, clock.spoken_at(spoken_end), datetime.now(timezone.utc))
 
     async def _send_live(self, builder: TurnBuilder) -> None:
         """The words of the current turn so far; empty text clears them."""

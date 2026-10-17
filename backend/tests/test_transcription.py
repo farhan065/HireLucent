@@ -21,7 +21,7 @@ from app.models import InterviewSession, TranscriptTurn
 from app.models.enums import UserRole
 from app.services import transcript_service
 from app.workers import capture, deepgram
-from app.workers.turns import MAX_TURN_SECONDS, AudioClock, Turn, TurnBuilder
+from app.workers.turns import MAX_TURN_SECONDS, AudioClock, DelayMeter, Turn, TurnBuilder
 
 STARTED = datetime(2026, 10, 16, 9, 0, tzinfo=timezone.utc)
 
@@ -188,8 +188,10 @@ class FakeDeepgram:
     """A local stand-in for Deepgram's live endpoint. It answers the first
     second of audio with one final result, and closes when told to."""
 
-    def __init__(self, drop_first: bool = False):
+    def __init__(self, drop_first: bool = False, before: list[str] | None = None):
         self.drop_first = drop_first
+        # Messages sent before the answer, for example ones that cannot be read.
+        self.before = before or []
         self.connections = 0
         self.headers: list[str] = []
         self.audio_bytes = 0
@@ -206,6 +208,8 @@ class FakeDeepgram:
                 self.audio_bytes += len(message)
                 if not answered and received >= deepgram.CHUNK_BYTES * 10:
                     answered = True
+                    for extra in self.before:
+                        await connection.send(extra)
                     text = f"answer {self.connections}"
                     await connection.send(json.dumps(_result(text, 0.0, 1.0, pause=True)))
                     if self.drop_first and self.connections == 1:
@@ -288,6 +292,93 @@ def test_a_dropped_connection_is_opened_again(monkeypatch: pytest.MonkeyPatch) -
 
     assert fake.connections == 2
     assert [turn.text for turn in saved] == ["answer 1", "answer 2"]
+
+
+def test_bad_and_error_messages_are_skipped_without_losing_text(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    bad_start = {**_result("half", 0.0, 0.5, final=False), "start": "soon"}
+    fake = FakeDeepgram(
+        before=[
+            "not json",
+            json.dumps([1, 2]),
+            json.dumps(bad_start),
+            json.dumps({"type": "Error", "description": "something went wrong"}),
+            json.dumps({"type": "Metadata"}),
+        ]
+    )
+
+    saved = _run_sink(monkeypatch, fake, seconds=1.5)
+
+    # The connection carried on and the answer after the bad messages was saved.
+    assert fake.connections == 1
+    assert [turn.text for turn in saved] == ["answer 1"]
+    skipped = [r for r in caplog.records if r.getMessage() == "stt_message_skipped"]
+    assert [r.fields["error_type"] for r in skipped] == [
+        "JSONDecodeError",
+        "AttributeError",
+        "ValueError",
+    ]
+    [error] = [r for r in caplog.records if r.getMessage() == "stt_error_message"]
+    assert "went wrong" not in str(error.fields)
+    [finished] = [r for r in caplog.records if r.getMessage() == "stt_stream_finished"]
+    assert finished.fields["skipped_messages"] == 3
+
+
+def test_the_delay_is_measured_and_logged_as_numbers(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    _run_sink(monkeypatch, FakeDeepgram(), seconds=1.5)
+
+    [finished] = [r for r in caplog.records if r.getMessage() == "stt_stream_finished"]
+    delays = {key: value for key, value in finished.fields.items() if "delay" in key}
+    # One final result arrived; there were no live words to measure.
+    assert set(delays) == {"final_delay_avg_ms", "final_delay_p95_ms", "final_delay_max_ms"}
+    assert all(isinstance(value, int) and 0 <= value < 5000 for value in delays.values())
+
+
+def test_retries_wait_at_most_five_seconds() -> None:
+    waits = [deepgram.FIRST_RETRY_SECONDS]
+    for _ in range(5):
+        waits.append(deepgram.next_wait(waits[-1]))
+
+    # Back within seconds of the network returning, before the queue is full.
+    assert waits == [1, 2, 4, 5, 5, 5]
+    assert deepgram.MAX_RETRY_SECONDS * 2 < deepgram.QUEUE_CHUNKS * deepgram.CHUNK_SECONDS
+
+
+# --- Delay ---
+
+
+def test_the_clock_time_of_a_point_in_the_audio() -> None:
+    clock = AudioClock(STARTED)
+    clock.add(1.0, _at(11))
+
+    assert clock.spoken_at(0.5) == _at(10.5)
+
+
+def test_the_delay_meter_keeps_average_slowest_and_maximum() -> None:
+    meter = DelayMeter()
+    for delay in range(100, 2100, 100):
+        meter.add("live", _at(0), _at(delay / 1000))
+    meter.add("final", _at(5), _at(4))
+
+    assert meter.summary() == {
+        "live_delay_avg_ms": 1050,
+        "live_delay_p95_ms": 1900,
+        "live_delay_max_ms": 2000,
+        # Clocks that disagree never give a delay below zero.
+        "final_delay_avg_ms": 0,
+        "final_delay_p95_ms": 0,
+        "final_delay_max_ms": 0,
+    }
+
+
+def test_without_text_no_delay_is_reported() -> None:
+    assert DelayMeter().summary() == {}
 
 
 # --- Reading the transcript ---

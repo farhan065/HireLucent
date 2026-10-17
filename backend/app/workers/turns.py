@@ -9,11 +9,13 @@ already belongs to one speaker. The service sends two kinds of text:
 
 Final pieces are joined into one turn until the person pauses. A turn that
 grows very long is saved anyway, so a long answer is saved as it goes.
-Each turn gets its time from the start of the interview.
+Each turn gets its time from the start of the interview. How long the text
+took to arrive after the words were spoken is measured too, as numbers only.
 """
 
+import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # A gap in the audio longer than this (for example while a person is muted)
 # moves the clock on to the real time.
@@ -63,6 +65,39 @@ class AudioClock:
                 break
             sent, elapsed = anchor
         return round(elapsed + (audio_seconds - sent) * 1000)
+
+    def spoken_at(self, audio_seconds: float) -> datetime:
+        """The clock time at which this point of the audio was spoken."""
+        return self.started_at + timedelta(milliseconds=self.elapsed_ms(audio_seconds))
+
+
+class DelayMeter:
+    """How long text took to arrive after its words were spoken, in
+    milliseconds: "live" for the words still being spoken, "final" for text
+    that no longer changes. Only numbers are kept, never the words."""
+
+    KINDS = ("live", "final")
+
+    def __init__(self):
+        self._delays: dict[str, list[int]] = {kind: [] for kind in self.KINDS}
+
+    def add(self, kind: str, spoken_at: datetime, arrived_at: datetime) -> None:
+        delay = round((arrived_at - spoken_at).total_seconds() * 1000)
+        self._delays[kind].append(max(delay, 0))
+
+    def summary(self) -> dict[str, int]:
+        """The average, the slowest 5% and the slowest delay of each kind,
+        for example {"live_delay_avg_ms": 640, ...}. Kinds with no text
+        are left out."""
+        numbers: dict[str, int] = {}
+        for kind, delays in self._delays.items():
+            if not delays:
+                continue
+            ordered = sorted(delays)
+            numbers[f"{kind}_delay_avg_ms"] = round(sum(ordered) / len(ordered))
+            numbers[f"{kind}_delay_p95_ms"] = ordered[math.ceil(len(ordered) * 0.95) - 1]
+            numbers[f"{kind}_delay_max_ms"] = ordered[-1]
+        return numbers
 
 
 class TurnBuilder:
