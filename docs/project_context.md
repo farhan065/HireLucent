@@ -2,7 +2,7 @@
 
 > **Status labels:** **BUILT** = implemented, tested and pushed · **FINAL** = agreed, do not change unless the owner asks · **PROPOSED** = suggested design, confirm before major work · **PENDING** = owner decides later · **Not specified** = no information yet.
 > Anything not marked **BUILT** is not in the code yet. For BUILT parts, the names in this file are the names used in the code. If the code and this file ever differ, **the code wins**; tell the owner which lines of this file to correct.
-> **Last updated:** 16 Oct 2026, Module 5 in progress (steps 5.0–5.5 BUILT and pushed; next is step 5.6, the transcript viewer). Branch `module/5-transcription`, last commit `ba37bd4`.
+> **Last updated:** 17 Oct 2026, **Module 5 complete** (steps 5.0–5.8 BUILT and pushed; full test done). Branch `module/5-transcription`, last code commit `8ebaf13`; next: pull request into `dev`, then Module 6.
 
 ---
 
@@ -25,7 +25,7 @@ JD creation → job posting → CV collection → screening and ranking → sche
   - **F1** CV screening and semantic ranking with met / partly met / not met evidence; candidates failing any must-have are excluded. **BUILT** (Module 3).
   - **F2** 0–100 scoring with per-dimension breakdown and justification. **BUILT** (Module 3).
   - **F3** 1-on-1 browser video interview with full lifecycle, controls and auto-reconnect. **BUILT** (Module 4).
-  - **F4** live transcription, speaker-attributed through separate audio channels, with timestamps, saved incrementally. **Mostly BUILT** (Module 5; viewer and robustness still to do).
+  - **F4** live transcription, speaker-attributed through separate audio channels, with timestamps, saved incrementally. **BUILT** (Module 5).
   - **F5** Q&A analysis (Module 6). **F6** consolidated assessment with export and traceability (Module 6).
 - **Client changes (override the BID):** the chatbot posts JDs to a portal with an API → **Blogger careers page** (BUILT); CVs arrive via **Google Form only for now** (BUILT; Gmail intake only if necessary, FINAL); future-dated interview scheduling is required (BUILT).
 - **Stretch (only after all core features work):** F7–F10. F7 is not required this phase.
@@ -35,7 +35,7 @@ JD creation → job posting → CV collection → screening and ranking → sche
 ### 1.3 Key constraints
 - **Performance:** 20 CVs screened in about 5 minutes (state the measured time in README). **Not measured yet** (deferred). Screening runs at most 4 CVs at a time. AI pacing: 14 requests/minute overall, background screening capped at 10/minute, so the interviewer's chat stays responsive. One live interview plus background processing at the same time (checked in 4.10).
 - **Security:** secrets only in `.env` (never committed, never pasted in chat); validate inputs, file types and sizes (PDF/DOCX, 10 MB); candidates can never reach scores, rankings, reports or the transcript (403 / interviewer-only data); no stack traces or prompts in error responses.
-- **Privacy:** sample or synthetic CVs only; no personal data in the repo or logs; **raw audio/video never stored**; transcript text never logged; Deepgram is asked not to keep audio for model training (`mip_opt_out=true`); candidate emails, phones and links never reach the LLM (masked in every prompt; the agent sees IDs and names only); README lists third-party services that receive candidate data (Gemini: CV text with contacts masked; Deepgram: interview audio; Google: name/email for the calendar invitation); candidate deletion endpoint; English only.
+- **Privacy:** sample or synthetic CVs only; no personal data in the repo or logs; **raw audio/video never stored**; transcript text never logged; Deepgram is asked not to keep audio for model training (`mip_opt_out=true`); AssemblyAI (optional second provider) cannot opt out of model training on the free plan, so it is used with test interviews only; candidate emails, phones and links never reach the LLM (masked in every prompt; the agent sees IDs and names only); README lists third-party services that receive candidate data (Gemini: CV text with contacts masked; Deepgram or AssemblyAI: interview audio; Google: name/email for the calendar invitation); candidate deletion endpoint; English only.
 - **Persistence:** data survives restarts; LangGraph state is checkpointed and resumes after a restart. Tasks interrupted by a restart are marked failed at startup and can be started again. Transcript turns are saved one by one during the interview.
 
 ---
@@ -86,12 +86,17 @@ JD creation → job posting → CV collection → screening and ranking → sche
 - **Room AI chat (FINAL, BUILT):** thread `interview-<session id>`, Recruiter Agent in **interview mode** (read-only tools only: JD, requirements, this candidate, `search_question_bank` filtered by role); external actions refused in code.
 - **Transcription (BUILT, Module 5):**
   - `transcription-worker` container checks the database every few seconds for in-progress interviews and joins each room as a **hidden** participant (no audio/video publishing; may send data). It receives the interviewer's and the candidate's microphones as **two separate streams**, so the speaker label comes from the channel (no diarisation).
-  - Each stream goes to a **Deepgram** live connection (`nova-3`, English, interim results, smart format, endpointing 300 ms, utterance end 1000 ms, `mip_opt_out=true`, optional job **keyterms**). Keep-alive during silence; reconnect with growing waits (1 s → 30 s) and up to 30 s of queued audio.
-  - Final pieces are joined into a **turn** at each pause (or after 30 s) and **saved immediately** to `transcript_turns` (speaker, `start_ms`, `end_ms` from the interview start, text). An audio clock corrects times after muted gaps. Overlapping speech = separate entries per speaker.
+  - **Two switchable providers (FINAL):** `STT_PROVIDER=deepgram` (default) or `assemblyai` (or `off`); switch by editing `.env` and running `docker compose up -d --force-recreate transcription-worker` (a running interview is rejoined within seconds). `capture.open_sink()` picks the sink from `capture.SINKS`.
+  - Shared code in `app/workers/stt_stream.py` (`StreamingSink`): 30 s audio queue while disconnected, reconnect with waits 1 → 2 → 4 → 5 s (max 5 s, `next_wait`), unreadable or error messages skipped and logged by kind only, close codes logged as numbers, delay measured (`DelayMeter`), turns saved and pushed. Each provider file only says how to connect and read replies.
+  - **Deepgram** (`deepgram.py`): `nova-3`, English, interim results, smart format, endpointing 300 ms, utterance end 1000 ms, `mip_opt_out=true`, keep-alive during silence, optional job **keyterms**. Final pieces are joined into a **turn** at each pause (or after 30 s) by `TurnBuilder`.
+  - **AssemblyAI** (`assemblyai.py`): Universal Streaming v3, `universal-streaming-english`, global address `wss://streaming.assemblyai.com/v3/ws` (its EU data zone accepted the connection but returned no text in testing), `format_turns=true`, job keywords as `keyterms_prompt`, `Terminate` at the end, queued audio sent at most 1.5× real time after a drop. `AssemblyTurnBuilder` shows every heard word live (sure or not) and saves the formatted turn.
+  - Turns are **saved immediately** to `transcript_turns` (speaker, `start_ms`, `end_ms` from the interview start, text). An audio clock corrects times after muted gaps. Overlapping speech = separate entries per speaker.
+  - **Measured delay (reported, AssemblyAI, 17 Oct):** saved lines arrive 0.08–0.09 s on average after the speaker stops, under 0.9 s in the slowest 5%; live words appear as they are spoken (target < 2 s, clarification #8). Logged per stream in `stt_stream_finished` (`live_/final_delay_avg/p95/max_ms`).
   - **Live push (FINAL: option A):** the worker sends `live` (words still being spoken), `turn` (each saved turn with its id) and `status` (`listening` / `paused` / `off`, every 5 s) over LiveKit data, **to the interviewer only**. LiveKit blanks the sender identity for hidden participants, so the browser accepts transcript data only from a sender with **no identity** (the candidate cannot fake lines).
   - **Live transcript panel (FINAL):** newest line at the bottom, auto-scroll that pauses when scrolling up + "N new · Jump to latest"; **one row per turn** (not grouped) with avatar ("You" / candidate initials), name ("You" / candidate's first name), time from the start (clock time on hover); grey interim words with "●●● speaking"; states Not started / Loading / Listening / Paused (banner "Transcription paused, reconnecting…") / Not available (no status for 15 s or speech-to-text off). Saved turns load first and after every reconnect.
-  - Settings: `STT_PROVIDER` (`deepgram` | `off`), `DEEPGRAM_API_KEY`, `STT_KEYTERMS` (`true` | `false`). Provider is a switch so Google STT can be added later (PENDING).
+  - Settings: `STT_PROVIDER` (`deepgram` | `assemblyai` | `off`), `DEEPGRAM_API_KEY`, `ASSEMBLYAI_API_KEY`, `ASSEMBLYAI_URL`, `ASSEMBLYAI_MODEL`, `STT_KEYTERMS` (`true` | `false`).
   - `GET /interviews/{id}/transcript` (interviewer only): ordered turns with `start_ms`, `end_ms`, `spoken_at` (clock time), text.
+  - **Transcript viewer (FINAL, BUILT, 5.6):** full page `/app/interviews/:sessionId/transcript` inside the app layout, opened from **View transcript** on Completed rows of the Interviews tab; read-only, interviewer only; no new endpoint (uses `GET /interviews/{id}` + `GET /interviews/{id}/transcript`). Search ignores case and matches inside words; all matches highlighted, current one outlined; "3 of 12", ↑/↓, Enter / Shift+Enter, Esc clears; "Nobody said …" when nothing matches. Timeline with two speaker lanes, match ticks, a box for the part on screen; clicks, minute markers and ticks jump the list. Text only, **no audio playback**. **Download .txt** built in the browser: header + `[hh:mm:ss] Speaker: text`; file name `transcript_<job code>_<date>.txt` (no candidate name); disabled when there are no turns ("No transcript for this interview"). Files: `pages/TranscriptPage.jsx`, `components/transcript/TranscriptTimeline.jsx`, `TranscriptTurns.jsx`, `lib/transcript.js`.
 
 **Step 10: Interview ends.** `POST /interviews/{id}/end` → room closed → worker saves the last words → status `completed`, `ended_at` set → candidate link and passes stop working.
 
@@ -122,7 +127,7 @@ JD creation → job posting → CV collection → screening and ranking → sche
 | Embeddings | `qwen3-embedding:0.6b` via Ollama (temporary; OpenAI selectable) | BUILT |
 | LLM | Gemini 3.5 Flash-Lite free tier (OpenAI selectable); pacing 14/min, background 10/min; retries; room chat has shorter timeouts (`ROOM_AI_*`) | BUILT |
 | Video | Self-hosted LiveKit (`livekit/livekit-server:v1.13.7`) | BUILT |
-| Speech-to-text | **Deepgram nova-3** live streaming (FINAL for now); Google STT later via `STT_PROVIDER` (PENDING) | BUILT |
+| Speech-to-text | **Deepgram nova-3** (default) or **AssemblyAI Universal Streaming**, switchable with `STT_PROVIDER` | BUILT |
 | Google APIs | One Cloud project: Forms, Drive (direct), Blogger (MCP), Calendar + Gmail send (mcp-google) | BUILT |
 | CV parsing / OCR | PyMuPDF, python-docx, Tesseract | BUILT |
 
@@ -145,12 +150,12 @@ JD creation → job posting → CV collection → screening and ranking → sche
 ### 3.5 UI design
 > - The owner wants a **very professional, modern and beautiful UI**.
 > - **Before implementing any UI screen or change: share the understanding, show a mockup on the design canvas, wait for approval, then apply it exactly.**
-> - Design canvas: https://claude.ai/artifact/1YsLaBugibMF1nbsWtcWYj (all approved mockups; Module 5 boards: `M5LiveTranscript`, `M5TranscriptStates`).
+> - Design canvas: https://claude.ai/artifact/1YsLaBugibMF1nbsWtcWYj (all approved mockups; Module 5 boards: `M5LiveTranscript`, `M5TranscriptStates`, `M5TranscriptViewer`, `M5TranscriptViewerStates`).
 
 Theme (FINAL): clean corporate SaaS, white/pale-blue backgrounds, blue primary `#1557E0`, navy headings `#0B1F4B`, body text `#51607A`, rounded cards, subtle shadows; each stage its own colour (no dark navy fills). Tailwind tokens in `frontend/src/index.css` (brand, navy, body, mist, tint, line, success, warning, danger, teal, amber, violet + `-soft`).
 
-**Screens (BUILT):** landing, login, sidebar (Dashboard, Jobs, AI Agent, Knowledge Base), Dashboard, Jobs page, job page tabs (Job post, Applications, Screening, **Interviews**), AI Agent page (cards, job brief), Knowledge Base, interviewer room `/app/interviews/:sessionId/room`, candidate pages `/interview/:token` (pre-join, waiting, room, ended).
-**Next screen (5.6):** transcript viewer for completed interviews (mockup first).
+**Screens (BUILT):** landing, login, sidebar (Dashboard, Jobs, AI Agent, Knowledge Base), Dashboard, Jobs page, job page tabs (Job post, Applications, Screening, **Interviews**), AI Agent page (cards, job brief), Knowledge Base, interviewer room `/app/interviews/:sessionId/room`, transcript viewer `/app/interviews/:sessionId/transcript`, candidate pages `/interview/:token` (pre-join, waiting, room, ended).
+**Next screens:** Module 6 assessment pages (mockups first).
 
 ---
 
@@ -190,27 +195,28 @@ OAuth consent in Testing mode: **the sign-in expires about every 7 days** → ru
 - **Later:** evaluate, ranking, compare, export, decision (Module 6+).
 
 ### 4.6 Error handling and logging
-JSON logs (IDs and numbers only: no names, emails, CV text, transcript text, tokens, keys or prompts). Worker events: `interview_audio_joined`, `stt_connected`, `transcript_turn_saved` (speaker, times, word count), `stt_stream_finished`, `stt_refused`, `stt_disconnected`, `stt_not_configured`. PENDING: simplify the logging code after all other tasks.
+JSON logs (IDs and numbers only: no names, emails, CV text, transcript text, tokens, keys or prompts). Worker events (all with `provider`): `transcription_worker_started` (provider, key set), `interview_audio_joined`, `stt_connected`, `transcript_turn_saved` (speaker, times, word count), `stt_stream_finished` (turns, dropped chunks, skipped messages, delay figures), `stt_refused` (HTTP status), `stt_disconnected` (error type, close code), `stt_error_message`, `stt_message_skipped`, `stt_not_configured`. PENDING: simplify the logging code after all other tasks.
 
 ### 4.7 Innovation feature: Candidate Feedback Composer (initial choice, Module 7)
 After Hold/Reject: draft respectful feedback from saved job-related evidence only, fairness check, HITL edit/approve, send via `send_email`. Graph, endpoint, UI and the 300–500 word rationale (owner's own reasoning) not yet specified.
 
 ---
 
-## 5. Development status (16 Oct 2026)
+## 5. Development status (17 Oct 2026)
 
 ### 5.1 Redmine tree and status
 - **Module 2** Foundation: BUILT, merged into `dev`.
 - **Module 3** (Story #647080, F1 + F2): BUILT, merged into `dev`.
 - **Module 4** (Story #648326, F3): **all tasks done**, merged into `dev` (14 Oct).
   - Feature 17 #648327: #648332, #648333, #648334, #648335 · Feature 18 #648328: #648336, #648337, #648338 · Feature 19 #648329: #648340, #648341 · Feature 20 #648330: #648342 · Feature 21 #648331: #648343
-- **Module 5** (Story #648345, F4), branch `module/5-transcription`:
+- **Module 5** (Story #648345, F4), branch `module/5-transcription`: **all tasks done**; next: PR into `dev`.
   - Feature 22 Speech-to-Text #648346: #648360 ✅, #648362 ✅ (feature complete)
   - Feature 23 Speaker Attribution & Timestamping #648347: #648363 ✅, #648365 ✅ (complete)
   - Feature 24 Structured Transcript & Persistence #648349: #648367 ✅, #648369 ✅ (complete)
   - Feature 25 Live Transcript Display #648354: #648372 ✅, #648374 ✅ (complete)
-  - Feature 26 Transcript Viewer #648355: **#648375 — next (step 5.6)**
-  - Feature 27 Transcription Robustness #648357: **#648376 — step 5.7**
+  - Feature 26 Transcript Viewer #648355: #648375 ✅ (complete)
+  - Feature 27 Transcription Robustness #648357: #648376 ✅ (complete)
+  - AssemblyAI provider (step 5.8): no new task, `Refs #648360`
 
 ### 5.2 Module 5 step log
 | Step | Content | Commits | Status |
@@ -219,25 +225,29 @@ After Hold/Reject: draft respectful feedback from saved job-related evidence onl
 | 5.0b/c | Agent uses the shared MCP client (old `app/rag/mcp_client.py` removed); delete job blocked with upcoming interviews; unused helper removed | `33244df`, `a50e20c`, `82ddd7e` | ✅ |
 | 5.1 + 5.2 | Deepgram streaming per speaker, settings, turns saved with times, transcript API | `26b094d`, `d668f99`, `9d97510` | ✅ |
 | 5.3 + 5.4 + 5.5 | Live push to the interviewer, live transcript panel, Paused/Not available states | `0f79306`, `ba37bd4` | ✅ |
-| **5.6** | **Transcript viewer for completed interviews (#648375)** | — | **Next** |
-| 5.7 | Robustness (#648376): silence, overlap, accents, low confidence; measure delay; possible tuning (endpointing 300 → 500–700 ms, keyterms with proper capitals), quality/speed review | — | Pending |
-| End | Full test, Redmine feature/module descriptions, merge Module 5 into `dev` | — | Pending |
+| 5.6 | Transcript viewer: full page, search, timeline, Download .txt (#648375) | `1c6200d`, `385b595` | ✅ |
+| 5.7 | Robustness (#648376): skip unreadable/error messages without dropping the connection, measure delay, reconnect waits capped at 5 s (owner chose only these; the rest moved to §5.4) | `b7df4f0` | ✅ |
+| 5.8 | AssemblyAI as a second, switchable provider; shared `stt_stream.py` (Refs #648360) | `8ebaf13` | ✅ |
+| End | Full test (done by the owner), Redmine descriptions (given), docs update, PR into `dev` | — | PR next |
 
-### 5.3 Step 5.6 plan (PROPOSED, waiting for the owner)
-- Interviews tab → each **Completed** interview gets **View transcript** → opens the viewer.
-- Viewer: header (candidate, job, date, length); **search** with highlighted matches, next/previous and "3 of 12"; **timestamp navigation** (timeline with minute markers, clickable times); turns in the same one-row-per-turn style; read-only, interviewer only; uses the existing `GET /interviews/{id}/transcript`.
-- **Open questions for the owner:** (1) full page (recommended) or side panel; (2) Download (.txt) button or not. Mockup on the design canvas before building.
+### 5.3 Module 5 decisions (17 Oct)
+- Transcript viewer: full page (not a side panel), Download .txt yes, text only (raw audio is never stored, so no playback).
+- Robustness scope: only bad-message handling and delay measurement (+ 5 s retry cap after the first test lost 3–4 s of audio during a Wi-Fi drop).
+- AssemblyAI added as a switchable second provider; Deepgram stays the default; the README reports AssemblyAI's measured delay.
+- Remote candidates: Render/Vercel do not fit (10 services, UDP for LiveKit, sleeping free tier); Oracle VM and LiveKit Cloud rejected for now.
 
 ### 5.4 Deferred items (owner: "later")
 1. Remove the demo code (`routes/graphs.py`, demo part of `routes/tasks.py`, `graphs/demo.py`).
 2. Phone sidebar fix (mockup needed).
 3. Measure the 20-CV screening time (README; Module 9).
-4. Update the High-Level and Detailed Architecture diagrams (Blogger, Google Form only, mcp-google, LiveKit, Deepgram, worker).
+4. Update the High-Level and Detailed Architecture diagrams (Blogger, Google Form only, mcp-google, LiveKit, Deepgram/AssemblyAI, worker).
 5. Simplify the logging code (#646546), after all other tasks.
-6. README: env table (incl. Deepgram/STT, LiveKit, interview settings) and a "two-person demo" section.
-7. Transcript quality and speed review (5.7). Tests on one PC need headphones and one window unmuted at a time (shared mic/speaker echo).
+6. README: env table (incl. STT providers and keys, LiveKit, interview settings), measured transcription delay (AssemblyAI), AssemblyAI in the third-party data list, and a "two-person demo" section.
+7. Tests on one PC need headphones and one window unmuted at a time (shared mic/speaker echo).
 8. Minimum experience in half years (e.g. 1.5): not supported (whole years); owner said no change for now.
-9. Google STT as a second provider (PENDING).
+9. **After Module 6 — same-Wi-Fi / phone-hotspot demo mode ("Way 2"):** Cloudflare quick tunnels for the website (3000) and LiveKit signalling (7880); LiveKit announces the PC's LAN IP; `FRONTEND_BASE_URL` and `LIVEKIT_URL` updated per run; config only; the one-PC setup stays the default. Same mobile-data network does not work (CGNAT).
+10. Transcription "later" ideas (not required): store per-turn confidence (migration `0014`), keyterm spelling table (FastAPI, Kubernetes…), endpointing / turn length as settings.
+11. Google STT as a third provider (PENDING).
 
 ### 5.5 Known limitations (for the README)
 - Gemini 3.5 Flash-Lite ignores temperature; repeated scoring can differ by up to ~2 final-score points.
@@ -245,6 +255,10 @@ After Hold/Reject: draft respectful feedback from saved job-related evidence onl
 - "New applications waiting" count can be wrong after form responses are deleted.
 - Free-tier LLM limits bound screening speed.
 - Two-window tests on one PC duplicate or garble the transcript (shared microphone and speakers).
+- Short pauses split an answer into several transcript lines (both providers).
+- Lower-case job keywords can make technical words appear in lower case ("fastapi").
+- AssemblyAI's free plan cannot opt out of model training; its EU data zone returned no text in testing.
+- Candidates can only join from the same PC for now (remote join is the planned "Way 2" demo mode).
 - The waiting-candidates count is cached for about 2 minutes.
 
 ---
@@ -252,6 +266,9 @@ After Hold/Reject: draft respectful feedback from saved job-related evidence onl
 ## 6. Working agreement with Claude (both accounts)
 
 - **Per step:** share understanding and questions first (with mockups on the design canvas for any UI) → build only after the owner confirms → deliver `hirelucent_step_X.zip` (changed files with repo paths; corrected re-sends get a new name such as `_v2`) with apply commands, a test checklist ending with "Done when", small commits with Refs/Closes, and the push command → after the owner pushes, verify GitHub against the delivered files → give the Redmine notes.
+- **Redmine timing:** each task's description comes together with its daily note; a feature's description once all its tasks are done; a module's description once all its features are done. Work without its own task uses the closest existing task (`Refs`, no new task).
+- **Docs:** `project_context.md` and `HANDOFF.md` are updated only when a module is complete (always) or when the owner asks; in between, Claude keeps a list of pending changes.
+- **Explanations:** keep them simple and short; recommend the minimum that meets the requirements when time is tight.
 - **Apply commands (from the project folder):**
   ```
   rm -rf ~/Downloads/hirelucent_step_X
@@ -259,7 +276,7 @@ After Hold/Reject: draft respectful feedback from saved job-related evidence onl
   cp -r ~/Downloads/hirelucent_step_X/. .
   docker compose up -d --build
   ```
-- **Tests:** `cd backend && source .venv/Scripts/activate && python -m pytest -q && cd ..` (401 passing at `ba37bd4`). Frontend: `npm run lint`, `npm run build`.
+- **Tests:** `cd backend && source .venv/Scripts/activate && python -m pytest -q && cd ..` (419 tests at `8ebaf13`; on the Windows venv 7 are skipped: 5 need Tesseract, 2 need the `livekit` package). Frontend: `npm run lint`, `npm run build`.
 - **Commits:** `<type>(<scope>): <Summary>` (≤50 chars, imperative), body bullets "- " wrapped at 72, footer `Refs #id` or `Closes #id`; multiline `git commit -m … -m …`, then `git push origin <branch>`. **Claude never commits or pushes; the owner does.**
 - **Redmine:** Textile. Daily notes `h1. *Date: dd/mm/yy*` + past-tense bullets, only work actually done; descriptions = one paragraph + `*Outcomes:*` bullets.
 - **DB check shortcut (Git Bash):** `hdb() { docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<< "$1"; }`
