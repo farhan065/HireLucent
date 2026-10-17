@@ -123,7 +123,17 @@ function Actions({
       </>
     )
   }
-  if (status === 'completed') return null
+  if (status === 'completed') {
+    return (
+      <Link
+        to={`/app/interviews/${interview.id}/transcript`}
+        aria-label={`View the transcript of the interview with ${interview.candidate_name}`}
+        className={`${LINK} inline-flex items-center text-brand hover:text-brand-dark`}
+      >
+        View transcript
+      </Link>
+    )
+  }
   const isMissed = joinState(interview, rules, now) === 'missed'
   return (
     <>
