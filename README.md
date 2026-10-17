@@ -175,7 +175,7 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
 
 | Service | Used for | What is sent |
 |---|---|---|
-| Google Gemini API | Job descriptions, CV parsing, requirement matching, scoring | Prompts with job details and **CV text with email addresses and phone numbers masked**. The CV text can still contain the candidate's name and other details written in the CV |
+| Google Gemini API | Job descriptions, CV parsing, requirement matching, scoring, interview evaluation | Prompts with job details, **CV text** and **interview transcript text**, both with email addresses, phone numbers and links masked. They can still contain the candidate's name and other details written in the CV or said in the interview |
 | Ollama (local container) | Embeddings | Nothing leaves the machine |
 | Google Blogger API | Publishing approved job posts | The job title, description, job code and application form link |
 | Google Forms and Drive APIs | Checking the application form and collecting CVs | Nothing is sent. Form responses and uploaded CVs are read |
