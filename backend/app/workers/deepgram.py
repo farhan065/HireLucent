@@ -1,67 +1,20 @@
-"""Speech-to-text with Deepgram: one live connection per person.
+"""Speech-to-text with Deepgram (STT_PROVIDER=deepgram).
 
-The worker hands each person's audio to a DeepgramSink. The sink sends the
-audio in small pieces and reads back the text. Final text becomes turns
-(see turns.py), which are saved as soon as each one is complete. The words
-of the turn still being spoken, and each saved turn, are also handed to
-the worker, which sends them to the interviewer's screen.
+How to connect to Deepgram and read its replies. Everything else, such as
+reconnecting, the audio queue and saving turns, is shared with the other
+services (see stt_stream.py).
 
-- Raw audio is never stored. It is sent and dropped.
-- The text is never logged: each saved turn is logged with its speaker,
-  times and number of words only.
 - Deepgram is asked not to keep the audio for improving its models.
-- If the connection drops, the sink connects again. Audio from the last
-  thirty seconds waits in a queue meanwhile, so short drops lose nothing.
-- A message that cannot be read, or an error message, is skipped and
-  logged by its kind only; the connection carries on.
-- The delay between speaking and the text arriving is measured, and only
-  its numbers are logged when the stream finishes.
+- Deepgram closes a connection that receives nothing for about ten
+  seconds, for example while a person is muted, so a keep-alive message
+  is sent while there is no audio.
 """
 
-import asyncio
-import json
-import logging
-from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
 from urllib.parse import urlencode
 
-from websockets.asyncio.client import ClientConnection, connect
-from websockets.exceptions import InvalidStatus, WebSocketException
-
 from app.core.config import get_settings
-from app.core.logging import get_logger, log_event
-from app.workers.turns import AudioClock, DelayMeter, Turn, TurnBuilder
-
-logger = get_logger(__name__)
-
-# The audio format sent: 16 kHz, one channel, 16-bit.
-SAMPLE_RATE = 16000
-# Audio is sent in pieces of a tenth of a second (16-bit, one channel).
-CHUNK_SECONDS = 0.1
-CHUNK_BYTES = int(SAMPLE_RATE * 2 * CHUNK_SECONDS)
-# Up to thirty seconds of audio waits while the connection is down.
-QUEUE_CHUNKS = 300
-# Deepgram closes a connection that receives nothing for about ten seconds,
-# for example while a person is muted. A keep-alive message prevents that.
-KEEP_ALIVE_SECONDS = 4
-# Waits between connection attempts start here and double up to the maximum.
-# The maximum is short, so the sink is back within seconds of the network
-# returning, well before the thirty-second queue fills and audio is lost.
-FIRST_RETRY_SECONDS = 1
-MAX_RETRY_SECONDS = 5
-# How long closing may take to collect the last words.
-CLOSE_TIMEOUT_SECONDS = 10
-
-# Saves a turn and returns its id.
-SaveTurn = Callable[[Turn], Awaitable[int]]
-# Sends one live transcript event to the interviewer's screen.
-Publish = Callable[[dict], Awaitable[None]]
-
-
-def next_wait(wait: float) -> float:
-    """The wait before the next connection attempt: double the last one,
-    never more than the maximum."""
-    return min(wait * 2, MAX_RETRY_SECONDS)
+from app.workers.stt_stream import SAMPLE_RATE, StreamingSink
+from app.workers.turns import AudioClock, TurnBuilder
 
 
 def listen_url(keyterms: list[str]) -> str:
@@ -84,234 +37,21 @@ def listen_url(keyterms: list[str]) -> str:
     return f"{settings.deepgram_url}?{urlencode(params)}"
 
 
-class DeepgramSink:
-    """Transcribes one person's audio in one interview."""
+class DeepgramSink(StreamingSink):
+    """Transcribes one person's audio in one interview with Deepgram."""
 
-    def __init__(
-        self,
-        session_id: int,
-        speaker: str,
-        started_at: datetime,
-        keyterms: list[str],
-        save: SaveTurn,
-        publish: Publish | None = None,
-    ):
-        self.session_id = session_id
-        self.speaker = speaker
-        self.started_at = started_at
-        self.keyterms = keyterms
-        self.save = save
-        self.publish = publish
-        # True while the connection to Deepgram is down and being retried.
-        self.has_problem = False
-        self.turns = 0
-        self.dropped_chunks = 0
-        self.skipped_messages = 0
-        self.delays = DelayMeter()
-        self._buffer = bytearray()
-        # Pieces of audio with the time each one ended; None means "close".
-        self._queue: asyncio.Queue[tuple[bytes, datetime] | None] = asyncio.Queue(QUEUE_CHUNKS)
-        self._closing = False
-        self._task = asyncio.create_task(self._run())
+    PROVIDER = "deepgram"
+    KEEP_ALIVE = {"type": "KeepAlive"}
+    CLOSE = {"type": "CloseStream"}
 
-    async def push(self, pcm: bytes, sample_rate: int) -> None:
-        """Add a piece of audio. It is sent in tenth-of-a-second pieces."""
-        self._buffer.extend(pcm)
-        while len(self._buffer) >= CHUNK_BYTES:
-            self._queue_chunk(bytes(self._buffer[:CHUNK_BYTES]))
-            del self._buffer[:CHUNK_BYTES]
+    def connection_url(self) -> str:
+        return listen_url(self.keyterms)
 
-    def _queue_chunk(self, chunk: bytes) -> None:
-        try:
-            self._queue.put_nowait((chunk, datetime.now(timezone.utc)))
-        except asyncio.QueueFull:
-            self.dropped_chunks += 1
+    def headers(self) -> dict[str, str]:
+        return {"Authorization": f"Token {get_settings().deepgram_api_key}"}
 
-    async def close(self) -> None:
-        """Send the rest of the audio, save the last words and disconnect."""
-        if self._buffer:
-            self._queue_chunk(bytes(self._buffer))
-            self._buffer.clear()
-        self._closing = True
-        if self._queue.full():
-            # Make room for the close signal by dropping the oldest audio.
-            self._queue.get_nowait()
-            self.dropped_chunks += 1
-        self._queue.put_nowait(None)
-        try:
-            await asyncio.wait_for(asyncio.shield(self._task), CLOSE_TIMEOUT_SECONDS)
-        except TimeoutError:
-            self._task.cancel()
-        log_event(
-            logger,
-            "stt_stream_finished",
-            session_id=self.session_id,
-            speaker=self.speaker,
-            turns=self.turns,
-            dropped_chunks=self.dropped_chunks,
-            skipped_messages=self.skipped_messages,
-            **self.delays.summary(),
-        )
+    def new_builder(self, clock: AudioClock) -> TurnBuilder:
+        return TurnBuilder(self.speaker, clock)
 
-    async def _run(self) -> None:
-        """Stay connected until closed, connecting again after a drop."""
-        settings = get_settings()
-        wait = FIRST_RETRY_SECONDS
-        while True:
-            try:
-                async with connect(
-                    listen_url(self.keyterms),
-                    additional_headers={"Authorization": f"Token {settings.deepgram_api_key}"},
-                    open_timeout=10,
-                ) as connection:
-                    log_event(
-                        logger,
-                        "stt_connected",
-                        session_id=self.session_id,
-                        speaker=self.speaker,
-                        keyterms=len(self.keyterms),
-                    )
-                    wait = FIRST_RETRY_SECONDS
-                    self.has_problem = False
-                    if await self._stream(connection):
-                        return
-            except InvalidStatus as exc:
-                # 401 means the key is wrong; 402 that the credit has run out.
-                self._log_problem("stt_refused", status=exc.response.status_code, retry_in=wait)
-            except (OSError, TimeoutError, WebSocketException) as exc:
-                self._log_problem("stt_disconnected", error_type=type(exc).__name__, retry_in=wait)
-            if self._closing:
-                return
-            self.has_problem = True
-            await asyncio.sleep(wait)
-            wait = next_wait(wait)
-
-    def _log_problem(self, event: str, **fields) -> None:
-        log_event(
-            logger,
-            event,
-            level=logging.WARNING,
-            session_id=self.session_id,
-            speaker=self.speaker,
-            **fields,
-        )
-
-    async def _stream(self, connection: ClientConnection) -> bool:
-        """Send audio and read results on one connection. Returns True when
-        the sink was closed, False when the connection dropped."""
-        builder = TurnBuilder(self.speaker, AudioClock(self.started_at))
-        sender = asyncio.create_task(self._send(connection, builder.clock))
-        try:
-            async for raw in connection:
-                if isinstance(raw, str):
-                    await self._read(builder, raw)
-        finally:
-            await self._save(builder.flush())
-            await self._send_live(builder)
-            if not sender.done():
-                sender.cancel()
-            await asyncio.gather(sender, return_exceptions=True)
-        return sender.done() and not sender.cancelled() and sender.exception() is None
-
-    async def _send(self, connection: ClientConnection, clock: AudioClock) -> None:
-        """Send queued audio, with keep-alive messages while there is none.
-        Ends after telling Deepgram that no more audio will come."""
-        while True:
-            try:
-                item = await asyncio.wait_for(self._queue.get(), KEEP_ALIVE_SECONDS)
-            except TimeoutError:
-                await connection.send(json.dumps({"type": "KeepAlive"}))
-                continue
-            if item is None:
-                await connection.send(json.dumps({"type": "CloseStream"}))
-                return
-            chunk, ended_at = item
-            clock.add(len(chunk) / (SAMPLE_RATE * 2), ended_at)
-            await connection.send(chunk)
-
-    async def _read(self, builder: TurnBuilder, raw: str) -> None:
-        """Handle one message. One that cannot be read is skipped, so a bad
-        message never ends the connection or loses the turn being built."""
-        try:
-            message = json.loads(raw)
-            if message.get("type") == "Error":
-                # Its wording is not logged; Deepgram closes the connection
-                # itself if the error is serious, and the sink connects again.
-                self._log_problem("stt_error_message")
-                return
-            await self._handle(builder, message)
-        except (ValueError, TypeError, AttributeError) as exc:
-            self.skipped_messages += 1
-            self._log_problem("stt_message_skipped", error_type=type(exc).__name__)
-
-    async def _handle(self, builder: TurnBuilder, message: dict) -> None:
-        """Save a finished turn, and send the words still being spoken
-        whenever they change."""
-        self._measure(builder.clock, message)
-        before = builder.live_text
-        await self._save(builder.handle(message))
-        if builder.live_text != before:
-            await self._send_live(builder)
-
-    def _measure(self, clock: AudioClock, message: dict) -> None:
-        """Record how long the text took to arrive after its last word was
-        spoken. Results without words (silence) are not counted."""
-        if message.get("type") != "Results":
-            return
-        alternatives = message.get("channel", {}).get("alternatives") or [{}]
-        if not (alternatives[0].get("transcript") or "").strip():
-            return
-        spoken_end = float(message.get("start", 0)) + float(message.get("duration", 0))
-        kind = "final" if message.get("is_final") else "live"
-        self.delays.add(kind, clock.spoken_at(spoken_end), datetime.now(timezone.utc))
-
-    async def _send_live(self, builder: TurnBuilder) -> None:
-        """The words of the current turn so far; empty text clears them."""
-        await self._publish(
-            {
-                "type": "live",
-                "speaker": self.speaker,
-                "start_ms": builder.live_start_ms,
-                "text": builder.live_text,
-            }
-        )
-
-    async def _save(self, turn: Turn | None) -> None:
-        if turn is None:
-            return
-        try:
-            turn_id = await self.save(turn)
-        except Exception as exc:
-            self._log_problem("transcript_turn_not_saved", error_type=type(exc).__name__)
-            return
-        self.turns += 1
-        # Numbers only: what was said is never logged.
-        log_event(
-            logger,
-            "transcript_turn_saved",
-            session_id=self.session_id,
-            speaker=self.speaker,
-            start_ms=turn.start_ms,
-            end_ms=turn.end_ms,
-            words=len(turn.text.split()),
-        )
-        await self._publish(
-            {
-                "type": "turn",
-                "id": turn_id,
-                "speaker": turn.speaker,
-                "start_ms": turn.start_ms,
-                "end_ms": turn.end_ms,
-                "text": turn.text,
-            }
-        )
-
-    async def _publish(self, event: dict) -> None:
-        """Send to the interviewer's screen. A failure only affects the live
-        view: the turn is already saved and loads again from the database."""
-        if self.publish is None:
-            return
-        try:
-            await self.publish(event)
-        except Exception:
-            pass
+    def is_error(self, message: dict) -> bool:
+        return message.get("type") == "Error"

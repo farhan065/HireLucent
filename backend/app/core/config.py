@@ -108,12 +108,18 @@ class Settings(BaseSettings):
     capture_livekit_url: str = "ws://localhost:7880"
     # How often the worker looks for interviews that started or ended.
     capture_poll_seconds: float = Field(default=3, gt=0, le=60)
-    # Speech-to-text for interviews. "deepgram" turns each person's speech
-    # into text; "off" only measures the audio, so no key is needed.
-    stt_provider: Literal["deepgram", "off"] = "deepgram"
+    # Speech-to-text for interviews. "deepgram" or "assemblyai" turns each
+    # person's speech into text with that service; "off" only measures the
+    # audio, so no key is needed. Change it and restart the worker to switch.
+    stt_provider: Literal["deepgram", "assemblyai", "off"] = "deepgram"
     deepgram_api_key: str = ""
     deepgram_url: str = "wss://api.deepgram.com/v1/listen"
     deepgram_model: str = "nova-3"
+    assemblyai_api_key: str = ""
+    # AssemblyAI's nearest region (US or EU). Its EU data zone,
+    # wss://streaming.eu.assemblyai.com/v3/ws, sent no text in our tests.
+    assemblyai_url: str = "wss://streaming.assemblyai.com/v3/ws"
+    assemblyai_model: str = "universal-streaming-english"
     # Send the job's requirement keywords to the speech-to-text service, so
     # technical words are recognised better. False transcribes without them.
     stt_keyterms: bool = True

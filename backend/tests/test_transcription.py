@@ -20,8 +20,15 @@ from app.main import create_app
 from app.models import InterviewSession, TranscriptTurn
 from app.models.enums import UserRole
 from app.services import transcript_service
-from app.workers import capture, deepgram
-from app.workers.turns import MAX_TURN_SECONDS, AudioClock, DelayMeter, Turn, TurnBuilder
+from app.workers import assemblyai, capture, deepgram, stt_stream
+from app.workers.turns import (
+    MAX_TURN_SECONDS,
+    AssemblyTurnBuilder,
+    AudioClock,
+    DelayMeter,
+    Turn,
+    TurnBuilder,
+)
 
 STARTED = datetime(2026, 10, 16, 9, 0, tzinfo=timezone.utc)
 
@@ -168,17 +175,41 @@ def test_the_connection_asks_for_english_interim_text_and_no_model_training() ->
 # --- Which sink is used ---
 
 
-@pytest.mark.parametrize(("provider", "key"), [("off", "key"), ("deepgram", "")])
+@pytest.mark.parametrize(
+    ("provider", "key"), [("off", "key"), ("deepgram", ""), ("assemblyai", "")]
+)
 def test_without_speech_to_text_the_audio_is_only_measured(
     monkeypatch: pytest.MonkeyPatch, provider: str, key: str
 ) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "stt_provider", provider)
     monkeypatch.setattr(settings, "deepgram_api_key", key)
+    monkeypatch.setattr(settings, "assemblyai_api_key", key)
 
     sink = capture.open_sink(9, "candidate", STARTED, [], save=None)
 
     assert isinstance(sink, capture.MeterSink)
+    assert capture.stt_enabled() is False
+
+
+@pytest.mark.parametrize(
+    ("provider", "sink_class"),
+    [("deepgram", deepgram.DeepgramSink), ("assemblyai", assemblyai.AssemblyAISink)],
+)
+def test_the_service_is_chosen_by_stt_provider(
+    monkeypatch: pytest.MonkeyPatch, provider: str, sink_class: type
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "stt_provider", provider)
+    monkeypatch.setattr(settings, f"{provider}_api_key", "key")
+
+    async def scenario() -> None:
+        sink = capture.open_sink(9, "candidate", STARTED, [], save=None)
+        sink._task.cancel()
+        assert type(sink) is sink_class
+
+    asyncio.run(scenario())
+    assert capture.stt_enabled() is True
 
 
 # --- The live connection ---
@@ -206,7 +237,7 @@ class FakeDeepgram:
             if isinstance(message, bytes):
                 received += len(message)
                 self.audio_bytes += len(message)
-                if not answered and received >= deepgram.CHUNK_BYTES * 10:
+                if not answered and received >= stt_stream.CHUNK_BYTES * 10:
                     answered = True
                     for extra in self.before:
                         await connection.send(extra)
@@ -222,7 +253,11 @@ class FakeDeepgram:
 
 
 def _run_sink(
-    monkeypatch: pytest.MonkeyPatch, fake: FakeDeepgram, seconds: float, sent: list | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    fake,
+    seconds: float,
+    sent: list | None = None,
+    provider: str = "deepgram",
 ) -> list:
     saved: list[Turn] = []
 
@@ -238,17 +273,17 @@ def _run_sink(
         async with serve(fake.handler, "127.0.0.1", 0) as server:
             port = server.sockets[0].getsockname()[1]
             settings = get_settings()
-            monkeypatch.setattr(settings, "deepgram_url", f"ws://127.0.0.1:{port}")
-            monkeypatch.setattr(settings, "deepgram_api_key", "test-key")
-            monkeypatch.setattr(deepgram, "FIRST_RETRY_SECONDS", 0.01)
-            monkeypatch.setattr(deepgram, "MAX_RETRY_SECONDS", 0.05)
-            sink = deepgram.DeepgramSink(
+            monkeypatch.setattr(settings, f"{provider}_url", f"ws://127.0.0.1:{port}")
+            monkeypatch.setattr(settings, f"{provider}_api_key", "test-key")
+            monkeypatch.setattr(stt_stream, "FIRST_RETRY_SECONDS", 0.01)
+            monkeypatch.setattr(stt_stream, "MAX_RETRY_SECONDS", 0.05)
+            sink = capture.SINKS[provider](
                 9, "interviewer", datetime.now(timezone.utc), [], save, publish
             )
             # Audio arrives in 10 ms frames, as from the video room.
-            frame = bytes(deepgram.CHUNK_BYTES // 10)
+            frame = bytes(stt_stream.CHUNK_BYTES // 10)
             for _ in range(int(seconds * 100)):
-                await sink.push(frame, deepgram.SAMPLE_RATE)
+                await sink.push(frame, stt_stream.SAMPLE_RATE)
                 await asyncio.sleep(0.001)
             await asyncio.sleep(0.3)
             await sink.close()
@@ -267,7 +302,7 @@ def test_speech_is_sent_and_each_turn_saved(
     saved = _run_sink(monkeypatch, fake, seconds=1.5, sent=sent)
 
     assert fake.headers == ["Token test-key"]
-    assert fake.audio_bytes == deepgram.CHUNK_BYTES * 15
+    assert fake.audio_bytes == stt_stream.CHUNK_BYTES * 15
     assert fake.closed_by_client is True
     assert [(turn.speaker, turn.text) for turn in saved] == [("interviewer", "answer 1")]
     # The saved turn goes to the interviewer's screen with its id.
@@ -341,13 +376,13 @@ def test_the_delay_is_measured_and_logged_as_numbers(
 
 
 def test_retries_wait_at_most_five_seconds() -> None:
-    waits = [deepgram.FIRST_RETRY_SECONDS]
+    waits = [stt_stream.FIRST_RETRY_SECONDS]
     for _ in range(5):
-        waits.append(deepgram.next_wait(waits[-1]))
+        waits.append(stt_stream.next_wait(waits[-1]))
 
     # Back within seconds of the network returning, before the queue is full.
     assert waits == [1, 2, 4, 5, 5, 5]
-    assert deepgram.MAX_RETRY_SECONDS * 2 < deepgram.QUEUE_CHUNKS * deepgram.CHUNK_SECONDS
+    assert stt_stream.MAX_RETRY_SECONDS * 2 < stt_stream.QUEUE_CHUNKS * stt_stream.CHUNK_SECONDS
 
 
 # --- Delay ---
@@ -379,6 +414,189 @@ def test_the_delay_meter_keeps_average_slowest_and_maximum() -> None:
 
 def test_without_text_no_delay_is_reported() -> None:
     assert DelayMeter().summary() == {}
+
+
+# --- AssemblyAI ---
+
+
+def _turn_message(
+    text: str, order: int, start_ms: int, end_ms: int, *, end=False, formatted=False
+) -> dict:
+    return {
+        "type": "Turn",
+        "turn_order": order,
+        "end_of_turn": end,
+        "turn_is_formatted": formatted,
+        "transcript": text,
+        "words": [{"text": text, "start": start_ms, "end": end_ms, "word_is_final": end}],
+    }
+
+
+def _assembly_builder() -> AssemblyTurnBuilder:
+    clock = AudioClock(STARTED)
+    clock.add(60.0, _at(70))  # audio began 10 s after the interview started
+    return AssemblyTurnBuilder("candidate", clock)
+
+
+def test_assemblyai_connection_asks_for_formatted_turns_and_keywords() -> None:
+    url = assemblyai.listen_url(["FastAPI", "scikit learn"])
+    query = parse_qs(urlsplit(url).query)
+
+    assert urlsplit(url).netloc == "streaming.assemblyai.com"
+    assert query["encoding"] == ["pcm_s16le"] and query["sample_rate"] == ["16000"]
+    assert query["format_turns"] == ["true"]
+    assert query["speech_model"] == ["universal-streaming-english"]
+    assert json.loads(query["keyterms_prompt"][0]) == ["FastAPI", "scikit learn"]
+    assert "keyterms_prompt" not in parse_qs(urlsplit(assemblyai.listen_url([])).query)
+
+
+def test_assemblyai_words_are_live_until_the_formatted_turn_is_saved() -> None:
+    builder = _assembly_builder()
+
+    assert builder.handle(_turn_message("we used alembic", 0, 2000, 3500)) == []
+    assert builder.live_text == "we used alembic"
+    assert builder.live_start_ms == 12_000
+    # The finished turn comes first without punctuation, then formatted.
+    assert builder.handle(_turn_message("we used alembic", 0, 2000, 3500, end=True)) == []
+    assert builder.live_text == ""
+    [turn] = builder.handle(
+        _turn_message("We used Alembic.", 0, 2000, 3500, end=True, formatted=True)
+    )
+
+    assert turn == Turn("candidate", 12_000, 13_500, "We used Alembic.")
+    # A repeat of a saved turn is not saved twice.
+    assert builder.handle(
+        _turn_message("We used Alembic.", 0, 2000, 3500, end=True, formatted=True)
+    ) == []
+    assert builder.flush() == []
+
+
+def test_assemblyai_a_finished_turn_without_formatting_is_still_saved() -> None:
+    builder = _assembly_builder()
+    builder.handle(_turn_message("first answer", 0, 1000, 2000, end=True))
+
+    # The next turn starts before the formatted copy came.
+    [turn] = builder.handle(_turn_message("second", 1, 3000, 3400))
+    assert turn.text == "first answer"
+
+    builder.handle(_turn_message("second answer", 1, 3000, 4000, end=True))
+    # The connection ends before the formatted copy came.
+    assert [t.text for t in builder.flush()] == ["second answer"]
+
+
+def test_assemblyai_live_text_includes_words_not_yet_sure() -> None:
+    builder = _assembly_builder()
+    message = {
+        "type": "Turn",
+        "turn_order": 0,
+        "end_of_turn": False,
+        "transcript": "tell me",
+        "words": [
+            {"text": "tell", "start": 1000, "end": 1200, "word_is_final": True},
+            {"text": "me", "start": 1200, "end": 1300, "word_is_final": True},
+            {"text": "about", "start": 1300, "end": 1500, "word_is_final": False},
+        ],
+    }
+
+    builder.handle(message)
+
+    # The newest word shows at once, before AssemblyAI is sure of it.
+    assert builder.live_text == "tell me about"
+    assert AssemblyTurnBuilder.spoken_end({**message, "transcript": ""}) == ("live", 1.5)
+
+
+def test_assemblyai_silence_and_other_messages_save_nothing() -> None:
+    builder = _assembly_builder()
+
+    assert builder.handle({"type": "Begin", "id": "abc"}) == []
+    silence = {**_turn_message("", 0, 0, 0, end=True, formatted=True), "words": []}
+    assert builder.handle(silence) == []
+    assert builder.handle({"type": "Termination", "audio_duration_seconds": 5}) == []
+
+
+def test_assemblyai_delay_counts_live_words_and_the_saved_turn() -> None:
+    live = _turn_message("hello", 0, 0, 800)
+    unformatted = _turn_message("hello", 0, 0, 800, end=True)
+    formatted = _turn_message("Hello.", 0, 0, 800, end=True, formatted=True)
+
+    assert AssemblyTurnBuilder.spoken_end(live) == ("live", 0.8)
+    assert AssemblyTurnBuilder.spoken_end(unformatted) is None
+    assert AssemblyTurnBuilder.spoken_end(formatted) == ("final", 0.8)
+
+
+def test_queued_audio_catches_up_at_most_one_and_a_half_times_real_time() -> None:
+    # Within the head start: send at once.
+    assert stt_stream.pace_wait(0.5, 0.0, 1.5, 1.0) == 0
+    # 4 s of audio after 1 s: 2.5 s allowed, so wait until the rest is due.
+    assert stt_stream.pace_wait(4.0, 1.0, 1.5, 1.0) == pytest.approx(1.0)
+
+
+class FakeAssemblyAI:
+    """A local stand-in for AssemblyAI's streaming endpoint. After a second
+    of audio it sends live words, the finished turn and its formatted copy;
+    it answers Terminate with Termination and closes."""
+
+    def __init__(self, refuse: bool = False):
+        self.refuse = refuse
+        self.headers: list[str] = []
+        self.terminated = False
+
+    async def handler(self, connection) -> None:
+        self.headers.append(connection.request.headers.get("Authorization"))
+        if self.refuse:
+            await connection.close(code=1008, reason="Unauthorized Connection: Invalid API key")
+            return
+        received = 0
+        answered = False
+        async for message in connection:
+            if isinstance(message, bytes):
+                received += len(message)
+                if not answered and received >= stt_stream.CHUNK_BYTES * 10:
+                    answered = True
+                    for reply in (
+                        _turn_message("answer", 0, 0, 900),
+                        _turn_message("answer one", 0, 0, 1000, end=True),
+                        _turn_message("Answer one.", 0, 0, 1000, end=True, formatted=True),
+                    ):
+                        await connection.send(json.dumps(reply))
+            elif json.loads(message)["type"] == "Terminate":
+                self.terminated = True
+                await connection.send(json.dumps({"type": "Termination"}))
+                await connection.close()
+                return
+
+
+def test_assemblyai_speech_is_sent_and_each_turn_saved(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    fake = FakeAssemblyAI()
+    sent: list[dict] = []
+
+    saved = _run_sink(monkeypatch, fake, seconds=1.5, sent=sent, provider="assemblyai")
+
+    # The key goes as it is, and the stream ends with Terminate.
+    assert fake.headers == ["test-key"]
+    assert fake.terminated is True
+    assert [(turn.speaker, turn.text) for turn in saved] == [("interviewer", "Answer one.")]
+    assert {"type": "live", "speaker": "interviewer", "text": "answer"}.items() <= sent[0].items()
+    [finished] = [r for r in caplog.records if r.getMessage() == "stt_stream_finished"]
+    assert finished.fields["provider"] == "assemblyai"
+    assert "final_delay_avg_ms" in finished.fields and "live_delay_avg_ms" in finished.fields
+
+
+def test_a_refused_connection_is_logged_by_its_close_code(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    saved = _run_sink(monkeypatch, FakeAssemblyAI(refuse=True), seconds=0.3, provider="assemblyai")
+
+    assert saved == []
+    refused = [r for r in caplog.records if r.getMessage() == "stt_disconnected"]
+    assert refused and refused[0].fields["code"] == 1008
+    # The reason given by the service is not logged.
+    assert "Invalid API key" not in str(refused[0].fields)
 
 
 # --- Reading the transcript ---

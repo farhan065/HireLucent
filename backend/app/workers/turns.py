@@ -2,13 +2,15 @@
 so it can be tested on its own.
 
 Each person's audio is transcribed on its own connection, so every result
-already belongs to one speaker. The service sends two kinds of text:
+already belongs to one speaker. Every service sends two kinds of text:
 
 - interim text while the person is still speaking, which keeps changing;
-- final pieces, which no longer change.
+- final text, which no longer changes.
 
-Final pieces are joined into one turn until the person pauses. A turn that
-grows very long is saved anyway, so a long answer is saved as it goes.
+TurnBuilder reads Deepgram, which sends final pieces: they are joined into
+one turn until the person pauses, and a turn that grows very long is saved
+anyway, so a long answer is saved as it goes. AssemblyTurnBuilder reads
+AssemblyAI, which sends each whole turn itself once the person stops.
 Each turn gets its time from the start of the interview. How long the text
 took to arrive after the words were spoken is measured too, as numbers only.
 """
@@ -162,3 +164,124 @@ class TurnBuilder:
         )
         self._texts = []
         return turn
+
+    @staticmethod
+    def spoken_end(message: dict) -> tuple[str, float] | None:
+        """For measuring the delay: "live" or "final", and the position in
+        the audio where the message's words end. None without words."""
+        if message.get("type") != "Results":
+            return None
+        alternatives = message.get("channel", {}).get("alternatives") or [{}]
+        if not (alternatives[0].get("transcript") or "").strip():
+            return None
+        end = float(message.get("start", 0)) + float(message.get("duration", 0))
+        return ("final" if message.get("is_final") else "live"), end
+
+
+class AssemblyTurnBuilder:
+    """Reads one person's AssemblyAI messages.
+
+    Each "Turn" message carries the whole turn so far, with every word's
+    time in milliseconds from the start of the connection. While the person
+    speaks, "transcript" holds only the words AssemblyAI is already sure of;
+    the newest words are only in "words", so the live text is built from all
+    of "words" and appears as soon as each word is heard. When they stop,
+    the turn arrives with
+    "end_of_turn" set, then once more with punctuation and capitals
+    ("turn_is_formatted"). The formatted one is saved. A finished turn whose
+    formatted copy never comes is saved when the next turn starts, or when
+    the connection ends, so nothing is lost.
+    """
+
+    def __init__(self, speaker: str, clock: AudioClock):
+        self.speaker = speaker
+        self.clock = clock
+        self._live = ""
+        self._live_start = 0.0
+        # A finished turn still waiting for its formatted copy.
+        self._pending: tuple[int, Turn] | None = None
+        self._saved_up_to = -1
+
+    @property
+    def live_text(self) -> str:
+        return self._live
+
+    @property
+    def live_start_ms(self) -> int:
+        return self.clock.elapsed_ms(self._live_start)
+
+    def handle(self, message: dict) -> list[Turn]:
+        """Read one message. Returns the turns that are complete."""
+        if message.get("type") != "Turn":
+            return []
+        order = int(message.get("turn_order", 0))
+        done: list[Turn] = []
+        if self._pending and self._pending[0] != order:
+            done.append(self.flush_pending())
+        if order <= self._saved_up_to:
+            return done
+        text = (message.get("transcript") or "").strip()
+        words = message.get("words") or []
+        if not message.get("end_of_turn"):
+            self._live = _spoken(words) or text
+            if words:
+                self._live_start = words[0]["start"] / 1000
+            return done
+        self._live = ""
+        if not text:
+            self._saved_up_to = order
+            self._pending = None
+            return done
+        turn = self._turn(text, words)
+        if message.get("turn_is_formatted"):
+            self._pending = None
+            self._saved_up_to = order
+            done.append(turn)
+        else:
+            self._pending = (order, turn)
+        return done
+
+    def flush_pending(self) -> Turn:
+        order, turn = self._pending
+        self._pending = None
+        self._saved_up_to = max(self._saved_up_to, order)
+        return turn
+
+    def flush(self) -> list[Turn]:
+        """The finished turn still waiting, if any. Words that were never
+        finished are dropped with the connection, as with Deepgram."""
+        self._live = ""
+        return [self.flush_pending()] if self._pending else []
+
+    def _turn(self, text: str, words: list[dict]) -> Turn:
+        start = words[0]["start"] / 1000 if words else self._live_start
+        end = words[-1]["end"] / 1000 if words else start
+        return Turn(
+            speaker=self.speaker,
+            start_ms=self.clock.elapsed_ms(start),
+            end_ms=self.clock.elapsed_ms(end),
+            text=text,
+        )
+
+    @staticmethod
+    def spoken_end(message: dict) -> tuple[str, float] | None:
+        """For measuring the delay: "live" while the person speaks, "final"
+        for the formatted turn that is saved; the position in the audio where
+        its words end. None without words."""
+        if message.get("type") != "Turn":
+            return None
+        words = message.get("words") or []
+        if not _spoken(words):
+            return None
+        if not message.get("end_of_turn"):
+            kind = "live"
+        elif message.get("turn_is_formatted"):
+            kind = "final"
+        else:
+            return None
+        return kind, words[-1]["end"] / 1000
+
+
+def _spoken(words: list[dict]) -> str:
+    """Every word heard so far in an AssemblyAI turn, sure or not yet."""
+    return " ".join(word.get("text", "") for word in words).strip()

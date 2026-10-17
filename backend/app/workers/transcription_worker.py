@@ -254,7 +254,7 @@ async def run() -> None:
         logger,
         "transcription_worker_started",
         stt_provider=settings.stt_provider,
-        stt_key_set=bool(settings.deepgram_api_key),
+        stt_key_set=capture.stt_enabled(),
         stt_keyterms=settings.stt_keyterms,
     )
     while True:

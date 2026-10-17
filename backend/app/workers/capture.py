@@ -3,8 +3,9 @@ be tested on its own.
 
 Each person in an interview has their own audio stream, labelled by who
 they are, so speech is never mixed and never guessed. A stream is handed to
-an audio sink: the speech-to-text sink (deepgram.py), or, when speech-to-text
-is off or has no key, a sink that only measures how much audio arrived.
+an audio sink: the sink of the chosen speech-to-text service (deepgram.py or
+assemblyai.py, picked by STT_PROVIDER), or, when speech-to-text is off or
+its key is missing, a sink that only measures how much audio arrived.
 
 Raw audio is never stored. Each piece is handled in memory and dropped, and
 only numbers are logged.
@@ -18,12 +19,12 @@ import numpy as np
 
 from app.core.config import get_settings
 from app.core.logging import get_logger, log_event
-from app.workers import deepgram
+from app.workers import assemblyai, deepgram, stt_stream
 
 logger = get_logger(__name__)
 
 # Audio as speech-to-text services expect it: 16 kHz, one channel, 16-bit.
-SAMPLE_RATE = deepgram.SAMPLE_RATE
+SAMPLE_RATE = stt_stream.SAMPLE_RATE
 CHANNELS = 1
 # The people whose audio is captured, by their identity in the room.
 SPEAKERS = {"interviewer", "candidate"}
@@ -79,26 +80,38 @@ class MeterSink:
         )
 
 
+# The speech-to-text services, by their STT_PROVIDER name.
+SINKS = {"deepgram": deepgram.DeepgramSink, "assemblyai": assemblyai.AssemblyAISink}
+
+
 def open_sink(
     session_id: int,
     speaker: str,
     started_at: datetime,
     keyterms: list[str],
-    save: deepgram.SaveTurn,
-    publish: deepgram.Publish | None = None,
+    save: stt_stream.SaveTurn,
+    publish: stt_stream.Publish | None = None,
 ) -> AudioSink:
     """The sink for one person's audio in one interview."""
+    sink_class = SINKS.get(get_settings().stt_provider)
     if stt_enabled():
-        return deepgram.DeepgramSink(session_id, speaker, started_at, keyterms, save, publish)
-    if get_settings().stt_provider == "deepgram":
-        log_event(logger, "stt_not_configured", level=logging.WARNING, session_id=session_id)
+        return sink_class(session_id, speaker, started_at, keyterms, save, publish)
+    if sink_class:
+        log_event(
+            logger,
+            "stt_not_configured",
+            level=logging.WARNING,
+            session_id=session_id,
+            provider=get_settings().stt_provider,
+        )
     return MeterSink(session_id, speaker)
 
 
 def stt_enabled() -> bool:
-    """True when speech is turned into text: Deepgram chosen, with a key."""
+    """True when speech is turned into text: a service chosen, with its key."""
     settings = get_settings()
-    return settings.stt_provider == "deepgram" and bool(settings.deepgram_api_key)
+    keys = {"deepgram": settings.deepgram_api_key, "assemblyai": settings.assemblyai_api_key}
+    return bool(keys.get(settings.stt_provider))
 
 
 def plan(running: set[int], listening: set[int]) -> tuple[set[int], set[int]]:
