@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.graphs.final_assessment import scoring
 from app.models.base import Base, TimestampMixin
 from app.models.enums import AssessmentStatus
 
@@ -50,6 +51,11 @@ class Assessment(TimestampMixin, Base):
     candidate: Mapped["Candidate"] = relationship(  # noqa: F821
         back_populates="assessments"
     )
+
+    @property
+    def suitability(self) -> str | None:
+        """The label for the overall score, worked out when read."""
+        return scoring.suitability(self.overall_score)
 
     @property
     def screening_score(self) -> float | None:
