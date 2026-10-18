@@ -1,12 +1,14 @@
 import { CircleAlert, CircleCheck, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useOutletContext } from 'react-router'
+import { useNavigate, useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
 import ConfirmDialog from '../../components/ConfirmDialog.jsx'
 import RankedList from '../../components/assessment/RankedList.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import {
+  MAX_COMPARED,
   RANK_FILTERS,
+  compareTo,
   SUITABILITY,
   approveAllDrafts,
   evaluationOf,
@@ -80,6 +82,19 @@ export default function AssessmentsTab() {
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('all')
   const [openId, setOpenId] = useState(null)
+  // The ranked candidates picked for comparing, in the order picked.
+  const [picked, setPicked] = useState([])
+  const navigate = useNavigate()
+
+  function pick(sessionId) {
+    setPicked((current) =>
+      current.includes(sessionId)
+        ? current.filter((id) => id !== sessionId)
+        : current.length < MAX_COMPARED
+          ? [...current, sessionId]
+          : current,
+    )
+  }
   const [isApproving, setIsApproving] = useState(false)
   const [approveBusy, setApproveBusy] = useState(false)
   const [approveError, setApproveError] = useState('')
@@ -160,6 +175,8 @@ export default function AssessmentsTab() {
   }
 
   const ranked = rows.filter((row) => row.rank != null)
+  // A candidate who is no longer ranked cannot stay picked.
+  const pickedRanked = picked.filter((id) => ranked.some((row) => row.session_id === id))
   const unranked = rows.filter((row) => row.rank == null)
   const shownRanked = ranked.filter((row) => matchesRankFilter(row, filter))
   const shownUnranked = filter === 'all' ? unranked : []
@@ -257,6 +274,36 @@ export default function AssessmentsTab() {
         </>
       )}
 
+      {pickedRanked.length > 0 && (
+        <section
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#A9C8FF] bg-tint px-4.5 py-3"
+        >
+          <span className="text-[14.5px] font-semibold text-navy">
+            {pickedRanked.length} selected · up to {MAX_COMPARED}
+            {pickedRanked.length < 2 && (
+              <span className="font-normal text-body"> · pick one more to compare</span>
+            )}
+          </span>
+          <span className="flex items-center gap-3.5">
+            <button
+              type="button"
+              onClick={() => setPicked([])}
+              className="min-h-10 px-1 text-sm font-semibold text-brand hover:text-brand-dark"
+            >
+              Clear
+            </button>
+            <Button
+              className="min-h-10"
+              disabled={pickedRanked.length < 2}
+              onClick={() => navigate(compareTo(job.id, pickedRanked))}
+            >
+              Compare {pickedRanked.length} candidates
+            </Button>
+          </span>
+        </section>
+      )}
+
       {(shownRanked.length > 0 || shownUnranked.length > 0) && (
         <RankedList
           ranked={shownRanked}
@@ -267,6 +314,8 @@ export default function AssessmentsTab() {
           isEvaluating={evaluation.isRunning}
           onEvaluate={(sessionId) => evaluation.start(sessionId)}
           onWriteReport={(sessionId) => evaluation.start(sessionId, { reportOnly: true })}
+          picked={pickedRanked}
+          onPick={pick}
         />
       )}
       {ranked.length > 0 && shownRanked.length === 0 && shownUnranked.length === 0 && (

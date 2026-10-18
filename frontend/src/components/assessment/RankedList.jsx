@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, LoaderCircle } from 'lucide-react'
 import { Link } from 'react-router'
 import {
+  MAX_COMPARED,
   REPORT_STATUS,
   SUITABILITY,
   oneDecimal,
@@ -12,7 +13,7 @@ import Button from '../Button.jsx'
 import SourceChip from './SourceChip.jsx'
 
 const GRID =
-  'grid grid-cols-[56px_minmax(0,1.4fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.15fr)_170px] items-center gap-4 px-6'
+  'grid grid-cols-[24px_56px_minmax(0,1.4fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.15fr)_170px] items-center gap-4 px-6'
 const LABEL = 'text-xs font-bold uppercase tracking-wider'
 const RANK_STYLES = [
   'bg-[#FFF4D6] text-[#8A5A00]',
@@ -103,7 +104,7 @@ function Details({ row }) {
   const parts = scoreParts(row)
   const label = SUITABILITY[row.suitability]
   return (
-    <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_minmax(0,1fr)] gap-5 border-b border-[#EEF2F9] pt-1.5 pr-6 pb-6 pl-24">
+    <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_minmax(0,1fr)] gap-5 border-b border-[#EEF2F9] pt-1.5 pr-6 pb-6 pl-34">
       <div className="flex flex-col gap-2.5 self-start rounded-2xl border border-[#EEF2F9] bg-[#F8FAFE] p-4">
         <span className={`${LABEL} text-[#6B7890]`}>How the score is made</span>
         <div className="flex justify-between gap-3 text-sm">
@@ -172,8 +173,8 @@ function Details({ row }) {
         {row.areas_to_verify?.length > 0 && (
           <div className="rounded-2xl border border-[#EEF2F9] bg-[#F8FAFE] px-4 py-3.5 text-[13.5px] leading-snug">
             <strong className="text-navy">
-              {row.areas_to_verify.length}{' '}
-              {row.areas_to_verify.length === 1 ? 'area' : 'areas'} to verify
+              {row.areas_to_verify.length} {row.areas_to_verify.length === 1 ? 'area' : 'areas'} to
+              verify
             </strong>
             {row.areas_to_verify.slice(0, SHOWN_FINDINGS).map((area) => (
               <span key={area.id} className="mt-1 block">
@@ -190,7 +191,25 @@ function Details({ row }) {
   )
 }
 
-function RankedRow({ row, isOpen, onToggle }) {
+// The box that picks a candidate for comparing. Up to MAX_COMPARED can be
+// picked; the others are then greyed out.
+function PickBox({ row, isPicked, canPick, onPick }) {
+  return (
+    <input
+      type="checkbox"
+      checked={isPicked}
+      disabled={!isPicked && !canPick}
+      onChange={() => onPick(row.session_id)}
+      aria-label={`Compare ${row.candidate_name}`}
+      title={
+        !isPicked && !canPick ? `Up to ${MAX_COMPARED} candidates can be compared.` : undefined
+      }
+      className="size-4.5 cursor-pointer accent-brand disabled:cursor-not-allowed disabled:opacity-40"
+    />
+  )
+}
+
+function RankedRow({ row, isOpen, onToggle, isPicked, canPick, onPick }) {
   const label = SUITABILITY[row.suitability]
   const isDraft = row.status === 'draft'
   const coverage = row.coverage
@@ -202,9 +221,10 @@ function RankedRow({ row, isOpen, onToggle }) {
     <>
       <div
         className={`${GRID} border-b border-[#EEF2F9] py-4.5 ${
-          isOpen ? 'bg-mist/60' : isDraft ? 'bg-[#FFFCF6]' : 'bg-white'
+          isOpen || isPicked ? 'bg-mist/60' : isDraft ? 'bg-[#FFFCF6]' : 'bg-white'
         }`}
       >
+        <PickBox row={row} isPicked={isPicked} canPick={canPick} onPick={onPick} />
         <span
           className={`flex size-9 items-center justify-center rounded-xl font-display text-base font-extrabold ${
             RANK_STYLES[row.rank - 1] ?? 'bg-mist text-[#6B7890]'
@@ -219,7 +239,9 @@ function RankedRow({ row, isOpen, onToggle }) {
               {oneDecimal(row.overall_score)}
             </span>
             {label && (
-              <span className={`rounded-full px-2.5 py-0.5 text-[12.5px] font-bold ${label.className}`}>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[12.5px] font-bold ${label.className}`}
+              >
                 {label.label}
               </span>
             )}
@@ -315,13 +337,18 @@ function UnrankedRow({ row, evaluation, isEvaluating, onEvaluate, onWriteReport 
     )
   } else if (row.status && !isBusy) {
     action = (
-      <Button to={reportTo(row)} variant="outline" className="min-h-10 whitespace-nowrap px-4 text-sm">
+      <Button
+        to={reportTo(row)}
+        variant="outline"
+        className="min-h-10 whitespace-nowrap px-4 text-sm"
+      >
         Open report
       </Button>
     )
   }
   return (
     <div className={`${GRID} border-b border-[#EEF2F9] py-4.5 last:border-b-0`}>
+      <span aria-hidden="true" />
       <span className="text-center font-bold text-[#9AA6BA]">–</span>
       <Person row={row} />
       <div className="col-span-3">{middle}</div>
@@ -342,6 +369,8 @@ export default function RankedList({
   isEvaluating,
   onEvaluate,
   onWriteReport,
+  picked,
+  onPick,
 }) {
   return (
     <section
@@ -352,6 +381,9 @@ export default function RankedList({
         <div
           className={`${GRID} border-b border-line bg-mist py-3.5 text-xs font-semibold uppercase tracking-wider text-[#6B7890]`}
         >
+          <span>
+            <span className="sr-only">Compare</span>
+          </span>
           <span>Rank</span>
           <span>Candidate</span>
           <span>Overall</span>
@@ -366,6 +398,9 @@ export default function RankedList({
             row={row}
             isOpen={openId === row.session_id}
             onToggle={() => onToggle(row.session_id)}
+            isPicked={picked.includes(row.session_id)}
+            canPick={picked.length < MAX_COMPARED}
+            onPick={onPick}
           />
         ))}
         {unranked.length > 0 && (

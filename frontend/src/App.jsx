@@ -3,6 +3,7 @@ import { Route, Routes } from 'react-router'
 import RequireInterviewer from './auth/RequireInterviewer.jsx'
 import AppLayout from './layouts/AppLayout.jsx'
 import AssessmentPage from './pages/AssessmentPage.jsx'
+import ComparePage from './pages/ComparePage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import ApplicationsTab from './pages/job/ApplicationsTab.jsx'
 import AssessmentsTab from './pages/job/AssessmentsTab.jsx'
@@ -57,6 +58,7 @@ export default function App() {
             <Route path="interviews" element={<InterviewsTab />} />
             <Route path="assessments" element={<AssessmentsTab />} />
           </Route>
+          <Route path="jobs/:jobId/compare" element={<ComparePage />} />
           <Route path="interviews/:sessionId/transcript" element={<TranscriptPage />} />
           <Route path="interviews/:sessionId/assessment" element={<AssessmentPage />} />
           <Route

@@ -367,3 +367,47 @@ export function printFile(file) {
   }
   document.body.appendChild(frame)
 }
+
+// --- Comparing candidates --------------------------------------------------
+
+export const MAX_COMPARED = 3
+
+// The address of the comparison of the picked interviews.
+export function compareTo(jobId, sessionIds) {
+  return `/app/jobs/${jobId}/compare?ids=${sessionIds.join(',')}`
+}
+
+// The interview ids in the comparison's address, at most MAX_COMPARED.
+export function comparedIds(value) {
+  return [
+    ...new Set(
+      (value ?? '')
+        .split(',')
+        .map(Number)
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ].slice(0, MAX_COMPARED)
+}
+
+// For each candidate, whether its value is the best (highest) among those
+// compared. Empty values are never best, nothing is best on its own, and
+// when every value is the same nobody stands out.
+export function bestOf(values) {
+  const present = values.filter((value) => value != null)
+  const top = Math.max(...present)
+  if (present.length < 2 || present.every((value) => value === top)) {
+    return values.map(() => false)
+  }
+  return values.map((value) => value != null && value === top)
+}
+
+// Every requirement any compared candidate has, in the job's order.
+export function comparedRequirements(rows) {
+  const seen = new Map()
+  rows.forEach((row) =>
+    (row.coverage_map ?? []).forEach((entry) => {
+      if (!seen.has(entry.requirement_id)) seen.set(entry.requirement_id, entry)
+    }),
+  )
+  return [...seen.values()]
+}
