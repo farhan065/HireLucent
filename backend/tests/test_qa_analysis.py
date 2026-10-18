@@ -9,18 +9,18 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.core.errors import ConflictError, ServiceUnavailableError
+from app.core.errors import AppError, ConflictError, ServiceUnavailableError
 from app.core.security import create_access_token
 from app.db.session import get_db
 from app.graphs.base import MAX_ATTEMPTS, thread_config
 from app.graphs.qa_analysis import graph as qa
-from app.graphs.qa_analysis import evaluation, references, segmentation
+from app.graphs.qa_analysis import coverage, evaluation, references, segmentation, suggestions
 from app.graphs.qa_analysis.evaluation import Criterion, EvaluationAnswer, PairJudgement
 from app.graphs.qa_analysis.segmentation import PairOut, SegmentationAnswer
 from app.main import create_app
-from app.models import Assessment, InterviewSession, Task
+from app.models import Assessment, Document, InterviewSession, Task
 from app.models.enums import SessionStatus, UserRole
-from app.services import evaluation_service
+from app.services import evaluation_service, knowledge_service
 
 NOW = datetime(2026, 10, 18, 10, 0, tzinfo=timezone.utc)
 
@@ -65,6 +65,17 @@ GOOD_ANSWER = SegmentationAnswer(
         _pair("Why FastAPI", [6], [7], follow_up_of=2),
     ]
 )
+
+
+REQUIREMENTS = [
+    {"id": "R1", "text": "Python web development", "priority": "must_have"},
+    {"id": "R2", "text": "Docker", "priority": "preferred"},
+    {"id": "R3", "text": "SQL databases", "priority": "must_have"},
+]
+CV_MATCHES = [
+    {"id": "R1", "status": "met", "evidence": "FastAPI for two years"},
+    {"id": "R3", "status": "met", "evidence": "PostgreSQL"},
+]
 
 
 # --- Segmentation checks ----------------------------------------------------
@@ -162,6 +173,172 @@ def test_counts_leave_small_talk_out_of_the_evaluation() -> None:
     counts = segmentation.counts(segmentation.build_pairs(GOOD_ANSWER, TURNS))
 
     assert counts == {"pairs": 4, "evaluated": 3, "small_talk": 1}
+
+
+# --- Requirements explored by each question ---------------------------------
+
+
+def test_each_pair_keeps_only_the_jobs_own_requirement_ids() -> None:
+    answer = SegmentationAnswer(
+        pairs=[
+            _pair("Greeting", [1], [2], "small_talk", requirements=["R1"]),
+            _pair("Python experience", [3], [4], requirements=[" r1 ", "R9", "R1"]),
+            _pair("Docker use", [3], [5], requirements=["R2", "R1"]),
+        ]
+    )
+
+    pairs = segmentation.build_pairs(answer, TURNS, ["R1", "R2", "R3"])
+
+    assert [pair["requirement_ids"] for pair in pairs] == [[], ["R1"], ["R1", "R2"]]
+
+
+def test_the_ai_is_given_the_jobs_requirements(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompts: list[str] = []
+    monkeypatch.setattr(
+        segmentation.ai_client,
+        "generate_structured",
+        lambda prompt, schema: prompts.append(prompt) or GOOD_ANSWER,
+    )
+
+    segmentation.ask_ai("Backend Engineer", TURNS, REQUIREMENTS)
+
+    assert "R1 (must-have): Python web development" in prompts[0]
+    assert "R2 (preferred): Docker" in prompts[0]
+
+
+# --- Requirement coverage ---------------------------------------------------
+
+
+def _scored(pair_id: str, requirement_ids: list[str], score: float | None) -> dict:
+    evaluation_part = None if score is None else {"score": score}
+    return {"id": pair_id, "requirement_ids": requirement_ids, "evaluation": evaluation_part}
+
+
+def test_each_requirement_gets_its_questions_average_and_status() -> None:
+    pairs = [
+        _scored("Q2", ["R1"], 86.0),
+        _scored("Q3", ["R1", "R2"], 70.0),
+        _scored("Q4", ["R2"], 30.0),
+    ]
+
+    result = {
+        entry["requirement_id"]: entry
+        for entry in coverage.map_coverage(pairs, REQUIREMENTS, CV_MATCHES)
+    }
+
+    assert result["R1"]["status"] == "covered" and result["R1"]["average"] == 78.0
+    assert result["R1"]["question_scores"] == [
+        {"pair_id": "Q2", "score": 86.0},
+        {"pair_id": "Q3", "score": 70.0},
+    ]
+    assert result["R2"]["status"] == "weak" and result["R2"]["average"] == 50.0
+    assert result["R3"]["status"] == "not_explored" and result["R3"]["average"] is None
+    assert result["R3"]["priority"] == "must_have"
+
+
+def test_the_cv_result_is_shown_next_to_each_requirement() -> None:
+    result = coverage.map_coverage([], REQUIREMENTS, CV_MATCHES)
+
+    assert result[2]["cv"] == {"status": "met", "evidence": "PostgreSQL"}
+    assert result[1]["cv"] is None
+    assert coverage.map_coverage([], REQUIREMENTS, None)[0]["cv"] is None
+
+
+def test_a_covered_requirement_with_a_poor_answer_is_marked_mixed() -> None:
+    pairs = [_scored("Q2", ["R1"], 95.0), _scored("Q3", ["R1"], 35.0)]
+
+    [r1, *_] = coverage.map_coverage(pairs, REQUIREMENTS, None)
+
+    assert r1["status"] == "covered" and r1["mixed"] is True
+
+
+def test_the_covered_line_is_sixty() -> None:
+    at_line = coverage.map_coverage([_scored("Q2", ["R1"], 60.0)], REQUIREMENTS, None)
+    below = coverage.map_coverage([_scored("Q2", ["R1"], 59.9)], REQUIREMENTS, None)
+
+    assert at_line[0]["status"] == "covered" and below[0]["status"] == "weak"
+
+
+def test_small_talk_never_counts_towards_a_requirement() -> None:
+    result = coverage.map_coverage([_scored("Q1", ["R1"], None)], REQUIREMENTS, None)
+
+    assert result[0]["status"] == "not_explored"
+    assert coverage.counts(result) == {"covered": 0, "weak": 0, "not_explored": 3}
+
+
+# --- Question bank suggestions -----------------------------------------------
+
+
+def _offered(pair_id: str, question: str, kind: str = "technical", **extra) -> dict:
+    return {
+        "id": pair_id,
+        "question": question,
+        "kind": kind,
+        "follow_up_of": None,
+        "evaluation": {"answered": "answered"},
+        **extra,
+    }
+
+
+def test_only_answered_standalone_job_questions_are_suggested() -> None:
+    pairs = [
+        _offered("Q1", "Greeting", "small_talk"),
+        _offered("Q2", "How does FastAPI validate requests?"),
+        _offered("Q3", "Why did you choose it?", follow_up_of="Q2"),
+        _offered("Q4", "Explain database indexes", evaluation={"answered": "not_answered"}),
+        _offered("Q5", "How does FastAPI validate requests?!"),
+        _offered("Q6", "Tell me about a hard project", "behavioural"),
+        _offered("Q7", "What do you know about our products?", "company"),
+    ]
+
+    assert [pair["id"] for pair in suggestions.candidates(pairs)] == ["Q2", "Q6", "Q7"]
+
+
+def test_questions_already_in_the_bank_are_not_suggested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        suggestions, "in_bank", lambda question, role: "FastAPI" in question
+    )
+    pairs = [
+        _offered("Q2", "How does FastAPI validate requests?"),
+        _offered("Q3", "What is a JOIN?"),
+    ]
+
+    found = suggestions.suggest(pairs, "Backend Engineer")
+
+    assert found == [
+        {"pair_id": "Q3", "question": "What is a JOIN?", "kind": "technical", "added": False}
+    ]
+
+
+@pytest.mark.parametrize(("similarity", "duplicate"), [(0.85, True), (0.79, False)])
+def test_a_very_similar_bank_question_counts_as_a_duplicate(
+    monkeypatch: pytest.MonkeyPatch, similarity: float, duplicate: bool
+) -> None:
+    calls: list[tuple] = []
+
+    def fake_call(server: str, tool: str, arguments: dict):
+        calls.append((server, tool, arguments["role"]))
+        found = [{"question": "q", "source": "bank.txt", "similarity": similarity}]
+        return SimpleNamespace(is_error=False, structured_content={"result": found})
+
+    monkeypatch.setattr(suggestions.mcp_client, "call_tool", fake_call)
+
+    assert suggestions.in_bank("What is a JOIN?", "Backend Engineer") is duplicate
+    assert calls == [("rag", "search_question_bank", "Backend Engineer")]
+
+
+def test_a_question_bank_that_cannot_be_searched_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def down(*args):
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(suggestions.mcp_client, "call_tool", down)
+
+    with pytest.raises(suggestions.QuestionBankSearchError):
+        suggestions.in_bank("What is a JOIN?", "Backend Engineer")
 
 
 # --- Answer evaluation -------------------------------------------------------
@@ -505,8 +682,17 @@ class FakeStore:
     def load_interview(self, session_id: int) -> dict | None:
         return self.interview
 
-    def save_analysis(self, session_id: int, candidate_id: int, pairs: list[dict]) -> None:
+    def save_analysis(
+        self,
+        session_id: int,
+        candidate_id: int,
+        pairs: list[dict],
+        coverage: list[dict],
+        suggestions: list[dict] | None,
+    ) -> None:
         self.saved[session_id] = pairs
+        self.coverage = coverage
+        self.suggestions = suggestions
 
 
 def _interview(status: str = SessionStatus.COMPLETED, turns: list[dict] = TURNS) -> dict:
@@ -514,6 +700,8 @@ def _interview(status: str = SessionStatus.COMPLETED, turns: list[dict] = TURNS)
         "candidate_id": 5,
         "status": status,
         "job_title": "Backend Engineer",
+        "requirements": REQUIREMENTS,
+        "cv_matches": CV_MATCHES,
         "turns": turns,
     }
 
@@ -547,6 +735,7 @@ def _run(
     By default every answer is judged validly and no reference is found."""
     monkeypatch.setattr(qa, "store", store)
     monkeypatch.setattr(qa.references, "for_batch", find_references)
+    monkeypatch.setattr(qa.suggestions, "in_bank", lambda question, role: False)
     monkeypatch.setattr(qa.segmentation, "ask_ai", _answers(segments))
     monkeypatch.setattr(qa.evaluation, "ask_ai", _answers(judgements or [_judge_all] * 10))
     graph = qa.build_qa_analysis_graph(InMemorySaver())
@@ -662,6 +851,7 @@ def test_references_reach_the_ai_and_are_kept_with_the_evaluation(
         return judge_with_reference(batch)
 
     monkeypatch.setattr(qa, "store", store)
+    monkeypatch.setattr(qa.suggestions, "in_bank", lambda question, role: False)
     monkeypatch.setattr(qa.segmentation, "ask_ai", _answers([GOOD_ANSWER]))
     monkeypatch.setattr(
         qa.references, "for_batch", lambda batch, turns: {"Q2": [PASSAGE], "Q3": [], "Q4": []}
@@ -719,6 +909,49 @@ def test_the_interview_fails_when_the_knowledge_base_cannot_be_searched(
     result = _run(monkeypatch, store, [GOOD_ANSWER], find_references=unreachable)
 
     assert result["failure"] == qa.NO_KNOWLEDGE_BASE and not store.saved
+
+
+def test_coverage_and_suggestions_are_saved_with_the_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+    tagged = SegmentationAnswer(
+        pairs=[
+            _pair("Greeting", [1], [2], "small_talk"),
+            _pair("Python experience", [3], [4], requirements=["R1"]),
+            _pair("Docker use", [3], [5], requirements=["R2"]),
+            _pair("Why FastAPI", [6], [7], follow_up_of=2, requirements=["R1"]),
+        ]
+    )
+
+    result = _run(monkeypatch, store, [tagged])
+
+    assert not result.get("failure")
+    statuses = {entry["requirement_id"]: entry["status"] for entry in store.coverage}
+    assert statuses == {"R1": "covered", "R2": "covered", "R3": "not_explored"}
+    assert [item["pair_id"] for item in store.suggestions] == ["Q2", "Q3"]
+
+
+def test_the_evaluation_goes_on_when_the_question_bank_cannot_be_searched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+
+    def down(question: str, role: str) -> bool:
+        raise qa.suggestions.QuestionBankSearchError
+
+    monkeypatch.setattr(qa, "store", store)
+    monkeypatch.setattr(qa.segmentation, "ask_ai", _answers([GOOD_ANSWER]))
+    monkeypatch.setattr(qa.evaluation, "ask_ai", _answers([_judge_all]))
+    monkeypatch.setattr(qa.references, "for_batch", _no_references)
+    monkeypatch.setattr(qa.suggestions, "in_bank", down)
+
+    result = qa.build_qa_analysis_graph(InMemorySaver()).invoke(
+        {"session_id": 9}, thread_config("t")
+    )
+
+    assert not result.get("failure") and len(store.saved[9]) == 4
+    assert store.suggestions is None
 
 
 def test_with_only_small_talk_nothing_is_sent_to_the_ai(
@@ -833,6 +1066,136 @@ def test_an_evaluation_starts_only_when_it_can_run(
     assert error.value.message == message and not started
 
 
+# --- Adding suggested questions to the question bank ------------------------
+
+
+SUGGESTIONS = [
+    {"pair_id": "Q2", "question": "What is a JOIN?", "kind": "technical", "added": False},
+    {"pair_id": "Q3", "question": "Explain indexes", "kind": "technical", "added": True},
+]
+
+
+class FakeSessionDB:
+    """Holds the job and records commits."""
+
+    def __init__(self) -> None:
+        self.commits = 0
+
+    def get(self, model, key):
+        return SimpleNamespace(job_code="HL-BE-01", title="Backend Engineer")
+
+    def commit(self) -> None:
+        self.commits += 1
+
+
+def _suggested(monkeypatch: pytest.MonkeyPatch, suggestions_saved: list[dict] | None):
+    assessment = SimpleNamespace(question_suggestions=suggestions_saved)
+    added: list[dict] = []
+    monkeypatch.setattr(evaluation_service, "get_assessment", lambda db, sid: assessment)
+    monkeypatch.setattr(
+        evaluation_service.session_service, "get_session", lambda db, sid: _session()
+    )
+    monkeypatch.setattr(
+        evaluation_service.knowledge_service,
+        "add_interview_questions",
+        lambda db, code, role, questions, user: added.append(
+            {"code": code, "role": role, "questions": questions}
+        ),
+    )
+    return assessment, added
+
+
+def test_ticked_questions_are_added_once_and_marked(monkeypatch: pytest.MonkeyPatch) -> None:
+    assessment, added = _suggested(monkeypatch, [dict(item) for item in SUGGESTIONS])
+
+    result = evaluation_service.add_suggested_questions(
+        FakeSessionDB(), 9, ["Q2", "Q3", "Q2"], 1
+    )
+
+    assert added == [
+        {"code": "HL-BE-01", "role": "Backend Engineer", "questions": ["What is a JOIN?"]}
+    ]
+    assert [item["added"] for item in result] == [True, True]
+    assert assessment.question_suggestions == result
+
+
+def test_questions_already_added_are_not_added_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, added = _suggested(monkeypatch, [dict(item) for item in SUGGESTIONS])
+
+    evaluation_service.add_suggested_questions(FakeSessionDB(), 9, ["Q3"], 1)
+
+    assert added == []
+
+
+def test_only_suggested_questions_can_be_added(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, added = _suggested(monkeypatch, [dict(item) for item in SUGGESTIONS])
+
+    with pytest.raises(AppError) as error:
+        evaluation_service.add_suggested_questions(FakeSessionDB(), 9, ["Q9"], 1)
+
+    assert error.value.message == evaluation_service.UNKNOWN_SUGGESTION and added == []
+
+
+def test_nothing_can_be_added_without_suggestions(monkeypatch: pytest.MonkeyPatch) -> None:
+    _suggested(monkeypatch, None)
+
+    with pytest.raises(ConflictError) as error:
+        evaluation_service.add_suggested_questions(FakeSessionDB(), 9, ["Q2"], 1)
+
+    assert error.value.message == evaluation_service.NO_SUGGESTIONS
+
+
+class FakeKnowledgeDB:
+    def __init__(self, existing: Document | None) -> None:
+        self.document = existing
+        self.added: list = []
+
+    def scalar(self, _query):
+        return self.document
+
+    def add(self, document: Document) -> None:
+        document.id = 31
+        self.document = document
+        self.added.append(document)
+
+    def flush(self) -> None:
+        return None
+
+    def commit(self) -> None:
+        return None
+
+
+def test_interview_questions_go_into_one_document_per_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored: list[dict] = []
+    monkeypatch.setattr(
+        knowledge_service.store,
+        "add_chunks",
+        lambda collection, document_id, chunks, metadata, first_index=0: stored.append(
+            {"collection": collection, "id": document_id, "first": first_index, **metadata}
+        ),
+    )
+    db = FakeKnowledgeDB(None)
+
+    document = knowledge_service.add_interview_questions(
+        db, "HL-BE-01", "Backend Engineer", ["What is a JOIN?", "Explain indexes"], 1
+    )
+    knowledge_service.add_interview_questions(
+        db, "HL-BE-01", "Backend Engineer", ["What is a view?"], 1
+    )
+
+    assert len(db.added) == 1
+    assert document.filename == "Interview questions - HL-BE-01.txt"
+    assert document.doc_type == "questions" and document.tags == ["Backend Engineer"]
+    assert document.chunk_count == 3
+    assert [(item["collection"], item["first"]) for item in stored] == [
+        ("question_bank", 0),
+        ("question_bank", 2),
+    ]
+    assert stored[0]["tags"] == "Backend Engineer"
+
+
 # --- Endpoints ---------------------------------------------------------------
 
 
@@ -870,6 +1233,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
             candidate_id=5,
             status="analysed",
             qa_evaluations=pairs,
+            coverage_map=[],
+            question_suggestions=None,
             created_at=NOW,
             updated_at=NOW,
         ),
@@ -890,6 +1255,30 @@ def test_interviewer_starts_an_evaluation(client: TestClient) -> None:
     assert one.json()["kind"] == "interview_evaluation"
 
 
+def test_interviewer_adds_suggested_questions(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        evaluation_service,
+        "add_suggested_questions",
+        lambda db, sid, pair_ids, uid: [{**SUGGESTIONS[0], "added": True}],
+    )
+
+    response = client.post(
+        "/interviews/9/assessment/questions",
+        json={"pair_ids": ["Q2"]},
+        headers=_auth(UserRole.INTERVIEWER),
+    )
+    empty = client.post(
+        "/interviews/9/assessment/questions",
+        json={"pair_ids": []},
+        headers=_auth(UserRole.INTERVIEWER),
+    )
+
+    assert response.status_code == 200 and response.json()[0]["added"] is True
+    assert empty.status_code == 422
+
+
 def test_interviewer_reads_the_pairs(client: TestClient) -> None:
     response = client.get("/interviews/9/assessment", headers=_auth(UserRole.INTERVIEWER))
 
@@ -906,6 +1295,7 @@ def test_interviewer_reads_the_pairs(client: TestClient) -> None:
         ("post", "/interviews/9/evaluate"),
         ("post", "/jobs/2/evaluate"),
         ("get", "/interviews/9/assessment"),
+        ("post", "/interviews/9/assessment/questions"),
     ],
 )
 def test_candidate_cannot_evaluate_or_read_assessments(
