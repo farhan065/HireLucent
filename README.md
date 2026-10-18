@@ -154,6 +154,7 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
 | `MCP_BLOGGER_URL`, `BLOGGER_BLOG_ID`, `BLOGGER_API_KEY` | Publishing to Blogger |
 | `GOOGLE_TOKEN_FILE` | The Google sign-in file inside the backend container |
 | `APP_ENV`, `LOG_LEVEL` | Environment name and log level |
+| `PGADMIN_EMAIL`, `PGADMIN_PASSWORD` | Sign-in for the optional pgAdmin database viewer |
 
 ## Usage walkthrough
 
@@ -253,6 +254,14 @@ npm install
 npm run lint
 npm run build
 ```
+
+**Database viewer (optional):** pgAdmin runs only when asked for, so the normal start is unchanged:
+
+```bash
+docker compose --profile tools up -d pgadmin
+```
+
+Open http://localhost:5050 (only from this computer), sign in with `PGADMIN_EMAIL` and `PGADMIN_PASSWORD` from `.env`, then open **Servers › HireLucent** and enter `POSTGRES_PASSWORD`. The connection uses the default database user `hirelucent`; if `POSTGRES_USER` is changed, change it in `pgadmin/servers.json` too. Stop it with `docker compose stop pgadmin`. It shows real candidate data, so use it only on your own machine.
 
 **Score stability check:** scores one already-screened candidate again 1–5 times, without saving, and compares the results with the saved scores. It prints IDs and numbers only:
 
