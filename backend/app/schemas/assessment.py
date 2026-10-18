@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.task import TaskResponse
 
@@ -126,6 +126,62 @@ class AddQuestionsRequest(BaseModel):
     )
 
 
+class ClaimSource(BaseModel):
+    """Where a conclusion comes from: a transcript segment, or what CV
+    screening found for a requirement."""
+
+    type: Literal["transcript", "cv"]
+    pair_id: str | None = Field(default=None, description="transcript: the question.")
+    question: str | None = None
+    turn_id: int | None = Field(default=None, description="transcript: the turn.")
+    start_ms: int | None = Field(
+        default=None, description="transcript: milliseconds from the start of the interview."
+    )
+    quote: str | None = Field(default=None, description="transcript: the words relied on.")
+    requirement_id: str | None = Field(default=None, description="cv: the requirement.")
+    requirement: str | None = None
+    status: Literal["met", "partially_met", "unmet"] | None = Field(
+        default=None, description="cv: the screening result; empty when not screened."
+    )
+    evidence: str | None = Field(default=None, description="cv: the CV text relied on.")
+
+
+class Claim(BaseModel):
+    """One conclusion of the report, with its sources."""
+
+    id: str = Field(description="S1, W1, G1, V1, … by list.")
+    text: str
+    sources: list[ClaimSource]
+
+
+class ReviewRequest(BaseModel):
+    """The interviewer's review of a draft report."""
+
+    action: Literal["approve", "request_changes", "edit"]
+    note: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1000,
+        description="request_changes: what the AI should change.",
+    )
+    summary: str | None = Field(
+        default=None, min_length=1, max_length=1500, description="edit: the new summary."
+    )
+    remove: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description="edit: ids of strengths or weaknesses to remove.",
+    )
+
+    @model_validator(mode="after")
+    def check_action(self) -> "ReviewRequest":
+        if self.action == "request_changes" and not (self.note or "").strip():
+            raise ValueError("Write what should change.")
+        if self.action == "edit" and not ((self.summary or "").strip() or self.remove):
+            raise ValueError("Change the summary or remove at least one point.")
+        return self
+
+
 class AssessmentOut(BaseModel):
     """An interview's assessment as far as it has been made."""
 
@@ -143,6 +199,27 @@ class AssessmentOut(BaseModel):
     question_suggestions: list[QuestionSuggestion] | None = Field(
         default=None, description="Empty when the question bank could not be searched."
     )
+    # The report, from the draft on. Empty while only the answers are evaluated.
+    cv_score: float | None = None
+    interview_score: float | None = Field(
+        default=None, description="Average score of the evaluated answers."
+    )
+    overall_score: float | None = Field(
+        default=None, description="40% CV score + 60% interview score."
+    )
+    suitability: Literal["strong_fit", "possible_fit", "not_a_fit"] | None = Field(
+        default=None,
+        description="From the overall score: strong_fit 70+, possible_fit 60-69, "
+        "not_a_fit below 60. Decision support only.",
+    )
+    report: str | None = Field(default=None, description="The summary.")
+    strengths: list[Claim] | None = None
+    weaknesses: list[Claim] | None = None
+    gaps: list[Claim] | None = Field(
+        default=None, description="Requirements the interview never explored."
+    )
+    areas_to_verify: list[Claim] | None = None
+    approved_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

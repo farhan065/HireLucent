@@ -516,8 +516,7 @@ export default function AssessmentPage() {
             >
               <CircleAlert className="mt-0.5 size-4.5 shrink-0" aria-hidden="true" />
               <span>
-                <strong>The last evaluation stopped.</strong> {state.reason} The results below are
-                from the evaluation before it.
+                <strong>The last evaluation stopped.</strong> {state.reason}
               </span>
             </p>
           )}

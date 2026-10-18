@@ -7,17 +7,19 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import Principal, require_interviewer
 from app.db.session import get_db
-from app.graphs.qa_analysis.graph import get_qa_analysis_graph
+from app.graphs.final_assessment.graph import get_final_assessment_graph
 from app.models import Assessment, Task
 from app.schemas.assessment import (
     AddQuestionsRequest,
     AssessmentOut,
     EvaluationActivity,
     QuestionSuggestion,
+    ReviewRequest,
 )
 from app.schemas.error import ErrorResponse
 from app.schemas.task import TaskResponse
 from app.services import evaluation_service
+from app.services.evaluation_service import EvaluationGraphs, get_evaluation_graphs
 
 job_router = APIRouter(
     prefix="/jobs/{job_id}", tags=["Assessments"], dependencies=[Depends(require_interviewer)]
@@ -45,13 +47,14 @@ def evaluate_interview(
     background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_interviewer),
     db: Session = Depends(get_db),
-    graph: CompiledStateGraph = Depends(get_qa_analysis_graph),
+    graphs: EvaluationGraphs = Depends(get_evaluation_graphs),
 ) -> Task:
     """Starts in the background and returns a task; follow it with
-    GET /tasks/{id}. An interview evaluated before is evaluated again and its
-    earlier assessment is replaced."""
+    GET /tasks/{id}. The answers are evaluated, then the report is written
+    and waits for review as a draft. An interview evaluated before is
+    evaluated again and its earlier assessment is replaced."""
     return evaluation_service.start_evaluation(
-        db, background_tasks, graph, session_id, principal.subject_id
+        db, background_tasks, graphs, session_id, principal.subject_id
     )
 
 
@@ -73,12 +76,12 @@ def evaluate_job_interviews(
     background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_interviewer),
     db: Session = Depends(get_db),
-    graph: CompiledStateGraph = Depends(get_qa_analysis_graph),
+    graphs: EvaluationGraphs = Depends(get_evaluation_graphs),
 ) -> Task:
     """Evaluates the interviews one after another in one background task.
     Interviews that already have an assessment are skipped."""
     return evaluation_service.start_job_evaluation(
-        db, background_tasks, graph, job_id, principal.subject_id
+        db, background_tasks, graphs, job_id, principal.subject_id
     )
 
 
@@ -108,7 +111,10 @@ def read_assessment(session_id: int, db: Session = Depends(get_db)) -> Assessmen
     reasons, a score worked out by rule, a justification and a quote from the
     answer. Small talk is kept but marked, and is not evaluated. Also the
     coverage of each job requirement, next to its CV screening result, and
-    the new questions offered for the question bank."""
+    the new questions offered for the question bank. Once the report is
+    written: the CV, interview and overall scores with the suitability label,
+    the summary, and the strengths, weaknesses, evidence gaps and areas to
+    verify, each pointing to a transcript segment or a CV result."""
     return evaluation_service.get_assessment(db, session_id)
 
 
@@ -135,4 +141,32 @@ def add_questions(
     the suggestions, each marked when added."""
     return evaluation_service.add_suggested_questions(
         db, session_id, payload.pair_ids, principal.subject_id
+    )
+
+
+@session_router.post(
+    "/{session_id}/assessment/review",
+    response_model=AssessmentOut,
+    summary="Approve, edit or ask for changes to the draft report",
+    responses={
+        400: {"model": ErrorResponse, "description": "A point to remove is not in the report"},
+        404: {"model": ErrorResponse, "description": "Not found or not evaluated"},
+        409: {"model": ErrorResponse, "description": "The report is not waiting for review"},
+        503: {"model": ErrorResponse, "description": "The AI could not rewrite the report"},
+    },
+)
+def review_report(
+    session_id: int,
+    payload: ReviewRequest,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+    graph: CompiledStateGraph = Depends(get_final_assessment_graph),
+) -> Assessment:
+    """approve: the report is final and the candidate becomes assessed.
+    request_changes: the AI rewrites the report following the note, checks
+    every point again, and the new draft waits for review. edit: a new
+    summary and/or strengths and weaknesses removed (none can be added),
+    and the draft waits for review again."""
+    return evaluation_service.review_assessment(
+        db, graph, session_id, payload, principal.subject_id
     )

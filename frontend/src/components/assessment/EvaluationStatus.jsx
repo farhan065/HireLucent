@@ -2,17 +2,25 @@ import { CircleAlert, LoaderCircle, Sparkles } from 'lucide-react'
 import { Link } from 'react-router'
 import Button from '../Button.jsx'
 
-// The stages of an evaluation, in order. The first is done once answers
-// are being judged.
+// The stages of an evaluation, in order.
 const STAGES = [
   'Questions and answers found',
   'Judging answers and checking references',
   "Mapping the job's requirements",
+  'Writing the report',
 ]
+const WRITING = 'writing the report'
+
+// Which stage the progress message is at: 0 while the questions are being
+// found, 1 while answers are judged, 3 while the report is written.
+function stageOf(message) {
+  if (!message || message === 'starting') return 0
+  return message === WRITING ? 3 : 1
+}
 
 // While this interview is being evaluated.
 export function EvaluatingCard({ message, percent }) {
-  const isJudging = message && message !== 'starting'
+  const stage = stageOf(message)
   return (
     <section
       role="status"
@@ -25,7 +33,11 @@ export function EvaluatingCard({ message, percent }) {
         <div>
           <h2 className="text-[17px] font-extrabold text-navy">Evaluating the interview</h2>
           <p className="text-[13.5px]">
-            {isJudging ? message : 'Finding the questions and answers'}
+            {stage === 0
+              ? 'Finding the questions and answers'
+              : stage === 3
+                ? 'Writing the report'
+                : message}
           </p>
         </div>
       </div>
@@ -37,8 +49,8 @@ export function EvaluatingCard({ message, percent }) {
       </span>
       <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-[13.5px]">
         {STAGES.map((stage, index) => {
-          const isDone = index === 0 && isJudging
-          const isNow = isJudging ? index === 1 : index === 0
+          const isDone = index < stage
+          const isNow = index === stage
           return (
             <li
               key={stage}
@@ -50,7 +62,7 @@ export function EvaluatingCard({ message, percent }) {
         })}
       </ol>
       <p className="text-[13px]">
-        About a minute. You can leave this page; the result is saved when it finishes.
+        A minute or two. You can leave this page; the result is saved when it finishes.
       </p>
     </section>
   )

@@ -3,7 +3,9 @@
 The interviewer asks for an evaluation, either for one interview or for all
 of a job's completed interviews that have not been evaluated yet. Each
 interview runs through the Q&A Analysis graph, which finds the questions and
-answers and evaluates each answer.
+answers and evaluates each answer, then through the Final Assessment graph,
+which writes the report and pauses it as a draft. The interviewer then
+approves the draft, asks for changes or edits it (review_assessment).
 
 Only one evaluation runs at a time, because the AI's per-minute limit is
 shared. An evaluation does not block fetching or screening CVs for the job.
@@ -11,19 +13,24 @@ While it runs, its task keeps which interviews it covers, which one it is on
 and which failed, so the screens can show this after a page reload.
 """
 
+from dataclasses import dataclass
+
 from fastapi import BackgroundTasks
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.ai import client as ai_client
 from app.core.config import get_settings
-from app.core.errors import AppError, ConflictError, NotFoundError
+from app.core.errors import AppError, ConflictError, NotFoundError, ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import thread_config
-from app.graphs.qa_analysis.graph import answers_to_judge
+from app.graphs.final_assessment import graph as final_graph
+from app.graphs.qa_analysis.graph import answers_to_judge, get_qa_analysis_graph
 from app.models import Assessment, InterviewSession, Job, Task, TranscriptTurn
-from app.models.enums import SessionStatus
+from app.models.enums import AssessmentStatus, SessionStatus
+from app.schemas.assessment import ReviewRequest
 from app.services import knowledge_service, session_service, task_service
 from app.services.task_service import ACTIVE, TaskProgress
 
@@ -40,6 +47,26 @@ NO_SUGGESTIONS = (
     "Evaluate it again to get suggestions."
 )
 UNKNOWN_SUGGESTION = "Some of the chosen questions are not among the suggestions."
+NOT_A_DRAFT = "This report is not waiting for review."
+UNKNOWN_POINT = "Some of the chosen points are not in the report."
+REWRITE_FAILED = (
+    "The AI service was not available, so the report was not rewritten. "
+    "The draft is unchanged; try again in a moment."
+)
+
+
+@dataclass(frozen=True)
+class EvaluationGraphs:
+    """The two graphs an evaluation runs, one after the other."""
+
+    qa_analysis: CompiledStateGraph
+    final_assessment: CompiledStateGraph
+
+
+def get_evaluation_graphs() -> EvaluationGraphs:
+    return EvaluationGraphs(
+        get_qa_analysis_graph(), final_graph.get_final_assessment_graph()
+    )
 
 
 class EvaluationFailed(AppError):
@@ -60,7 +87,7 @@ def _has_turns(session_id):
 def start_evaluation(
     db: Session,
     background_tasks: BackgroundTasks,
-    graph: CompiledStateGraph,
+    graphs: EvaluationGraphs,
     session_id: int,
     user_id: int,
 ) -> Task:
@@ -77,7 +104,7 @@ def start_evaluation(
         background_tasks,
         TASK_KIND,
         user_id,
-        lambda progress: run_evaluation(graph, [session_id], progress),
+        lambda progress: run_evaluation(graphs, [session_id], progress),
         job_id=session.job_id,
     )
 
@@ -102,7 +129,7 @@ def sessions_to_evaluate(db: Session, job_id: int) -> list[int]:
 def start_job_evaluation(
     db: Session,
     background_tasks: BackgroundTasks,
-    graph: CompiledStateGraph,
+    graphs: EvaluationGraphs,
     job_id: int,
     user_id: int,
 ) -> Task:
@@ -120,7 +147,7 @@ def start_job_evaluation(
         background_tasks,
         TASK_KIND,
         user_id,
-        lambda progress: run_evaluation(graph, session_ids, progress),
+        lambda progress: run_evaluation(graphs, session_ids, progress),
         job_id=job_id,
     )
 
@@ -131,7 +158,7 @@ def thread_id(task_id: str, session_id: int) -> str:
 
 
 def run_evaluation(
-    graph: CompiledStateGraph, session_ids: list[int], progress: TaskProgress
+    graphs: EvaluationGraphs, session_ids: list[int], progress: TaskProgress
 ) -> dict[str, int]:
     """Evaluate the interviews one by one. One interview that fails does not
     stop the others; if every interview fails, the task fails with the
@@ -142,7 +169,7 @@ def run_evaluation(
         progress.note(
             {"session_ids": session_ids, "current": session_id, "failures": failures}
         )
-        result = evaluate_one(graph, session_id, done, total, progress)
+        result = evaluate_one(graphs, session_id, done, total, progress)
         if result.get("failure"):
             failures.append({"session_id": session_id, "reason": result["failure"]})
         else:
@@ -165,11 +192,13 @@ def run_evaluation(
 
 
 def evaluate_one(
-    graph: CompiledStateGraph, session_id: int, done: int, total: int, progress: TaskProgress
+    graphs: EvaluationGraphs, session_id: int, done: int, total: int, progress: TaskProgress
 ) -> dict:
-    """Run one interview through the graph, showing how many answers have
-    been judged. With one interview the bar follows its answers; with
-    several it follows the interviews."""
+    """Run one interview through both graphs, showing how many answers have
+    been judged, then that the report is being written. With one interview
+    the bar follows its answers; with several it follows the interviews.
+    Returns the failure, if any, under "failure"."""
+    graph = graphs.qa_analysis
     config = thread_config(thread_id(progress.task_id, session_id))
     config["max_concurrency"] = get_settings().screening_max_parallel
     prefix = f"Interview {done + 1} of {total}"
@@ -191,6 +220,25 @@ def evaluate_one(
                 progress.update(judged, answers, message)
             else:
                 progress.update(done, total, message)
+        analysis = graph.get_state(config).values
+        if analysis.get("failure"):
+            return analysis
+
+        message = f"{prefix} · writing the report"
+        if total == 1:
+            progress.update(answers, answers, message)
+        else:
+            progress.update(done, total, message)
+        return write_report(graphs.final_assessment, session_id)
+
+
+def write_report(graph: CompiledStateGraph, session_id: int) -> dict:
+    """Run the Final Assessment graph until the report waits for review. An
+    earlier report of the interview is started afresh."""
+    config = thread_config(final_graph.thread_id(session_id))
+    if graph.checkpointer is not None:
+        graph.checkpointer.delete_thread(config["configurable"]["thread_id"])
+    graph.invoke({"session_id": session_id}, config)
     return graph.get_state(config).values
 
 
@@ -249,3 +297,34 @@ def add_suggested_questions(
         db.commit()
     log_event(logger, "suggested_questions_added", session_id=session_id, count=len(new))
     return assessment.question_suggestions
+
+
+def review_assessment(
+    db: Session,
+    graph: CompiledStateGraph,
+    session_id: int,
+    review: ReviewRequest,
+    user_id: int,
+) -> Assessment:
+    """Continue the paused report with the interviewer's review: approve it,
+    ask the AI to rewrite it following a note, or edit it (a new summary,
+    points removed). Returns the assessment as it is afterwards."""
+    assessment = get_assessment(db, session_id)
+    config = thread_config(final_graph.thread_id(session_id))
+    waiting = final_graph.is_waiting_for_review(graph, config)
+    if assessment.status != AssessmentStatus.DRAFT or not waiting:
+        raise ConflictError(NOT_A_DRAFT)
+    claims = (assessment.strengths or []) + (assessment.weaknesses or [])
+    points = {claim["id"] for claim in claims}
+    if any(point not in points for point in review.remove):
+        raise AppError(UNKNOWN_POINT)
+
+    graph.invoke(
+        Command(resume={**review.model_dump(), "user_id": user_id}),
+        config,
+    )
+    if graph.get_state(config).values.get("revision_failed"):
+        raise ServiceUnavailableError(REWRITE_FAILED)
+    log_event(logger, "assessment_reviewed", session_id=session_id, action=review.action)
+    db.refresh(assessment)
+    return assessment
