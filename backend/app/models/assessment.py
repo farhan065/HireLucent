@@ -11,6 +11,7 @@ from app.models.enums import AssessmentStatus
 
 if TYPE_CHECKING:
     from app.models.candidate import Candidate
+    from app.models.user import User
 
 
 
@@ -51,6 +52,12 @@ class Assessment(TimestampMixin, Base):
     candidate: Mapped["Candidate"] = relationship(  # noqa: F821
         back_populates="assessments"
     )
+    approver: Mapped["User | None"] = relationship(viewonly=True)
+
+    @property
+    def approved_by_name(self) -> str | None:
+        """Who approved the report, for showing next to it."""
+        return self.approver.full_name if self.approver else None
 
     @property
     def suitability(self) -> str | None:

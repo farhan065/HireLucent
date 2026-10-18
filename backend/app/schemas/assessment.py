@@ -220,6 +220,7 @@ class AssessmentOut(BaseModel):
     )
     areas_to_verify: list[Claim] | None = None
     approved_at: datetime | None = None
+    approved_by_name: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -256,6 +257,13 @@ class RankedAssessment(BaseModel):
     gaps: list[Claim] | None
     areas_to_verify: list[Claim] | None
     approved_at: datetime | None
+
+
+class ApproveAllResult(BaseModel):
+    approved: int = Field(description="Draft reports approved now.")
+    skipped: int = Field(
+        description="Drafts not waiting for review, for example being rewritten."
+    )
 
 
 class EvaluationActivity(BaseModel):

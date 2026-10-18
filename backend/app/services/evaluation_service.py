@@ -461,3 +461,33 @@ def review_assessment(
     log_event(logger, "assessment_reviewed", session_id=session_id, action=review.action)
     db.refresh(assessment)
     return assessment
+
+
+def approve_all_drafts(
+    db: Session, graph: CompiledStateGraph, job_id: int, user_id: int
+) -> dict[str, int]:
+    """Approve every draft report of the job that is waiting for review, as
+    if each were approved one by one. A draft being written again is left
+    alone and counted as skipped."""
+    if db.get(Job, job_id) is None:
+        raise NotFoundError("This job does not exist.")
+    session_ids = db.scalars(
+        select(Assessment.session_id)
+        .join(InterviewSession, InterviewSession.id == Assessment.session_id)
+        .where(InterviewSession.job_id == job_id, Assessment.status == AssessmentStatus.DRAFT)
+    ).all()
+    approved = 0
+    for session_id in session_ids:
+        config = thread_config(final_graph.thread_id(session_id))
+        if not final_graph.is_waiting_for_review(graph, config):
+            continue
+        graph.invoke(Command(resume={"action": "approve", "user_id": user_id}), config)
+        approved += 1
+    log_event(
+        logger,
+        "assessments_approved",
+        job_id=job_id,
+        approved=approved,
+        skipped=len(session_ids) - approved,
+    )
+    return {"approved": approved, "skipped": len(session_ids) - approved}

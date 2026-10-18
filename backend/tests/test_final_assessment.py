@@ -826,3 +826,70 @@ def test_only_an_interview_without_a_report_gets_one(monkeypatch: pytest.MonkeyP
         evaluation_service.start_report(None, None, None, 9, 1)
 
     assert error.value.message == evaluation_service.HAS_REPORT
+
+
+# --- Approving all drafts ----------------------------------------------------
+
+
+class FakeDraftsDB:
+    def __init__(self, session_ids: list[int]) -> None:
+        self.session_ids = session_ids
+
+    def get(self, model, key):
+        return SimpleNamespace(id=key)
+
+    def scalars(self, query):
+        return SimpleNamespace(all=lambda: self.session_ids)
+
+
+class FakeWaitingGraph:
+    """Waiting for review on the given interviews' threads."""
+
+    def __init__(self, waiting: set[int]) -> None:
+        self.waiting = waiting
+        self.approved: list[tuple[str, dict]] = []
+
+    def get_state(self, config: dict):
+        session_id = int(config["configurable"]["thread_id"].rsplit("-", 1)[1])
+        return SimpleNamespace(next=("human_review",) if session_id in self.waiting else ())
+
+    def invoke(self, command: Command, config: dict) -> None:
+        self.approved.append((config["configurable"]["thread_id"], command.resume))
+
+
+def test_all_waiting_drafts_are_approved_and_the_rest_skipped() -> None:
+    graph = FakeWaitingGraph({7, 9})
+
+    result = evaluation_service.approve_all_drafts(FakeDraftsDB([7, 8, 9]), graph, 2, 1)
+
+    assert result == {"approved": 2, "skipped": 1}
+    assert [thread for thread, _ in graph.approved] == [
+        "final-assessment-7",
+        "final-assessment-9",
+    ]
+    assert graph.approved[0][1] == {"action": "approve", "user_id": 1}
+
+
+def test_interviewer_approves_all_drafts(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        evaluation_service,
+        "approve_all_drafts",
+        lambda db, graph, job_id, uid: {"approved": 3, "skipped": 0},
+    )
+
+    response = client.post("/jobs/2/assessments/approve", headers=_auth(UserRole.INTERVIEWER))
+    refused = client.post("/jobs/2/assessments/approve", headers=_auth(UserRole.CANDIDATE))
+
+    assert response.status_code == 200 and response.json()["approved"] == 3
+    assert refused.status_code == 403
+
+
+def test_the_approver_is_named_next_to_the_report() -> None:
+    from app.models.user import User
+
+    assert Assessment().approved_by_name is None
+    assert Assessment(approver=User(full_name="Demo Interviewer")).approved_by_name == (
+        "Demo Interviewer"
+    )

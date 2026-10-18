@@ -11,6 +11,7 @@ from app.graphs.final_assessment.graph import get_final_assessment_graph
 from app.models import Assessment, Task
 from app.schemas.assessment import (
     AddQuestionsRequest,
+    ApproveAllResult,
     AssessmentOut,
     EvaluationActivity,
     QuestionSuggestion,
@@ -143,6 +144,24 @@ def list_ranked_assessments(job_id: int, db: Session = Depends(get_db)) -> list[
     The rest follow unranked: not evaluated yet, only analysed, or without
     an overall score."""
     return evaluation_service.ranked_assessments(db, job_id)
+
+
+@job_router.post(
+    "/assessments/approve",
+    response_model=ApproveAllResult,
+    summary="Approve all the job's draft reports",
+    responses={404: {"model": ErrorResponse, "description": "Job not found"}},
+)
+def approve_all_reports(
+    job_id: int,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+    graph: CompiledStateGraph = Depends(get_final_assessment_graph),
+) -> dict:
+    """Approves every draft report waiting for review, the same as approving
+    each one: it becomes final and its candidate is marked assessed. A draft
+    being rewritten at that moment is skipped."""
+    return evaluation_service.approve_all_drafts(db, graph, job_id, principal.subject_id)
 
 
 @session_router.get(
