@@ -736,6 +736,8 @@ def test_candidates_are_ranked_by_overall_score_then_interview_then_name() -> No
     assert first["suitability"] == "strong_fit" and first["status"] == "draft"
     assert first["answers_evaluated"] == 4
     assert first["coverage"] == {"covered": 1, "weak": 1, "not_explored": 2, "total": 4}
+    requirement_ids = [entry["requirement_id"] for entry in first["coverage_map"]]
+    assert requirement_ids == ["R1", "R2", "R3", "R4"]
 
 
 def test_an_unevaluated_interview_shows_the_screening_score_only() -> None:

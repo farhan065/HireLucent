@@ -252,6 +252,9 @@ class RankedAssessment(BaseModel):
     suitability: Literal["strong_fit", "possible_fit", "not_a_fit"] | None
     answers_evaluated: int = Field(description="Answers the interview score averages.")
     coverage: CoverageCounts | None
+    coverage_map: list[CoverageEntry] | None = Field(
+        default=None, description="Each requirement's coverage, for comparing candidates."
+    )
     strengths: list[Claim] | None
     weaknesses: list[Claim] | None
     gaps: list[Claim] | None

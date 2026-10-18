@@ -348,6 +348,7 @@ def _ranked_row(session: InterviewSession) -> dict:
         if assessment
         else 0,
         "coverage": _coverage_counts(assessment.coverage_map if assessment else None),
+        "coverage_map": assessment.coverage_map if assessment else None,
         "strengths": report.strengths if report else None,
         "weaknesses": report.weaknesses if report else None,
         "gaps": report.gaps if report else None,
