@@ -14,7 +14,8 @@ from app.core.security import create_access_token
 from app.db.session import get_db
 from app.graphs.base import MAX_ATTEMPTS, thread_config
 from app.graphs.qa_analysis import graph as qa
-from app.graphs.qa_analysis import segmentation
+from app.graphs.qa_analysis import evaluation, segmentation
+from app.graphs.qa_analysis.evaluation import Criterion, EvaluationAnswer, PairJudgement
 from app.graphs.qa_analysis.segmentation import PairOut, SegmentationAnswer
 from app.main import create_app
 from app.models import Assessment, InterviewSession, Task
@@ -163,6 +164,153 @@ def test_counts_leave_small_talk_out_of_the_evaluation() -> None:
     assert counts == {"pairs": 4, "evaluated": 3, "small_talk": 1}
 
 
+# --- Answer evaluation -------------------------------------------------------
+
+
+PAIRS = segmentation.build_pairs(GOOD_ANSWER, TURNS)
+TURNS_BY_ID = {turn["id"]: turn for turn in TURNS}
+QUOTES = {"Q2": (4, "REST APIs in FastAPI"), "Q3": (5, "Docker Compose"), "Q4": (7, "typing")}
+
+
+def _criterion(score: int = 80) -> Criterion:
+    return Criterion(score=score, reason="Clear and correct.")
+
+
+def _judgement(pair_id: str, **changes) -> PairJudgement:
+    turn, quote = QUOTES[pair_id]
+    values = {
+        "id": pair_id,
+        "answered": "answered",
+        "relevance": _criterion(90),
+        "accuracy": _criterion(80),
+        "completeness": _criterion(70),
+        "articulation": _criterion(60),
+        "justification": "A solid answer.",
+        "evidence_turn": turn,
+        "evidence_quote": quote,
+    }
+    return PairJudgement(**(values | changes))
+
+
+def _judge_all(batch: list[dict]) -> EvaluationAnswer:
+    return EvaluationAnswer(evaluations=[_judgement(pair["id"]) for pair in batch])
+
+
+def test_small_talk_and_unanswered_questions_are_not_sent_to_the_ai() -> None:
+    unanswered = {**PAIRS[3], "id": "Q5", "answer_turn_ids": []}
+
+    batches = evaluation.make_batches([*PAIRS, unanswered])
+
+    assert [[pair["id"] for pair in batch] for batch in batches] == [["Q2", "Q3", "Q4"]]
+
+
+def test_answers_go_to_the_ai_in_batches() -> None:
+    many = [{**PAIRS[1], "id": f"Q{n}"} for n in range(1, 11)]
+
+    sizes = [len(batch) for batch in evaluation.make_batches(many)]
+
+    assert sizes == [evaluation.BATCH_SIZE, evaluation.BATCH_SIZE, 2]
+
+
+def test_a_valid_answer_has_no_problems() -> None:
+    batch = PAIRS[1:]
+
+    assert evaluation.problems(_judge_all(batch), batch, TURNS_BY_ID) == []
+
+
+@pytest.mark.parametrize(
+    ("judgements", "problem"),
+    [
+        ([_judgement("Q2")], "pairs_mismatch"),
+        ([_judgement("Q2"), _judgement("Q3"), _judgement("Q3")], "pairs_mismatch"),
+        (
+            [_judgement("Q2", accuracy=None), _judgement("Q3"), _judgement("Q4")],
+            "accuracy_missing",
+        ),
+        (
+            [_judgement("Q2", evidence_turn=5), _judgement("Q3"), _judgement("Q4")],
+            "evidence_turn_wrong",
+        ),
+        (
+            [
+                _judgement("Q2", evidence_quote="ten years of Kubernetes"),
+                _judgement("Q3"),
+                _judgement("Q4"),
+            ],
+            "quote_not_found",
+        ),
+    ],
+)
+def test_answers_that_fail_the_checks_are_found(
+    judgements: list[PairJudgement], problem: str
+) -> None:
+    answer = EvaluationAnswer(evaluations=judgements)
+
+    assert problem in evaluation.problems(answer, PAIRS[1:], TURNS_BY_ID)
+
+
+def test_a_quote_may_differ_in_case_and_punctuation() -> None:
+    answer = EvaluationAnswer(
+        evaluations=[_judgement("Q2", evidence_quote="rest APIs, in fastapi")]
+    )
+
+    assert evaluation.problems(answer, [PAIRS[1]], TURNS_BY_ID) == []
+
+
+def test_the_score_is_the_average_of_the_criteria_that_apply() -> None:
+    technical = {"relevance": {"score": 90}, "accuracy": {"score": 80}}
+    behavioural = {"relevance": {"score": 90}, "accuracy": None}
+
+    assert evaluation.answer_score(technical, "answered") == 85.0
+    assert evaluation.answer_score(behavioural, "partly_answered") == 90.0
+    assert evaluation.answer_score(technical, "not_answered") == 0.0
+
+
+def test_behavioural_answers_are_not_judged_on_accuracy() -> None:
+    pair = {**PAIRS[3], "kind": "behavioural"}
+
+    [result] = evaluation.to_evaluations(
+        EvaluationAnswer(evaluations=[_judgement("Q4")]), [pair], TURNS_BY_ID
+    )
+
+    assert result["criteria"]["accuracy"] is None and result["accuracy_source"] is None
+    assert result["score"] == 73.3  # (90 + 70 + 60) / 3
+
+
+def test_each_evaluation_points_to_its_quote_in_the_transcript() -> None:
+    [result] = evaluation.to_evaluations(
+        EvaluationAnswer(evaluations=[_judgement("Q2")]), [PAIRS[1]], TURNS_BY_ID
+    )
+
+    evidence = {"turn_id": 4, "start_ms": 20_000, "quote": "REST APIs in FastAPI"}
+    assert result["evidence"] == evidence
+    assert result["score"] == 75.0 and result["accuracy_source"] == {"type": "ai_judgement"}
+
+
+def test_the_ai_never_sees_contact_details_in_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompts: list[str] = []
+    monkeypatch.setattr(
+        evaluation.ai_client,
+        "generate_structured",
+        lambda prompt, schema: prompts.append(prompt) or _judge_all([PAIRS[1]]),
+    )
+    turns = {**TURNS_BY_ID, 4: {**TURNS_BY_ID[4], "text": "Reach me at sam@example.com"}}
+
+    evaluation.ask_ai("Backend Engineer", [PAIRS[1]], turns)
+
+    assert "sam@example.com" not in prompts[0] and "[email]" in prompts[0]
+
+
+def test_a_question_without_an_answer_scores_zero() -> None:
+    unanswered = {**PAIRS[3], "answer_turn_ids": []}
+
+    [small_talk, result] = evaluation.attach([PAIRS[0], unanswered], [])
+
+    assert small_talk["evaluation"] is None
+    assert result["evaluation"]["score"] == 0.0
+    assert result["evaluation"]["justification"] == evaluation.NO_ANSWER
+
+
 # --- The graph ---------------------------------------------------------------
 
 
@@ -187,30 +335,45 @@ def _interview(status: str = SessionStatus.COMPLETED, turns: list[dict] = TURNS)
     }
 
 
-def _run(monkeypatch: pytest.MonkeyPatch, store: FakeStore, answers: list) -> dict:
-    """Run the graph once. Each AI call returns the next answer in the list;
-    an exception in the list is raised instead."""
-    calls = iter(answers)
+def _answers(items: list):
+    """Each call returns the next item; an exception is raised instead, and a
+    function is called with the batch."""
+    calls = iter(items)
 
-    def fake_ask(job_title: str, turns: list[dict]):
-        answer = next(calls)
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
+    def ask(job_title: str, *args):
+        item = next(calls)
+        if isinstance(item, Exception):
+            raise item
+        return item(args[0]) if callable(item) else item
 
+    return ask
+
+
+def _run(
+    monkeypatch: pytest.MonkeyPatch,
+    store: FakeStore,
+    segments: list,
+    judgements: list | None = None,
+) -> dict:
+    """Run the graph once with stand-ins for the AI. By default every answer
+    is judged validly."""
     monkeypatch.setattr(qa, "store", store)
-    monkeypatch.setattr(qa.segmentation, "ask_ai", fake_ask)
+    monkeypatch.setattr(qa.segmentation, "ask_ai", _answers(segments))
+    monkeypatch.setattr(qa.evaluation, "ask_ai", _answers(judgements or [_judge_all] * 10))
     graph = qa.build_qa_analysis_graph(InMemorySaver())
     return graph.invoke({"session_id": 9}, thread_config("test-qa"))
 
 
-def test_the_pairs_are_saved(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_evaluated_pairs_are_saved(monkeypatch: pytest.MonkeyPatch) -> None:
     store = FakeStore(_interview())
 
     result = _run(monkeypatch, store, [GOOD_ANSWER])
 
     assert not result.get("failure")
-    assert [pair["id"] for pair in store.saved[9]] == ["Q1", "Q2", "Q3", "Q4"]
+    saved = store.saved[9]
+    assert [pair["id"] for pair in saved] == ["Q1", "Q2", "Q3", "Q4"]
+    assert saved[0]["evaluation"] is None
+    assert [pair["evaluation"]["score"] for pair in saved[1:]] == [75.0, 75.0, 75.0]
 
 
 @pytest.mark.parametrize(
@@ -261,6 +424,47 @@ def test_the_analysis_gives_up_after_the_last_attempt(monkeypatch: pytest.Monkey
     assert not store.saved
 
 
+def test_an_invalid_evaluation_is_asked_for_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = FakeStore(_interview())
+    invalid = EvaluationAnswer(evaluations=[_judgement("Q2")])
+
+    result = _run(monkeypatch, store, [GOOD_ANSWER], [invalid, _judge_all])
+
+    assert not result.get("failure") and store.saved[9][3]["evaluation"]["score"] == 75.0
+
+
+def test_the_interview_fails_when_an_evaluation_stays_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+    invalid = EvaluationAnswer(evaluations=[_judgement("Q2")])
+
+    result = _run(monkeypatch, store, [GOOD_ANSWER], [invalid] * MAX_ATTEMPTS)
+
+    assert result["failure"] == qa.INVALID_EVALUATION and not store.saved
+
+
+def test_an_unavailable_ai_during_evaluation_saves_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+
+    result = _run(monkeypatch, store, [GOOD_ANSWER], [ServiceUnavailableError("down")])
+
+    assert result["failure"] == qa.AI_UNAVAILABLE and not store.saved
+
+
+def test_with_only_small_talk_nothing_is_sent_to_the_ai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+    greeting = SegmentationAnswer(pairs=[_pair("Greeting", [1], [2], "small_talk")])
+
+    result = _run(monkeypatch, store, [greeting], [])
+
+    assert not result.get("failure") and store.saved[9][0]["evaluation"] is None
+
+
 # --- The evaluation service --------------------------------------------------
 
 
@@ -275,14 +479,22 @@ class FakeProgress:
 
 
 class FakeGraph:
+    """Streams the updates a real run would: the pairs, then one batch."""
+
     def __init__(self, failures: dict[int, str]) -> None:
         self.failures = failures
         self.seen: list[int] = []
+        self.last: int | None = None
 
-    def invoke(self, state: dict, config: dict) -> dict:
+    def stream(self, state: dict, config: dict, stream_mode: str):
         self.seen.append(state["session_id"])
-        failure = self.failures.get(state["session_id"])
-        return {"failure": failure} if failure else {}
+        self.last = state["session_id"]
+        yield {"segment_qa": {"pairs": PAIRS, "attempts": 1}}
+        yield {"evaluate_answers": {"evaluations": [{}, {}, {}]}}
+
+    def get_state(self, config: dict):
+        failure = self.failures.get(self.last)
+        return SimpleNamespace(values={"failure": failure} if failure else {})
 
 
 def test_one_failed_interview_does_not_stop_the_others() -> None:
@@ -293,6 +505,14 @@ def test_one_failed_interview_does_not_stop_the_others() -> None:
     assert graph.seen == [1, 2, 3]
     assert summary == {"total": 3, "evaluated": 2, "failed": 1}
     assert progress.updates[-1] == (3, 3, "Evaluated 2 of 3 interviews")
+
+
+def test_progress_follows_the_answers_of_a_single_interview() -> None:
+    progress = FakeProgress()
+
+    evaluation_service.run_evaluation(FakeGraph({}), [1], progress)
+
+    assert (3, 3, "Interview 1 of 1 · 3 of 3 answers evaluated") in progress.updates
 
 
 def test_the_task_fails_with_the_reason_when_nothing_could_be_evaluated() -> None:
