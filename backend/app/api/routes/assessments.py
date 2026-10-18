@@ -1,7 +1,7 @@
 """Post-interview assessment endpoints: evaluating interviews and reading
 the result. Interviewers only."""
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.orm import Session
 
@@ -181,6 +181,37 @@ def read_assessment(session_id: int, db: Session = Depends(get_db)) -> Assessmen
     the summary, and the strengths, weaknesses, evidence gaps and areas to
     verify, each pointing to a transcript segment or a CV result."""
     return evaluation_service.get_assessment(db, session_id)
+
+
+@session_router.get(
+    "/{session_id}/assessment/report.pdf",
+    response_class=Response,
+    summary="Download the report as a PDF",
+    responses={
+        200: {"content": {"application/pdf": {}}, "description": "The report as a PDF"},
+        404: {"model": ErrorResponse, "description": "Not found or not evaluated"},
+        409: {"model": ErrorResponse, "description": "The report has not been written yet"},
+    },
+)
+def download_report(
+    session_id: int,
+    tz: str | None = Query(
+        default=None,
+        max_length=64,
+        description="The interviewer's time zone, for example Asia/Dhaka.",
+    ),
+    db: Session = Depends(get_db),
+) -> Response:
+    """The report (draft or approved) on the first page, then an appendix
+    with the requirement coverage and every question with its score. The
+    file name holds the job code and the interview date, never the
+    candidate's name."""
+    content, name = evaluation_service.report_file(db, session_id, tz)
+    return Response(
+        content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 @session_router.post(

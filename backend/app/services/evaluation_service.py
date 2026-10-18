@@ -33,7 +33,7 @@ from app.graphs.qa_analysis.graph import answers_to_judge, get_qa_analysis_graph
 from app.models import Assessment, InterviewSession, Job, Task, TranscriptTurn
 from app.models.enums import AssessmentStatus, SessionStatus
 from app.schemas.assessment import ReviewRequest
-from app.services import knowledge_service, session_service, task_service
+from app.services import knowledge_service, report_pdf, session_service, task_service
 from app.services.task_service import ACTIVE, TaskProgress
 
 logger = get_logger(__name__)
@@ -50,6 +50,7 @@ NO_SUGGESTIONS = (
 )
 UNKNOWN_SUGGESTION = "Some of the chosen questions are not among the suggestions."
 NOT_A_DRAFT = "This report is not waiting for review."
+NO_REPORT = "This interview's report has not been written yet."
 HAS_REPORT = "This interview already has a report. Evaluate it again to write a new one."
 UNKNOWN_POINT = "Some of the chosen points are not in the report."
 REWRITE_FAILED = (
@@ -491,3 +492,18 @@ def approve_all_drafts(
         skipped=len(session_ids) - approved,
     )
     return {"approved": approved, "skipped": len(session_ids) - approved}
+
+
+def report_file(db: Session, session_id: int, time_zone: str | None) -> tuple[bytes, str]:
+    """The interview's report as a PDF, with its file name. Dates and times
+    are shown in time_zone (the interviewer's), or UTC."""
+    assessment = get_assessment(db, session_id)
+    if assessment.status == AssessmentStatus.ANALYSED:
+        raise ConflictError(NO_REPORT)
+    session = session_service.get_session(db, session_id)
+    job = db.get(Job, session.job_id)
+    context = report_pdf.report_context(assessment, session, job, time_zone)
+    content = report_pdf.build_pdf(context)
+    log_event(logger, "report_pdf_built", session_id=session_id, size=len(content))
+    start = session.started_at or session.scheduled_start
+    return content, report_pdf.file_name(job.job_code, start)
