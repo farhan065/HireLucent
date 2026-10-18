@@ -85,5 +85,7 @@ def evaluate_job_interviews(
 )
 def read_assessment(session_id: int, db: Session = Depends(get_db)) -> Assessment:
     """The question-answer pairs found in the transcript, each pointing to its
-    transcript turns. Small talk is kept but marked, and is not evaluated."""
+    transcript turns, with each answer's evaluation: four criteria with
+    reasons, a score worked out by rule, a justification and a quote from the
+    answer. Small talk is kept but marked, and is not evaluated."""
     return evaluation_service.get_assessment(db, session_id)

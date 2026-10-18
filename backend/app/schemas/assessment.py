@@ -6,6 +6,41 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class Criterion(BaseModel):
+    score: int = Field(ge=0, le=100)
+    reason: str
+
+
+class Criteria(BaseModel):
+    relevance: Criterion
+    accuracy: Criterion | None = Field(default=None, description="Technical questions only.")
+    completeness: Criterion
+    articulation: Criterion
+
+
+class Evidence(BaseModel):
+    """The part of the answer the evaluation relies on."""
+
+    turn_id: int
+    start_ms: int = Field(description="Milliseconds from the start of the interview.")
+    quote: str = Field(description="Copied from the turn and checked against it.")
+
+
+class AccuracySource(BaseModel):
+    type: Literal["ai_judgement"] = Field(description="ai_judgement: the AI's own knowledge.")
+
+
+class AnswerEvaluation(BaseModel):
+    answered: Literal["answered", "partly_answered", "not_answered"]
+    criteria: Criteria | None = Field(default=None, description="Empty when nothing was said.")
+    score: float = Field(
+        description="Average of the criteria that apply, or 0 when not answered."
+    )
+    justification: str
+    evidence: Evidence | None = None
+    accuracy_source: AccuracySource | None = None
+
+
 class QAPair(BaseModel):
     """One question and the answer that followed, pointing to the transcript."""
 
@@ -22,6 +57,9 @@ class QAPair(BaseModel):
     )
     follow_up_of: str | None = Field(
         default=None, description="The pair this question follows up or clarifies."
+    )
+    evaluation: AnswerEvaluation | None = Field(
+        default=None, description="Empty for small talk, which is not evaluated."
     )
 
 

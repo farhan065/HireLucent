@@ -2,7 +2,8 @@
 
 The interviewer asks for an evaluation, either for one interview or for all
 of a job's completed interviews that have not been evaluated yet. Each
-interview runs through the Q&A Analysis graph.
+interview runs through the Q&A Analysis graph, which finds the questions and
+answers and evaluates each answer.
 
 Only one evaluation runs at a time, because the AI's per-minute limit is
 shared. An evaluation does not block fetching or screening CVs for the job.
@@ -14,9 +15,11 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.ai import client as ai_client
+from app.core.config import get_settings
 from app.core.errors import AppError, ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import thread_config
+from app.graphs.qa_analysis.graph import answers_to_judge
 from app.models import Assessment, InterviewSession, Job, Task, TranscriptTurn
 from app.models.enums import SessionStatus
 from app.services import session_service, task_service
@@ -127,12 +130,7 @@ def run_evaluation(
     total = len(session_ids)
     evaluated, failures = 0, []
     for done, session_id in enumerate(session_ids):
-        progress.update(done, total, f"Evaluating interview {done + 1} of {total}")
-        config = thread_config(thread_id(progress.task_id, session_id))
-        # Evaluation is background work: its AI calls leave room for the AI
-        # Agent and the interview room.
-        with ai_client.background_calls():
-            result = graph.invoke({"session_id": session_id}, config)
+        result = evaluate_one(graph, session_id, done, total, progress)
         if result.get("failure"):
             failures.append(result["failure"])
         else:
@@ -144,6 +142,36 @@ def run_evaluation(
     if not evaluated:
         raise EvaluationFailed(failures[-1])
     return summary
+
+
+def evaluate_one(
+    graph: CompiledStateGraph, session_id: int, done: int, total: int, progress: TaskProgress
+) -> dict:
+    """Run one interview through the graph, showing how many answers have
+    been judged. With one interview the bar follows its answers; with
+    several it follows the interviews."""
+    config = thread_config(thread_id(progress.task_id, session_id))
+    config["max_concurrency"] = get_settings().screening_max_parallel
+    prefix = f"Interview {done + 1} of {total}"
+    progress.update(done, total, f"{prefix} · finding the questions and answers")
+
+    answers, judged = 0, 0
+    # Evaluation is background work: its AI calls leave room for the AI
+    # Agent and the interview room.
+    with ai_client.background_calls():
+        for update in graph.stream({"session_id": session_id}, config, stream_mode="updates"):
+            if update.get("segment_qa") and update["segment_qa"].get("pairs"):
+                answers = answers_to_judge(update["segment_qa"]["pairs"])
+            elif update.get("evaluate_answers"):
+                judged += len(update["evaluate_answers"].get("evaluations", []))
+            else:
+                continue
+            message = f"{prefix} · {judged} of {answers} answers evaluated"
+            if total == 1:
+                progress.update(judged, answers, message)
+            else:
+                progress.update(done, total, message)
+    return graph.get_state(config).values
 
 
 def get_assessment(db: Session, session_id: int) -> Assessment:
