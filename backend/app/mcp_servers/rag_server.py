@@ -1,9 +1,10 @@
-"""The RAG MCP server: search tools the Recruiter Agent can call.
+"""The RAG MCP server: search tools for the Recruiter Agent and the backend.
 
 MCP (Model Context Protocol) is a standard way to offer tools to an AI
 agent. This server runs in its own container and speaks MCP over HTTP.
 Each tool searches one fixed collection, so the model cannot choose where
-to look: job description templates, or the interview question bank.
+to look: job description templates, the interview question bank, or the
+reference documents used to check interview answers.
 
 Run with:  python -m app.mcp_servers.rag_server
 """
@@ -20,6 +21,9 @@ settings = get_settings()
 
 MAX_RESULTS = 2
 MAX_QUESTIONS = 3
+MAX_REFERENCES = 2
+# The question and answer are cut to this before they are embedded.
+MAX_QUERY_CHARS = 2000
 # Questions are searched in a wider pool first, then kept to the role.
 QUESTION_POOL = 20
 
@@ -99,6 +103,36 @@ def search_question_bank(query: str, role: str = "") -> list[dict]:
     searched.
     """
     return find_bank_questions(query, role)
+
+
+def find_references(question: str, answer: str) -> list[dict]:
+    """Search the uploaded reference documents for passages about a question
+    and the candidate's answer, closest first."""
+    query = f"{question}\n{answer}"[:MAX_QUERY_CHARS]
+    matches = store.search(store.RAG_DOCUMENTS, query, limit=MAX_REFERENCES)
+    references = [
+        {
+            "source": match["metadata"]["source"],
+            "similarity": round(1 - match["distance"], 2),
+            "text": match["text"],
+        }
+        for match in matches
+        if match["distance"] <= settings.reference_max_distance
+    ]
+    log_event(logger, "references_searched", found=len(matches), used=len(references))
+    return references
+
+
+@server.tool()
+def verify_answer(question: str, answer: str) -> list[dict]:
+    """Find approved reference passages to check an interview answer against.
+
+    Searches only the Knowledge Base documents uploaded as references.
+    Returns up to two passages, closest first, each with its source document.
+    An empty list means no reference is close enough, and the answer's
+    accuracy can only be judged without one.
+    """
+    return find_references(question, answer)
 
 
 if __name__ == "__main__":
