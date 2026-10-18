@@ -283,6 +283,42 @@ def test_a_quote_may_differ_in_case_and_punctuation() -> None:
     assert report.claim_problems(claim, True, {"Q2": PAIRS[1]}, {}, TURNS_BY_ID) == []
 
 
+def test_a_quote_misspelled_by_the_speech_to_text_is_traced_in_its_own_words() -> None:
+    misspelled = "It runs a funk shun before the end point."
+    turns = {**TURNS_BY_ID, 2: {**TURNS_BY_ID[2], "text": misspelled}}
+    claim = _claim("Knows Depends", [("Q2", "runs a function before the endpoint")])
+
+    assert report.claim_problems(claim, True, {"Q2": PAIRS[1]}, {}, turns) == []
+    traced = report.traced_report(
+        ReportAnswer(summary="A summary.", strengths=[claim]), PAIRS, COVERAGE, turns
+    )
+    source = traced["strengths"][0]["sources"][0]
+    assert source["quote"] == "runs a funk shun before the end point"
+
+
+def test_a_quote_across_a_pause_is_traced() -> None:
+    split = {
+        **TURNS_BY_ID,
+        2: {**TURNS_BY_ID[2], "text": "It runs a function"},
+        7: {"id": 7, "start_ms": 8000, "text": "before the endpoint is called."},
+    }
+    pair = {**PAIRS[1], "answer_turn_ids": [2, 7]}
+    claim = _claim("Knows Depends", [("Q2", "a function before the endpoint")])
+
+    assert report.claim_problems(claim, True, {"Q2": pair}, {}, split) == []
+
+
+def test_a_technical_answer_whose_accuracy_was_not_judged_is_listed() -> None:
+    pair = {
+        **PAIRS[1],
+        "evaluation": {**PAIRS[1]["evaluation"], "accuracy_source": {"type": "not_checked"}},
+    }
+
+    [area] = findings.areas_to_verify([pair], [])
+
+    assert "the AI could not judge it" in area["text"]
+
+
 def test_only_traced_claims_are_kept_with_their_sources() -> None:
     answer = ReportAnswer(
         summary="  A summary.  ",

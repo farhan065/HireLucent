@@ -123,10 +123,15 @@ def areas_to_verify(pairs: list[dict], coverage: list[dict]) -> list[dict]:
                 )
             )
         elif (evaluation.get("accuracy_source") or {}).get("type") == "not_checked":
+            reason = (
+                "no company reference covers it"
+                if pair["kind"] == "company"
+                else "the AI could not judge it"
+            )
             found.append(
                 (
-                    f"Check the answer to “{pair['question']}”: no company reference "
-                    "covers it, so its accuracy was not checked.",
+                    f"Check the answer to “{pair['question']}”: {reason}, so its "
+                    "accuracy was not checked.",
                     [transcript_source(pair)],
                 )
             )

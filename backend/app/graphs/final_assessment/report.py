@@ -7,18 +7,18 @@ strength and weakness it must name its sources: quotes copied from the
 candidate's answers, or requirements whose CV screening result supports it.
 
 Everything it returns is checked here (the traceability check): a quote must
-appear in the candidate's answer to that question, a requirement must exist
+appear in the candidate's answer to that question (with the same tolerance
+for speech-to-text spelling as the answer evaluation), a requirement must exist
 and have a CV result, a strength must rest on good evidence and a weakness
 on weak evidence. A claim that fails is asked for again, and is dropped if
 it still fails, so the report never states a conclusion it cannot trace.
 """
 
-import re
-
 from pydantic import BaseModel, Field
 
 from app.ai import client as ai_client
 from app.graphs.final_assessment import findings
+from app.graphs.qa_analysis import evaluation
 from app.graphs.qa_analysis.coverage import COVERED_SCORE
 from app.graphs.qa_analysis.segmentation import mask_text
 
@@ -51,10 +51,14 @@ partly met. Requirements never explored in the interview are listed \
 separately, so do not repeat them.
 
 For every strength and weakness give its sources:
-- questions: the question id and a short quote copied exactly from the \
-candidate's answer to that question
+- questions: the question id and a short quote copied word for word from \
+the candidate's answer to that question. Keep the transcript's own spelling, \
+even where the speech-to-text wrote a word wrongly.
 - requirements: requirement ids whose CV result supports the point
 Give at least one source for each point. Keep each point to one sentence.
+
+The answers come from speech-to-text, which can misspell words, especially \
+technical terms. Judge what the candidate meant, never the spelling.
 
 Judge only skills, knowledge and how the answers were given. Never consider \
 age, gender, nationality, religion, accent or any other personal trait. The \
@@ -108,12 +112,6 @@ class ReportAnswer(BaseModel):
     summary: str
     strengths: list[ClaimOut] = Field(default_factory=list)
     weaknesses: list[ClaimOut] = Field(default_factory=list)
-
-
-def _plain(text: str) -> str:
-    """Lower case letters and digits only, so a quote matches its turn even
-    when the AI changes punctuation or spacing."""
-    return " ".join(re.sub(r"[^\w]+", " ", text.lower()).split())
 
 
 def _score(value: float | None) -> str:
@@ -219,16 +217,12 @@ def ask_ai(
 # --- The traceability check --------------------------------------------------
 
 
-def _answer_turn(pair: dict, quote: str, turns: dict[int, dict]) -> dict | None:
-    """The answer turn the quote was copied from, if any."""
-    wanted = _plain(quote)
-    if not wanted:
-        return None
-    for turn_id in pair["answer_turn_ids"]:
-        turn = turns.get(turn_id)
-        if turn and wanted in _plain(mask_text(turn["text"])):
-            return turn
-    return None
+def _found_quote(pair: dict, quote: str, turns: dict[int, dict]) -> dict | None:
+    """Where the quote is in the candidate's answer to that question, with
+    the transcript's own words, or None. Matched with the same tolerance as
+    the answer evaluation: across the answer's turns, and despite a word
+    spelled differently by the speech-to-text."""
+    return evaluation.find_quote(pair, quote, turns)
 
 
 def claim_problems(
@@ -250,7 +244,7 @@ def claim_problems(
         evaluation = (pair or {}).get("evaluation")
         if evaluation is None:
             found.append("unknown_question")
-        elif _answer_turn(pair, item.quote, turns) is None:
+        elif _found_quote(pair, item.quote, turns) is None:
             found.append("quote_not_found")
         elif is_strength and evaluation["score"] < COVERED_SCORE:
             found.append("strength_on_weak_answer")
@@ -293,10 +287,10 @@ def _sources(
     sources = []
     for item in claim.questions:
         pair = pairs_by_id[item.question_id]
-        turn = _answer_turn(pair, item.quote, turns)
-        sources.append(
-            findings.transcript_source(pair, turn, item.quote.strip()[:MAX_CLAIM_CHARS])
-        )
+        found = _found_quote(pair, item.quote, turns)
+        turn = turns[found["turn_id"]] if found else None
+        quote = found["quote"] if found else item.quote.strip()
+        sources.append(findings.transcript_source(pair, turn, quote[:MAX_CLAIM_CHARS]))
     for requirement_id in dict.fromkeys(claim.requirements):
         sources.append(findings.cv_source(coverage_by_id[requirement_id]))
     return sources
