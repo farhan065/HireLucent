@@ -13,6 +13,7 @@ import {
 } from '../components/assessment/EvaluationStatus.jsx'
 import QuestionBankCard from '../components/assessment/QuestionBankCard.jsx'
 import QuestionCard from '../components/assessment/QuestionCard.jsx'
+import ReportView from '../components/assessment/ReportView.jsx'
 import { useEvaluation } from '../hooks/useEvaluation.js'
 import {
   KIND_FILTERS,
@@ -22,16 +23,23 @@ import {
   evaluationOf,
   kindCounts,
   needsAttention,
+  SUITABILITY,
+  hasReport,
+  oneDecimal,
   qaSummary,
   readAssessment,
   requirementNames,
-  roundScore,
   turnsById,
 } from '../lib/assessment.js'
 import { readInterview, readTranscript } from '../lib/room.js'
 import { whenLabel } from '../lib/transcript.js'
 
-const TABS = ['qa', 'coverage']
+const TABS = ['report', 'qa', 'coverage']
+// The Report tab's badge for each assessment status.
+const REPORT_BADGES = {
+  draft: { label: 'Draft', className: 'bg-amber-soft text-amber' },
+  approved: { label: 'Approved', className: 'bg-success-soft text-success' },
+}
 // The header chip for each assessment status.
 const STATUS_CHIPS = {
   analysed: { tone: 'info', label: 'Answers evaluated' },
@@ -60,17 +68,49 @@ function LoadingAssessment() {
   )
 }
 
-function ScoreTile({ label, value, note }) {
+function ScoreTile({ label, value, note, chip }) {
   return (
     <div className="flex min-w-36 flex-col gap-0.5 rounded-2xl border border-line bg-white px-4 py-3">
-      <span className="text-xs font-semibold uppercase tracking-wider text-[#6B7890]">
-        {label}
-      </span>
-      <span className="font-display text-[26px] font-extrabold tabular-nums text-navy">
-        {value ?? '–'}
+      <span className="text-xs font-semibold uppercase tracking-wider text-[#6B7890]">{label}</span>
+      <span className="flex items-center gap-2">
+        <span
+          className={`font-display text-[26px] font-extrabold tabular-nums ${
+            value == null ? 'text-[#9AA6BA]' : 'text-navy'
+          }`}
+        >
+          {value ?? '–'}
+        </span>
+        {chip && (
+          <span className={`rounded-full px-2.5 py-0.5 text-[12.5px] font-bold ${chip.className}`}>
+            {chip.label}
+          </span>
+        )}
       </span>
       <span className="text-[12.5px]">{note}</span>
     </div>
+  )
+}
+
+// The Report tab of an interview whose answers are evaluated but whose
+// report is not written yet.
+function NoReport({ isBusy, onWriteReport }) {
+  return (
+    <section className="flex max-w-xl flex-col gap-3.5 rounded-[20px] border border-dashed border-[#A9C8FF] bg-white p-5.5">
+      <h2 className="text-lg font-extrabold text-navy">The report has not been written yet</h2>
+      <p className="text-sm leading-relaxed">
+        The answers are evaluated. Write the report to get the scores, the summary, and the
+        strengths and weaknesses with their sources.
+      </p>
+      <div>
+        <Button
+          disabled={isBusy}
+          title={isBusy ? 'An evaluation is running. Wait for it to finish.' : undefined}
+          onClick={onWriteReport}
+        >
+          Write report
+        </Button>
+      </div>
+    </section>
   )
 }
 
@@ -79,9 +119,7 @@ function SummaryBox({ label, value, note, children }) {
     <div className="flex flex-col gap-1 rounded-2xl border border-line bg-white px-4 py-3.5">
       <span className="text-[13px] font-semibold text-[#6B7890]">{label}</span>
       {value != null && (
-        <span className="font-display text-2xl font-extrabold tabular-nums text-navy">
-          {value}
-        </span>
+        <span className="font-display text-2xl font-extrabold tabular-nums text-navy">{value}</span>
       )}
       {children}
       {note && <span className="text-[12.5px]">{note}</span>}
@@ -109,9 +147,7 @@ function ScoringKey() {
     <section className="flex flex-col gap-3 rounded-[20px] border border-line bg-white p-4.5">
       <h2 className="text-[15px] font-extrabold text-navy">How answers are scored</h2>
       <ul className="flex list-disc flex-col gap-1.5 pl-5 text-[13.5px] leading-snug">
-        <li>
-          Score = average of the criteria that apply. Behavioural answers have no accuracy.
-        </li>
+        <li>Score = average of the criteria that apply. Behavioural answers have no accuracy.</li>
         <li>Not answered or silent = 0.</li>
         <li>Small talk is kept but not scored.</li>
       </ul>
@@ -313,7 +349,8 @@ export default function AssessmentPage() {
   const { sessionId } = useParams()
   const id = Number(sessionId)
   const [searchParams, setSearchParams] = useSearchParams()
-  const tab = TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'qa'
+  // The tab asked for in the address; without one, the page picks (see currentTab).
+  const tab = TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : null
   const [info, setInfo] = useState(null)
   const [assessment, setAssessment] = useState(undefined)
   const [turns, setTurns] = useState(new Map())
@@ -361,7 +398,7 @@ export default function AssessmentPage() {
   }, [tab, openIds])
 
   function showTab(next) {
-    setSearchParams(next === 'qa' ? {} : { tab: next }, { replace: true })
+    setSearchParams({ tab: next }, { replace: true })
   }
 
   function pickQuestion(pairId) {
@@ -406,6 +443,10 @@ export default function AssessmentPage() {
   const isQueued = state.state === 'queued'
   const coverage = assessment?.coverage_map ?? []
   const notExplored = coverage.filter((entry) => entry.status === 'not_explored').length
+  const isReport = hasReport(assessment)
+  // The page opens on the report once there is one, else on the answers.
+  const currentTab = tab ?? (isReport ? 'report' : 'qa')
+  const answersEvaluated = assessment ? qaSummary(assessment.qa_evaluations).evaluated : 0
 
   let body
   if (isRunning) {
@@ -532,28 +573,40 @@ export default function AssessmentPage() {
           <div className="flex flex-wrap gap-3">
             <ScoreTile
               label="CV score"
-              value={roundScore(assessment.screening_score)}
+              value={oneDecimal(assessment.cv_score ?? assessment.screening_score)}
               note="from screening"
             />
-            <ScoreTile label="Interview" value={null} note="after the report" />
-            <ScoreTile label="Overall" value={null} note="40% CV · 60% interview" />
+            <ScoreTile
+              label="Interview"
+              value={oneDecimal(assessment.interview_score)}
+              note={
+                !isReport
+                  ? 'after the report'
+                  : assessment.interview_score == null
+                    ? 'no job questions'
+                    : `${answersEvaluated} ${answersEvaluated === 1 ? 'answer' : 'answers'}`
+              }
+            />
+            <ScoreTile
+              label="Overall"
+              value={oneDecimal(assessment.overall_score)}
+              chip={SUITABILITY[assessment.suitability]}
+              note="40% CV · 60% interview"
+            />
           </div>
 
-          <div role="tablist" aria-label="Assessment" className="flex flex-wrap gap-1 border-b border-line">
-            <button
-              type="button"
-              role="tab"
-              aria-selected="false"
-              disabled
-              title="Comes with the review step"
-              className="-mb-px inline-flex min-h-11 cursor-not-allowed items-center gap-2 border-b-2 border-transparent px-4 text-[15px] font-semibold text-[#A8B3C6]"
-            >
-              Report
-              <span className="rounded-full bg-[#F4F6FA] px-2 py-0.5 text-xs">
-                after review step
-              </span>
-            </button>
+          <div
+            role="tablist"
+            aria-label="Assessment"
+            className="flex flex-wrap gap-1 border-b border-line"
+          >
             {[
+              [
+                'report',
+                'Report',
+                REPORT_BADGES[assessment.status]?.label ?? null,
+                REPORT_BADGES[assessment.status]?.className,
+              ],
               ['qa', 'Q&A analysis', assessment.qa_evaluations.length, 'bg-tint text-brand-dark'],
               [
                 'coverage',
@@ -566,10 +619,10 @@ export default function AssessmentPage() {
                 key={key}
                 type="button"
                 role="tab"
-                aria-selected={tab === key}
+                aria-selected={currentTab === key}
                 onClick={() => showTab(key)}
                 className={`-mb-px inline-flex min-h-11 items-center gap-2 border-b-2 px-4 text-[15px] font-semibold ${
-                  tab === key
+                  currentTab === key
                     ? 'border-brand text-navy'
                     : 'border-transparent text-body hover:text-navy'
                 }`}
@@ -584,7 +637,20 @@ export default function AssessmentPage() {
             ))}
           </div>
 
-          {tab === 'qa' ? (
+          {currentTab === 'report' ? (
+            isReport ? (
+              <ReportView
+                assessment={assessment}
+                candidateName={interview.candidate_name}
+                onChanged={(updated) => setAssessment(updated)}
+              />
+            ) : (
+              <NoReport
+                isBusy={evaluation.isRunning}
+                onWriteReport={() => evaluation.start(id, { reportOnly: true })}
+              />
+            )
+          ) : currentTab === 'qa' ? (
             <QaTab
               info={info}
               assessment={assessment}
@@ -594,7 +660,10 @@ export default function AssessmentPage() {
               kind={kind}
               setKind={setKind}
               onAdded={(suggestions) =>
-                setAssessment((current) => ({ ...current, question_suggestions: suggestions }))
+                setAssessment((current) => ({
+                  ...current,
+                  question_suggestions: suggestions,
+                }))
               }
             />
           ) : (

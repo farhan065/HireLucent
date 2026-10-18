@@ -294,3 +294,23 @@ export function unrankedReason(row) {
 export function draftsToReview(interviews) {
   return (interviews ?? []).filter((item) => item.assessment_status === 'draft').length
 }
+
+// --- Reviewing the report --------------------------------------------------
+
+// action: "approve", "request_changes" (with note) or "edit" (summary and/or
+// remove). Returns the assessment as it is afterwards.
+export function reviewReport(sessionId, body) {
+  return apiRequest(`/interviews/${sessionId}/assessment/review`, { method: 'POST', body })
+}
+
+// Approves every draft report of the job: { approved, skipped }.
+export function approveAllDrafts(jobId) {
+  return apiRequest(`/jobs/${jobId}/assessments/approve`, { method: 'POST' })
+}
+
+export const MAX_SUMMARY_CHARS = 1500
+export const MAX_NOTE_CHARS = 1000
+
+export function hasReport(assessment) {
+  return assessment?.status === 'draft' || assessment?.status === 'approved'
+}

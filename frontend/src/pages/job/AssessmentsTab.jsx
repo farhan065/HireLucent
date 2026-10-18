@@ -1,12 +1,14 @@
-import { CircleAlert, Sparkles } from 'lucide-react'
+import { CircleAlert, CircleCheck, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
+import ConfirmDialog from '../../components/ConfirmDialog.jsx'
 import RankedList from '../../components/assessment/RankedList.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import {
   RANK_FILTERS,
   SUITABILITY,
+  approveAllDrafts,
   evaluationOf,
   matchesRankFilter,
   rankingSummary,
@@ -73,11 +75,36 @@ function Empty({ title, children, action }) {
 // interview); each row opens to show why it has its score. Draft reports are ranked
 // too and marked; interviews without an overall score follow, unranked.
 export default function AssessmentsTab() {
-  const { job, listVersion, evaluation } = useOutletContext()
+  const { job, listVersion, evaluation, onChanged } = useOutletContext()
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('all')
   const [openId, setOpenId] = useState(null)
+  const [isApproving, setIsApproving] = useState(false)
+  const [approveBusy, setApproveBusy] = useState(false)
+  const [approveError, setApproveError] = useState('')
+  const [approvedNotice, setApprovedNotice] = useState('')
+
+  // Every draft report waiting for review is approved at once.
+  async function approveAll() {
+    setApproveBusy(true)
+    setApproveError('')
+    try {
+      const result = await approveAllDrafts(job.id)
+      setIsApproving(false)
+      setApprovedNotice(
+        `${result.approved} ${result.approved === 1 ? 'report' : 'reports'} approved.` +
+          (result.skipped
+            ? ` ${result.skipped} being rewritten ${result.skipped === 1 ? 'was' : 'were'} left as drafts.`
+            : ''),
+      )
+      onChanged()
+    } catch (error) {
+      setApproveError(error.message)
+    } finally {
+      setApproveBusy(false)
+    }
+  }
 
   // Loaded again after each evaluation, and as Evaluate all moves on to the
   // next interview, so finished reports show up during the run.
@@ -95,6 +122,8 @@ export default function AssessmentsTab() {
       isCurrent = false
     }
   }, [job.id, listVersion, current])
+
+  const summary = rankingSummary(rows ?? [])
 
   if (error) {
     return (
@@ -132,7 +161,6 @@ export default function AssessmentsTab() {
 
   const ranked = rows.filter((row) => row.rank != null)
   const unranked = rows.filter((row) => row.rank == null)
-  const summary = rankingSummary(rows)
   const shownRanked = ranked.filter((row) => matchesRankFilter(row, filter))
   const shownUnranked = filter === 'all' ? unranked : []
   const counts = { all: rows.length, ...summary }
@@ -147,8 +175,38 @@ export default function AssessmentsTab() {
             decision stays with you.
           </p>
         </div>
-        {evaluateAll}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {summary.review > 0 && (
+            <Button
+              variant="outline"
+              disabled={evaluation.isRunning}
+              title={
+                evaluation.isRunning
+                  ? 'An evaluation is running. Wait for it to finish.'
+                  : undefined
+              }
+              onClick={() => {
+                setApproveError('')
+                setIsApproving(true)
+              }}
+            >
+              Approve all drafts
+              <span className="rounded-full bg-tint px-2 py-0.5 text-xs">{summary.review}</span>
+            </Button>
+          )}
+          {evaluateAll}
+        </div>
       </div>
+
+      {approvedNotice && (
+        <p
+          role="status"
+          className="flex items-start gap-2.5 rounded-2xl bg-success-soft px-4 py-3 text-sm text-[#0B5C41]"
+        >
+          <CircleCheck className="mt-0.5 size-4.5 shrink-0" aria-hidden="true" />
+          {approvedNotice}
+        </p>
+      )}
 
       {evaluation.error && (
         <p role="alert" className="text-sm font-semibold text-danger">
@@ -213,6 +271,24 @@ export default function AssessmentsTab() {
       )}
       {ranked.length > 0 && shownRanked.length === 0 && shownUnranked.length === 0 && (
         <p className="text-sm">No candidate matches this filter.</p>
+      )}
+
+      {isApproving && (
+        <ConfirmDialog
+          title={`Approve ${summary.review} draft ${summary.review === 1 ? 'report' : 'reports'}?`}
+          confirmLabel="Approve all"
+          confirmVariant="primary"
+          busyLabel="Approving…"
+          isBusy={approveBusy}
+          error={approveError}
+          onConfirm={approveAll}
+          onCancel={() => setIsApproving(false)}
+        >
+          <p>
+            Each report becomes final and its candidate is marked assessed, the same as approving
+            them one by one. Open a report first if you want to check or change it.
+          </p>
+        </ConfirmDialog>
       )}
     </div>
   )
