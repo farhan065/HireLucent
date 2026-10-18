@@ -1,6 +1,6 @@
 import { ArrowLeft, ChevronDown, ChevronUp, CircleAlert, Download, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useParams, useSearchParams } from 'react-router'
 import Button from '../components/Button.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
@@ -82,9 +82,13 @@ function Legend({ color, children }) {
 
 // The transcript of one interview, read-only, for the interviewer: search
 // with every match marked, a timeline of the whole interview and a text
-// file to download. Opened from a Completed row of the Interviews tab.
+// file to download. Opened from a Completed row of the Interviews tab, or
+// from an answer on the assessment page with ?turn=<id>, which opens it at
+// that turn.
 export default function TranscriptPage() {
   const { sessionId } = useParams()
+  const [searchParams] = useSearchParams()
+  const focusTurnId = Number(searchParams.get('turn')) || null
   const [info, setInfo] = useState(null)
   const [turns, setTurns] = useState(null)
   const [error, setError] = useState('')
@@ -147,6 +151,14 @@ export default function TranscriptPage() {
         : row.offsetTop - 8
     box.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
   }, [])
+
+  // Opened at a turn: it is brought to the middle of the list once.
+  const hasFocused = useRef(false)
+  useEffect(() => {
+    if (!focusTurnId || !showsTurns || hasFocused.current) return
+    hasFocused.current = true
+    scrollToTurn(focusTurnId, 'center')
+  }, [focusTurnId, showsTurns, scrollToTurn])
 
   // Each new current match is brought to the middle of the list.
   useEffect(() => {
@@ -393,6 +405,7 @@ export default function TranscriptPage() {
                     candidateName={interview.candidate_name}
                     query={isSearching ? query : ''}
                     currentMatch={currentMatch}
+                    focusTurnId={focusTurnId}
                   />
                 </div>
               </>

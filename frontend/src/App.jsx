@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Route, Routes } from 'react-router'
 import RequireInterviewer from './auth/RequireInterviewer.jsx'
 import AppLayout from './layouts/AppLayout.jsx'
+import AssessmentPage from './pages/AssessmentPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import ApplicationsTab from './pages/job/ApplicationsTab.jsx'
 import InterviewsTab from './pages/job/InterviewsTab.jsx'
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="interviews" element={<InterviewsTab />} />
           </Route>
           <Route path="interviews/:sessionId/transcript" element={<TranscriptPage />} />
+          <Route path="interviews/:sessionId/assessment" element={<AssessmentPage />} />
           <Route
             path="assistant/:threadId?"
             element={
