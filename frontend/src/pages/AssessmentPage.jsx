@@ -334,8 +334,8 @@ function CoverageTab({ coverage, onPickQuestion }) {
       </section>
 
       <p className="text-[13px] leading-relaxed">
-        A requirement that was not explored does not lower any score. It is listed under Areas to
-        verify in the report, so it can be checked in a follow-up.
+        A requirement that was not explored does not lower any score. It is listed under Evidence
+        gaps in the report, with what the CV says about it.
       </p>
     </div>
   )

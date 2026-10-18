@@ -196,7 +196,7 @@ def report_html(context: dict) -> str:
 <p class="small">Requirements the interview never explored.</p>
 {_points(context["gaps"], "None.")}
 <h2>Areas to verify ({len(context["areas_to_verify"] or [])})</h2>
-<p class="small">To check in a follow-up.</p>
+<p class="small">To double-check before deciding.</p>
 {_points(context["areas_to_verify"], "None.")}
 <p class="small" style="margin-top: 10pt">Sources: Q = interview question with its time in
 the interview and the candidate's words; R = job requirement with what CV screening found.

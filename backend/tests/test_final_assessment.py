@@ -212,16 +212,36 @@ def test_areas_to_verify_point_to_their_sources() -> None:
     areas = findings.areas_to_verify(PAIRS, COVERAGE)
     texts = [area["text"] for area in areas]
 
-    assert texts[0].startswith("Ask about R3 Docker: the CV claims it")
-    assert any("“How do you test an endpoint?” was not answered" in text for text in texts)
-    assert any(
-        "“What is our leave policy?”" in text and "not checked" in text for text in texts
+    assert texts == [
+        "Q3 “How do you test an endpoint?” was not answered (requirement R2).",
+        "Q4 “What is our leave policy?”: the accuracy was not checked, because no "
+        "company reference covers it.",
+    ]
+    unanswered = areas[0]["sources"][0]
+    assert unanswered["turn_id"] == 3 and unanswered["quote"] is None
+    assert areas[1]["sources"][0]["quote"] == "twenty days"
+
+
+def test_a_requirement_never_explored_is_only_an_evidence_gap() -> None:
+    gaps = findings.evidence_gaps(COVERAGE)
+    areas = findings.areas_to_verify(PAIRS, COVERAGE)
+
+    assert gaps[0]["text"] == (
+        "R3 Docker (must-have) was not explored in the interview; the CV meets it."
     )
-    unanswered = next(area for area in areas if "not answered" in area["text"])
-    source = unanswered["sources"][0]
-    assert source["turn_id"] == 3 and source["quote"] is None
-    company = next(area for area in areas if "leave policy" in area["text"])
-    assert company["sources"][0]["quote"] == "twenty days"
+    assert gaps[1]["text"].endswith("the CV was not screened for it.")
+    assert not any("R3" in area["text"] for area in areas)
+
+
+def test_a_requirement_text_keeps_one_full_stop() -> None:
+    entry = {**_entry("R3", "not_explored", "partially_met"), "text": "Docker and Kubernetes."}
+
+    [gap] = findings.evidence_gaps([entry])
+
+    assert gap["text"] == (
+        "R3 Docker and Kubernetes (must-have) was not explored in the interview; "
+        "the CV partly meets it."
+    )
 
 
 def test_a_poor_answer_behind_a_good_average_is_listed() -> None:
@@ -231,13 +251,32 @@ def test_a_poor_answer_behind_a_good_average_is_listed() -> None:
         "met",
         average=65,
         mixed=True,
+        question_scores=[{"pair_id": "Q2", "score": 86}, {"pair_id": "Q5", "score": 30}],
+    )
+
+    areas = findings.areas_to_verify(PAIRS, [entry])
+
+    poor = next(area for area in areas if area["text"].startswith("Q5"))
+    assert "scored below 40, though R1 looks covered on average" in poor["text"]
+    assert poor["sources"][0]["pair_id"] == "Q5"
+
+
+def test_a_question_is_listed_once_for_its_main_reason() -> None:
+    # Q3 was not answered and is also the poor answer behind R2.
+    entry = _entry(
+        "R2",
+        "covered",
+        "unmet",
+        average=60,
+        mixed=True,
         question_scores=[{"pair_id": "Q2", "score": 86}, {"pair_id": "Q3", "score": 0}],
     )
 
     areas = findings.areas_to_verify(PAIRS, [entry])
 
-    assert areas[0]["text"].startswith("Probe R1 FastAPI further")
-    assert areas[0]["sources"][0]["pair_id"] == "Q3"
+    assert [area["text"] for area in areas if "Q3" in area["text"]] == [
+        "Q3 “How do you test an endpoint?” was not answered (requirement R2)."
+    ]
 
 
 def test_an_interview_without_job_questions_says_so() -> None:

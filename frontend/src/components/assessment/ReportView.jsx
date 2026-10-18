@@ -447,7 +447,7 @@ export default function ReportView({ assessment, candidateName, fileName, onChan
             />
             <Findings
               title="Areas to verify"
-              note="To check in a follow-up."
+              note="To double-check before deciding."
               claims={assessment.areas_to_verify ?? []}
               sessionId={sessionId}
             />
