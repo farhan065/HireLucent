@@ -73,8 +73,54 @@ class QAPair(BaseModel):
     follow_up_of: str | None = Field(
         default=None, description="The pair this question follows up or clarifies."
     )
+    requirement_ids: list[str] = Field(
+        default_factory=list, description="The job requirements the question explores."
+    )
     evaluation: AnswerEvaluation | None = Field(
         default=None, description="Empty for small talk, which is not evaluated."
+    )
+
+
+class QuestionScore(BaseModel):
+    pair_id: str
+    score: float
+
+
+class CvResult(BaseModel):
+    """What CV screening found for the requirement."""
+
+    status: Literal["met", "partially_met", "unmet"]
+    evidence: str = ""
+
+
+class CoverageEntry(BaseModel):
+    """How the interview explored one job requirement."""
+
+    requirement_id: str
+    text: str
+    priority: Literal["must_have", "preferred"]
+    status: Literal["covered", "weak", "not_explored"] = Field(
+        description="covered: average answer score 60 or more. weak: explored, but "
+        "below 60. not_explored: no question touched it."
+    )
+    average: float | None = Field(description="Average score of the answers that explored it.")
+    question_scores: list[QuestionScore]
+    mixed: bool = Field(description="Covered, but one of its answers scored below 40.")
+    cv: CvResult | None = Field(description="Empty when the CV was not matched to it.")
+
+
+class QuestionSuggestion(BaseModel):
+    """A question from the interview offered for the question bank."""
+
+    pair_id: str
+    question: str
+    kind: Literal["technical", "behavioural", "company"]
+    added: bool
+
+
+class AddQuestionsRequest(BaseModel):
+    pair_ids: list[str] = Field(
+        min_length=1, max_length=100, description="The suggestions the interviewer ticked."
     )
 
 
@@ -88,5 +134,9 @@ class AssessmentOut(BaseModel):
     candidate_id: int
     status: Literal["analysed", "draft", "approved"]
     qa_evaluations: list[QAPair]
+    coverage_map: list[CoverageEntry]
+    question_suggestions: list[QuestionSuggestion] | None = Field(
+        default=None, description="Empty when the question bank could not be searched."
+    )
     created_at: datetime
     updated_at: datetime

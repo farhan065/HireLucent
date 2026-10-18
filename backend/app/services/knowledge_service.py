@@ -95,6 +95,55 @@ def ingest_document(document_id: int, extension: str, content: bytes) -> None:
         )
 
 
+def interview_questions_name(job_code: str) -> str:
+    """The Knowledge Base document that holds a job's questions added from
+    its interviews."""
+    return f"Interview questions - {job_code}.txt"
+
+
+def add_interview_questions(
+    db: Session, job_code: str, role: str, questions: list[str], added_by: int
+) -> Document:
+    """Add questions from an interview to the question bank.
+
+    They go into one question bank document per job, created on first use
+    and tagged with the job title as its role, so they are suggested in
+    later interviews for the same role. The document is listed on the
+    Knowledge Base page like an upload, and deleting it removes them.
+    Raises ServiceUnavailableError when the embedding model cannot be reached.
+    """
+    filename = interview_questions_name(job_code)
+    document = db.scalar(
+        select(Document).where(
+            Document.filename == filename, Document.doc_type == DocumentType.QUESTIONS
+        )
+    )
+    if document is None:
+        document = Document(
+            filename=filename,
+            doc_type=DocumentType.QUESTIONS,
+            tags=[role],
+            status=DocumentStatus.READY,
+            chunk_count=0,
+            uploaded_by=added_by,
+        )
+        db.add(document)
+        db.flush()
+    store.add_chunks(
+        store.QUESTION_BANK,
+        document.id,
+        questions,
+        {"source": document.filename, "tags": ", ".join(document.tags)},
+        first_index=document.chunk_count,
+    )
+    document.chunk_count += len(questions)
+    db.commit()
+    log_event(
+        logger, "interview_questions_added", document_id=document.id, count=len(questions)
+    )
+    return document
+
+
 def list_documents(db: Session) -> list[Document]:
     return list(db.scalars(select(Document).order_by(Document.created_at.desc())))
 

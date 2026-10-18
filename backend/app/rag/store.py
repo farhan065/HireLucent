@@ -42,13 +42,21 @@ def get_collection(name: str) -> Collection:
 
 
 def add_chunks(
-    collection_name: str, document_id: int, chunks: list[str], metadata: dict[str, Any]
+    collection_name: str,
+    document_id: int,
+    chunks: list[str],
+    metadata: dict[str, Any],
+    first_index: int = 0,
 ) -> None:
-    """Embed the chunks and store them, tagged with the document they came from."""
+    """Embed the chunks and store them, tagged with the document they came from.
+
+    first_index numbers the chunks after the ones the document already has,
+    when more are added to it later.
+    """
     if not chunks:
         return
     get_collection(collection_name).add(
-        ids=[f"doc-{document_id}-{index}" for index in range(len(chunks))],
+        ids=[f"doc-{document_id}-{first_index + index}" for index in range(len(chunks))],
         documents=chunks,
         embeddings=ai_client.embed_texts(chunks),
         metadatas=[{**metadata, "document_id": document_id} for _ in chunks],

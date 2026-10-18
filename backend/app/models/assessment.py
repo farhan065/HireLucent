@@ -29,6 +29,9 @@ class Assessment(TimestampMixin, Base):
     # Written by the Q&A Analysis graph.
     qa_evaluations: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     coverage_map: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    # New questions offered for the question bank, each marked when the
+    # interviewer adds it. None when the bank could not be searched.
+    question_suggestions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
 
     # Written by the Final Assessment graph, so empty until then.
     cv_score: Mapped[float | None] = mapped_column(Float)

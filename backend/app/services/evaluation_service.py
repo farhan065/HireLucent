@@ -22,7 +22,7 @@ from app.graphs.base import thread_config
 from app.graphs.qa_analysis.graph import answers_to_judge
 from app.models import Assessment, InterviewSession, Job, Task, TranscriptTurn
 from app.models.enums import SessionStatus
-from app.services import session_service, task_service
+from app.services import knowledge_service, session_service, task_service
 from app.services.task_service import ACTIVE, TaskProgress
 
 logger = get_logger(__name__)
@@ -33,6 +33,11 @@ NOT_COMPLETED = "Only a completed interview can be evaluated."
 NO_TRANSCRIPT = "This interview has no transcript to evaluate."
 NOTHING_TO_EVALUATE = "There are no new completed interviews to evaluate."
 NOT_EVALUATED = "This interview has not been evaluated yet."
+NO_SUGGESTIONS = (
+    "The question bank could not be searched when this interview was evaluated. "
+    "Evaluate it again to get suggestions."
+)
+UNKNOWN_SUGGESTION = "Some of the chosen questions are not among the suggestions."
 
 
 class EvaluationFailed(AppError):
@@ -180,3 +185,35 @@ def get_assessment(db: Session, session_id: int) -> Assessment:
     if assessment is None:
         raise NotFoundError(NOT_EVALUATED)
     return assessment
+
+
+def add_suggested_questions(
+    db: Session, session_id: int, pair_ids: list[str], user_id: int
+) -> list[dict]:
+    """Add the suggested questions the interviewer ticked to the question
+    bank, and mark them as added. A question added before is not added
+    again. Returns the updated suggestions."""
+    assessment = get_assessment(db, session_id)
+    if assessment.question_suggestions is None:
+        raise ConflictError(NO_SUGGESTIONS)
+    by_pair = {item["pair_id"]: item for item in assessment.question_suggestions}
+    if any(pair_id not in by_pair for pair_id in pair_ids):
+        raise AppError(UNKNOWN_SUGGESTION)
+
+    chosen = [by_pair[pair_id] for pair_id in dict.fromkeys(pair_ids)]
+    new = [item for item in chosen if not item["added"]]
+    if new:
+        session = session_service.get_session(db, session_id)
+        job = db.get(Job, session.job_id)
+        knowledge_service.add_interview_questions(
+            db, job.job_code, job.title, [item["question"] for item in new], user_id
+        )
+        added = {item["pair_id"] for item in new}
+        # A new list, so the change to the JSON column is saved.
+        assessment.question_suggestions = [
+            {**item, "added": item["added"] or item["pair_id"] in added}
+            for item in assessment.question_suggestions
+        ]
+        db.commit()
+    log_event(logger, "suggested_questions_added", session_id=session_id, count=len(new))
+    return assessment.question_suggestions

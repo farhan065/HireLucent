@@ -9,7 +9,7 @@ from app.api.deps import Principal, require_interviewer
 from app.db.session import get_db
 from app.graphs.qa_analysis.graph import get_qa_analysis_graph
 from app.models import Assessment, Task
-from app.schemas.assessment import AssessmentOut
+from app.schemas.assessment import AddQuestionsRequest, AssessmentOut, QuestionSuggestion
 from app.schemas.error import ErrorResponse
 from app.schemas.task import TaskResponse
 from app.services import evaluation_service
@@ -87,5 +87,33 @@ def read_assessment(session_id: int, db: Session = Depends(get_db)) -> Assessmen
     """The question-answer pairs found in the transcript, each pointing to its
     transcript turns, with each answer's evaluation: four criteria with
     reasons, a score worked out by rule, a justification and a quote from the
-    answer. Small talk is kept but marked, and is not evaluated."""
+    answer. Small talk is kept but marked, and is not evaluated. Also the
+    coverage of each job requirement, next to its CV screening result, and
+    the new questions offered for the question bank."""
     return evaluation_service.get_assessment(db, session_id)
+
+
+@session_router.post(
+    "/{session_id}/assessment/questions",
+    response_model=list[QuestionSuggestion],
+    summary="Add ticked questions to the question bank",
+    responses={
+        400: {"model": ErrorResponse, "description": "A question is not a suggestion"},
+        404: {"model": ErrorResponse, "description": "Not found or not evaluated"},
+        409: {"model": ErrorResponse, "description": "No suggestions were made"},
+        503: {"model": ErrorResponse, "description": "The embedding model is unavailable"},
+    },
+)
+def add_questions(
+    session_id: int,
+    payload: AddQuestionsRequest,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Adds the chosen suggestions to the question bank, in one Knowledge Base
+    document per job ("Interview questions - <job code>.txt") with the job
+    title as its role. Questions added before are not added again. Returns
+    the suggestions, each marked when added."""
+    return evaluation_service.add_suggested_questions(
+        db, session_id, payload.pair_ids, principal.subject_id
+    )
