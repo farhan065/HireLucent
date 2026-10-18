@@ -50,3 +50,9 @@ class Assessment(TimestampMixin, Base):
     candidate: Mapped["Candidate"] = relationship(  # noqa: F821
         back_populates="assessments"
     )
+
+    @property
+    def screening_score(self) -> float | None:
+        """The candidate's final score from CV screening."""
+        scores = self.candidate.scores if self.candidate else None
+        return scores["final_score"] if scores else None

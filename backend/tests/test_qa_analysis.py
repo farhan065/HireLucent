@@ -973,9 +973,13 @@ class FakeProgress:
 
     def __init__(self) -> None:
         self.updates: list[tuple[int, int, str | None]] = []
+        self.notes: list[dict] = []
 
     def update(self, current: int, total: int, message: str | None = None) -> None:
         self.updates.append((current, total, message))
+
+    def note(self, details: dict) -> None:
+        self.notes.append({**details, "failures": list(details["failures"])})
 
 
 class FakeGraph:
@@ -1003,8 +1007,19 @@ def test_one_failed_interview_does_not_stop_the_others() -> None:
     summary = evaluation_service.run_evaluation(graph, [1, 2, 3], progress)
 
     assert graph.seen == [1, 2, 3]
-    assert summary == {"total": 3, "evaluated": 2, "failed": 1}
+    assert summary["total"] == 3 and summary["evaluated"] == 2 and summary["failed"] == 1
+    assert summary["failures"] == [{"session_id": 2, "reason": qa.NO_PAIRS}]
     assert progress.updates[-1] == (3, 3, "Evaluated 2 of 3 interviews")
+
+
+def test_the_task_keeps_which_interview_it_is_on() -> None:
+    progress = FakeProgress()
+
+    evaluation_service.run_evaluation(FakeGraph({1: qa.NO_PAIRS}), [1, 2], progress)
+
+    assert [note["current"] for note in progress.notes] == [1, 2, None]
+    assert progress.notes[1]["failures"] == [{"session_id": 1, "reason": qa.NO_PAIRS}]
+    assert all(note["session_ids"] == [1, 2] for note in progress.notes)
 
 
 def test_progress_follows_the_answers_of_a_single_interview() -> None:
@@ -1304,3 +1319,54 @@ def test_candidate_cannot_evaluate_or_read_assessments(
     response = getattr(client, method)(path, headers=_auth(UserRole.CANDIDATE))
 
     assert response.status_code == 403
+
+
+# --- The job's evaluation status and what the lists show ---------------------
+
+
+def test_an_interview_shows_whether_it_has_been_evaluated() -> None:
+    session = InterviewSession(id=9, job_id=2, candidate_id=5, status=SessionStatus.COMPLETED)
+
+    assert session.assessment_status is None
+    session.assessment = Assessment(status="analysed")
+    assert session.assessment_status == "analysed"
+
+
+def test_the_screening_score_comes_from_the_candidates_final_score() -> None:
+    candidate = SimpleNamespace(scores={"final_score": 83.0})
+
+    assert Assessment(candidate=None).screening_score is None
+    assessment = Assessment()
+    assessment.__dict__["candidate"] = candidate
+    assert assessment.screening_score == 83.0
+
+
+def test_an_evaluation_does_not_stop_a_fetch_or_a_screening() -> None:
+    queries: list[str] = []
+
+    class RecordingDB:
+        def scalar(self, query):
+            queries.append(str(query.compile(compile_kwargs={"literal_binds": True})))
+            return None
+
+    from app.services import task_service
+
+    task_service.ensure_idle(RecordingDB(), 2, exclude=(task_service.EVALUATION,))
+
+    assert "interview_evaluation" in queries[0] and "NOT IN" in queries[0]
+
+
+def test_interviewer_reads_the_jobs_evaluation_status(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        evaluation_service,
+        "evaluation_activity",
+        lambda db, job_id: {"running": _task(), "last": None, "waiting": 2},
+    )
+
+    response = client.get("/jobs/2/evaluation", headers=_auth(UserRole.INTERVIEWER))
+    refused = client.get("/jobs/2/evaluation", headers=_auth(UserRole.CANDIDATE))
+
+    assert response.status_code == 200 and response.json()["waiting"] == 2
+    assert refused.status_code == 403

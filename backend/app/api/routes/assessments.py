@@ -9,7 +9,12 @@ from app.api.deps import Principal, require_interviewer
 from app.db.session import get_db
 from app.graphs.qa_analysis.graph import get_qa_analysis_graph
 from app.models import Assessment, Task
-from app.schemas.assessment import AddQuestionsRequest, AssessmentOut, QuestionSuggestion
+from app.schemas.assessment import (
+    AddQuestionsRequest,
+    AssessmentOut,
+    EvaluationActivity,
+    QuestionSuggestion,
+)
 from app.schemas.error import ErrorResponse
 from app.schemas.task import TaskResponse
 from app.services import evaluation_service
@@ -75,6 +80,20 @@ def evaluate_job_interviews(
     return evaluation_service.start_job_evaluation(
         db, background_tasks, graph, job_id, principal.subject_id
     )
+
+
+@job_router.get(
+    "/evaluation",
+    response_model=EvaluationActivity,
+    summary="See the job's interview evaluations",
+    responses={404: {"model": ErrorResponse, "description": "Job not found"}},
+)
+def read_evaluation(job_id: int, db: Session = Depends(get_db)) -> dict:
+    """The evaluation running now, with the interviews it covers and the one
+    it is on, the last finished one with any interviews that failed, and how
+    many completed interviews have not been evaluated yet. The screens ask
+    every few seconds while one runs."""
+    return evaluation_service.evaluation_activity(db, job_id)
 
 
 @session_router.get(

@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.task import TaskResponse
+
 
 class Criterion(BaseModel):
     score: int = Field(ge=0, le=100)
@@ -133,6 +135,9 @@ class AssessmentOut(BaseModel):
     session_id: int
     candidate_id: int
     status: Literal["analysed", "draft", "approved"]
+    screening_score: float | None = Field(
+        default=None, description="The candidate's final score from CV screening."
+    )
     qa_evaluations: list[QAPair]
     coverage_map: list[CoverageEntry]
     question_suggestions: list[QuestionSuggestion] | None = Field(
@@ -140,3 +145,14 @@ class AssessmentOut(BaseModel):
     )
     created_at: datetime
     updated_at: datetime
+
+
+class EvaluationActivity(BaseModel):
+    """A job's interview evaluations: the one running, the last finished one
+    and how many completed interviews are waiting. While a task runs, its
+    result holds session_ids, current and failures (each with session_id
+    and reason)."""
+
+    running: TaskResponse | None
+    last: TaskResponse | None
+    waiting: int = Field(description="Completed interviews not evaluated yet.")

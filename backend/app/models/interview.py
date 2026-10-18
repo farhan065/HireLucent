@@ -9,6 +9,7 @@ from app.models.base import Base, TimestampMixin
 from app.models.enums import SessionStatus
 
 if TYPE_CHECKING:
+    from app.models.assessment import Assessment
     from app.models.candidate import Candidate
 
 # The candidate's waiting page checks in every few seconds. Without a check
@@ -56,6 +57,8 @@ class InterviewSession(TimestampMixin, Base):
     candidate: Mapped["Candidate"] = relationship(  
         back_populates="sessions"
     )
+    # The interview's assessment, once it has been evaluated.
+    assessment: Mapped["Assessment | None"] = relationship(viewonly=True, uselist=False)
     turns: Mapped[list["TranscriptTurn"]] = relationship(
         back_populates="session",
         cascade="all, delete-orphan",
@@ -67,6 +70,11 @@ class InterviewSession(TimestampMixin, Base):
     def candidate_name(self) -> str:
         """The candidate's name, for the interviewer's list of interviews."""
         return self.candidate.full_name
+
+    @property
+    def assessment_status(self) -> str | None:
+        """analysed, draft or approved; None until the interview is evaluated."""
+        return self.assessment.status if self.assessment else None
 
     @property
     def candidate_waiting(self) -> bool:

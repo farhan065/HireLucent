@@ -84,7 +84,7 @@ def read_job_activity(job_id: int, db: Session = Depends(get_db)) -> JobActivity
     """Lets the screen show progress again after a page reload."""
     job_service.get_job(db, job_id)
     return JobActivity(
-        running=task_service.running_task(db, job_id),
+        running=task_service.running_task(db, job_id, exclude=(task_service.EVALUATION,)),
         last_intake=task_service.last_finished(db, job_id, intake_service.TASK_KIND),
         last_screening=task_service.last_finished(
             db, job_id, screening_service.TASK_KIND

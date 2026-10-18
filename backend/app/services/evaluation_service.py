@@ -7,6 +7,8 @@ answers and evaluates each answer.
 
 Only one evaluation runs at a time, because the AI's per-minute limit is
 shared. An evaluation does not block fetching or screening CVs for the job.
+While it runs, its task keeps which interviews it covers, which one it is on
+and which failed, so the screens can show this after a page reload.
 """
 
 from fastapi import BackgroundTasks
@@ -27,7 +29,7 @@ from app.services.task_service import ACTIVE, TaskProgress
 
 logger = get_logger(__name__)
 
-TASK_KIND = "interview_evaluation"
+TASK_KIND = task_service.EVALUATION
 BUSY = "An evaluation is already running. Wait for it to finish."
 NOT_COMPLETED = "Only a completed interview can be evaluated."
 NO_TRANSCRIPT = "This interview has no transcript to evaluate."
@@ -76,6 +78,7 @@ def start_evaluation(
         TASK_KIND,
         user_id,
         lambda progress: run_evaluation(graph, [session_id], progress),
+        job_id=session.job_id,
     )
 
 
@@ -118,6 +121,7 @@ def start_job_evaluation(
         TASK_KIND,
         user_id,
         lambda progress: run_evaluation(graph, session_ids, progress),
+        job_id=job_id,
     )
 
 
@@ -135,18 +139,29 @@ def run_evaluation(
     total = len(session_ids)
     evaluated, failures = 0, []
     for done, session_id in enumerate(session_ids):
+        progress.note(
+            {"session_ids": session_ids, "current": session_id, "failures": failures}
+        )
         result = evaluate_one(graph, session_id, done, total, progress)
         if result.get("failure"):
-            failures.append(result["failure"])
+            failures.append({"session_id": session_id, "reason": result["failure"]})
         else:
             evaluated += 1
     progress.update(total, total, f"Evaluated {evaluated} of {total} interviews")
+    progress.note({"session_ids": session_ids, "current": None, "failures": failures})
 
-    summary = {"total": total, "evaluated": evaluated, "failed": len(failures)}
-    log_event(logger, "evaluation_finished", **summary)
+    log_event(
+        logger, "evaluation_finished", total=total, evaluated=evaluated, failed=len(failures)
+    )
     if not evaluated:
-        raise EvaluationFailed(failures[-1])
-    return summary
+        raise EvaluationFailed(failures[-1]["reason"])
+    return {
+        "total": total,
+        "evaluated": evaluated,
+        "failed": len(failures),
+        "session_ids": session_ids,
+        "failures": failures,
+    }
 
 
 def evaluate_one(
@@ -177,6 +192,23 @@ def evaluate_one(
             else:
                 progress.update(done, total, message)
     return graph.get_state(config).values
+
+
+def evaluation_activity(db: Session, job_id: int) -> dict:
+    """The job's evaluation that is running, its last finished one and how
+    many completed interviews have not been evaluated yet."""
+    if db.get(Job, job_id) is None:
+        raise NotFoundError("This job does not exist.")
+    running = db.scalar(
+        select(Task)
+        .where(Task.job_id == job_id, Task.kind == TASK_KIND, Task.status.in_(ACTIVE))
+        .limit(1)
+    )
+    return {
+        "running": running,
+        "last": task_service.last_finished(db, job_id, TASK_KIND),
+        "waiting": len(sessions_to_evaluate(db, job_id)),
+    }
 
 
 def get_assessment(db: Session, session_id: int) -> Assessment:

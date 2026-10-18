@@ -27,10 +27,13 @@ logger = get_logger(__name__)
 
 GENERIC_FAILURE_MESSAGE = "The operation could not be completed. Please try again."
 BUSY_MESSAGE = (
-    "A fetch or a screening is already running for this job. Wait for it to finish."
+    "A fetch, a screening or an evaluation is running for this job. Wait for it to finish."
 )
 ACTIVE = (TaskStatus.PENDING, TaskStatus.RUNNING)
 INTERRUPTED_MESSAGE = "The operation was interrupted by a restart. Please start it again."
+# Interview evaluations belong to a job but work on its interviews, not its
+# candidates' CVs, so they do not stop a fetch or a screening.
+EVALUATION = "interview_evaluation"
 
 
 class TaskProgress:
@@ -46,6 +49,11 @@ class TaskProgress:
             progress_total=total,
             message=message,
         )
+
+    def note(self, details: dict[str, Any]) -> None:
+        """Keep details about the work so far in the task's result. A task
+        that succeeds replaces them with its summary."""
+        _save(self.task_id, result=details)
 
 
 # The work a task does: receives a TaskProgress, may return a result summary.
@@ -69,17 +77,20 @@ def start_task(
     return task
 
 
-def running_task(db: Session, job_id: int) -> Task | None:
-    """The task that is working on a job right now, if there is one."""
-    return db.scalar(
-        select(Task).where(Task.job_id == job_id, Task.status.in_(ACTIVE)).limit(1)
-    )
+def running_task(db: Session, job_id: int, exclude: tuple[str, ...] = ()) -> Task | None:
+    """The task that is working on a job right now, if there is one, leaving
+    out tasks of the kinds in exclude."""
+    query = select(Task).where(Task.job_id == job_id, Task.status.in_(ACTIVE))
+    if exclude:
+        query = query.where(Task.kind.not_in(exclude))
+    return db.scalar(query.limit(1))
 
 
-def ensure_idle(db: Session, job_id: int) -> None:
+def ensure_idle(db: Session, job_id: int, exclude: tuple[str, ...] = ()) -> None:
     """Refuse to start work on a job that already has a task running, so a
-    fetch and a screening never change the same candidates at once."""
-    if running_task(db, job_id) is not None:
+    fetch and a screening never change the same candidates at once. Tasks of
+    the kinds in exclude do not count."""
+    if running_task(db, job_id, exclude) is not None:
         raise ConflictError(BUSY_MESSAGE)
 
 

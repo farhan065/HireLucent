@@ -36,6 +36,10 @@ class InterviewSessionSummary(BaseModel):
     candidate_waiting: bool = Field(
         default=False, description="The candidate is in the waiting room now."
     )
+    assessment_status: str | None = Field(
+        default=None,
+        description="analysed, draft or approved; empty until the interview is evaluated.",
+    )
 
 
 class InterviewRoomInfo(BaseModel):
