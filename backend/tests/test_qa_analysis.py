@@ -14,7 +14,7 @@ from app.core.security import create_access_token
 from app.db.session import get_db
 from app.graphs.base import MAX_ATTEMPTS, thread_config
 from app.graphs.qa_analysis import graph as qa
-from app.graphs.qa_analysis import evaluation, segmentation
+from app.graphs.qa_analysis import evaluation, references, segmentation
 from app.graphs.qa_analysis.evaluation import Criterion, EvaluationAnswer, PairJudgement
 from app.graphs.qa_analysis.segmentation import PairOut, SegmentationAnswer
 from app.main import create_app
@@ -169,7 +169,14 @@ def test_counts_leave_small_talk_out_of_the_evaluation() -> None:
 
 PAIRS = segmentation.build_pairs(GOOD_ANSWER, TURNS)
 TURNS_BY_ID = {turn["id"]: turn for turn in TURNS}
-QUOTES = {"Q2": (4, "REST APIs in FastAPI"), "Q3": (5, "Docker Compose"), "Q4": (7, "typing")}
+# The answer turn and quote each pair id is judged on. Q1 is used only when a
+# test's transcript starts with a job-related question.
+QUOTES = {
+    "Q1": (7, "typing"),
+    "Q2": (4, "REST APIs in FastAPI"),
+    "Q3": (5, "Docker Compose"),
+    "Q4": (7, "typing"),
+}
 
 
 def _criterion(score: int = 80) -> Criterion:
@@ -215,7 +222,7 @@ def test_answers_go_to_the_ai_in_batches() -> None:
 def test_a_valid_answer_has_no_problems() -> None:
     batch = PAIRS[1:]
 
-    assert evaluation.problems(_judge_all(batch), batch, TURNS_BY_ID) == []
+    assert evaluation.problems(_judge_all(batch), batch, TURNS_BY_ID, {}) == []
 
 
 @pytest.mark.parametrize(
@@ -246,7 +253,7 @@ def test_answers_that_fail_the_checks_are_found(
 ) -> None:
     answer = EvaluationAnswer(evaluations=judgements)
 
-    assert problem in evaluation.problems(answer, PAIRS[1:], TURNS_BY_ID)
+    assert problem in evaluation.problems(answer, PAIRS[1:], TURNS_BY_ID, {})
 
 
 def test_a_quote_may_differ_in_case_and_punctuation() -> None:
@@ -254,7 +261,7 @@ def test_a_quote_may_differ_in_case_and_punctuation() -> None:
         evaluations=[_judgement("Q2", evidence_quote="rest APIs, in fastapi")]
     )
 
-    assert evaluation.problems(answer, [PAIRS[1]], TURNS_BY_ID) == []
+    assert evaluation.problems(answer, [PAIRS[1]], TURNS_BY_ID, {}) == []
 
 
 def test_the_score_is_the_average_of_the_criteria_that_apply() -> None:
@@ -270,7 +277,7 @@ def test_behavioural_answers_are_not_judged_on_accuracy() -> None:
     pair = {**PAIRS[3], "kind": "behavioural"}
 
     [result] = evaluation.to_evaluations(
-        EvaluationAnswer(evaluations=[_judgement("Q4")]), [pair], TURNS_BY_ID
+        EvaluationAnswer(evaluations=[_judgement("Q4")]), [pair], TURNS_BY_ID, {}
     )
 
     assert result["criteria"]["accuracy"] is None and result["accuracy_source"] is None
@@ -279,7 +286,7 @@ def test_behavioural_answers_are_not_judged_on_accuracy() -> None:
 
 def test_each_evaluation_points_to_its_quote_in_the_transcript() -> None:
     [result] = evaluation.to_evaluations(
-        EvaluationAnswer(evaluations=[_judgement("Q2")]), [PAIRS[1]], TURNS_BY_ID
+        EvaluationAnswer(evaluations=[_judgement("Q2")]), [PAIRS[1]], TURNS_BY_ID, {}
     )
 
     evidence = {"turn_id": 4, "start_ms": 20_000, "quote": "REST APIs in FastAPI"}
@@ -296,7 +303,7 @@ def test_the_ai_never_sees_contact_details_in_answers(monkeypatch: pytest.Monkey
     )
     turns = {**TURNS_BY_ID, 4: {**TURNS_BY_ID[4], "text": "Reach me at sam@example.com"}}
 
-    evaluation.ask_ai("Backend Engineer", [PAIRS[1]], turns)
+    evaluation.ask_ai("Backend Engineer", [PAIRS[1]], turns, {})
 
     assert "sam@example.com" not in prompts[0] and "[email]" in prompts[0]
 
@@ -309,6 +316,182 @@ def test_a_question_without_an_answer_scores_zero() -> None:
     assert small_talk["evaluation"] is None
     assert result["evaluation"]["score"] == 0.0
     assert result["evaluation"]["justification"] == evaluation.NO_ANSWER
+
+
+# --- Checking accuracy against references -----------------------------------
+
+
+PASSAGE = {
+    "source": "fastapi_guide.pdf",
+    "similarity": 0.82,
+    "text": "FastAPI builds REST APIs from Python type hints.",
+}
+
+
+def test_a_technical_answer_records_the_reference_it_was_checked_against() -> None:
+    answer = EvaluationAnswer(evaluations=[_judgement("Q2", reference_used=1)])
+    found = {"Q2": [PASSAGE]}
+
+    assert evaluation.problems(answer, [PAIRS[1]], TURNS_BY_ID, found) == []
+    [result] = evaluation.to_evaluations(answer, [PAIRS[1]], TURNS_BY_ID, found)
+
+    assert result["accuracy_source"] == {
+        "type": "reference",
+        "source": "fastapi_guide.pdf",
+        "passage": PASSAGE["text"],
+        "similarity": 0.82,
+    }
+
+
+def test_without_a_usable_reference_accuracy_is_the_ais_own_judgement() -> None:
+    found = {"Q2": [PASSAGE]}
+    answer = EvaluationAnswer(evaluations=[_judgement("Q2", reference_used=None)])
+
+    [result] = evaluation.to_evaluations(answer, [PAIRS[1]], TURNS_BY_ID, found)
+
+    assert result["accuracy_source"] == {"type": "ai_judgement"}
+
+
+@pytest.mark.parametrize(("used", "found"), [(2, {"Q2": [PASSAGE]}), (1, {})])
+def test_a_reference_that_was_not_given_is_found(used: int, found: dict) -> None:
+    answer = EvaluationAnswer(evaluations=[_judgement("Q2", reference_used=used)])
+
+    assert evaluation.problems(answer, [PAIRS[1]], TURNS_BY_ID, found) == ["reference_wrong"]
+
+
+def test_the_ai_sees_the_references_of_technical_answers_only() -> None:
+    behavioural = {**PAIRS[3], "kind": "behavioural"}
+
+    text = evaluation.batch_lines(
+        [PAIRS[1], behavioural], TURNS_BY_ID, {"Q2": [PASSAGE], "Q4": [PASSAGE]}
+    )
+
+    assert text.count("[R1] (from fastapi_guide.pdf)") == 1
+    assert "Reference passages" not in text.split('id="Q4"')[1]
+
+
+def test_a_technical_answer_without_references_says_so() -> None:
+    text = evaluation.batch_lines([PAIRS[1]], TURNS_BY_ID, {"Q2": []})
+
+    assert "Reference passages: none" in text
+
+
+def test_references_are_searched_for_technical_answers_with_contacts_masked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+
+    def fake_call(server: str, tool: str, arguments: dict):
+        calls.append({"server": server, "tool": tool, **arguments})
+        return SimpleNamespace(is_error=False, structured_content={"result": [PASSAGE]})
+
+    monkeypatch.setattr(references.mcp_client, "call_tool", fake_call)
+    turns = {**TURNS_BY_ID, 4: {**TURNS_BY_ID[4], "text": "Mail sam@example.com"}}
+    behavioural = {**PAIRS[3], "kind": "behavioural"}
+
+    found = references.for_batch([PAIRS[1], behavioural], turns)
+
+    assert found == {"Q2": [PASSAGE]}
+    [call] = calls
+    assert call["server"] == "rag" and call["tool"] == "verify_answer"
+    assert "sam@example.com" not in call["answer"] and "[email]" in call["answer"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [ConnectionError("down"), SimpleNamespace(is_error=True, structured_content=None)],
+)
+def test_a_knowledge_base_that_cannot_be_searched_is_reported(
+    monkeypatch: pytest.MonkeyPatch, failure
+) -> None:
+    def fake_call(*args):
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    monkeypatch.setattr(references.mcp_client, "call_tool", fake_call)
+
+    with pytest.raises(references.ReferenceSearchError):
+        references.for_batch([PAIRS[1]], TURNS_BY_ID)
+
+
+# --- Questions about the company --------------------------------------------
+
+
+POLICY = {
+    "source": "company_reference_notes.txt",
+    "similarity": 0.78,
+    "text": "Employees may work remotely up to two days a week.",
+}
+COMPANY_PAIR = {**PAIRS[1], "kind": "company"}
+
+
+def test_company_answers_are_checked_against_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    searched: list[str] = []
+    monkeypatch.setattr(
+        references,
+        "search",
+        lambda question, answer: searched.append(question) or [POLICY],
+    )
+
+    found = references.for_batch([COMPANY_PAIR], TURNS_BY_ID)
+
+    assert found == {"Q2": [POLICY]} and searched == [COMPANY_PAIR["question"]]
+
+
+def test_a_company_answer_checked_against_a_reference_is_scored_on_accuracy() -> None:
+    answer = EvaluationAnswer(evaluations=[_judgement("Q2", reference_used=1)])
+    found = {"Q2": [POLICY]}
+
+    assert evaluation.problems(answer, [COMPANY_PAIR], TURNS_BY_ID, found) == []
+    [result] = evaluation.to_evaluations(answer, [COMPANY_PAIR], TURNS_BY_ID, found)
+
+    assert result["accuracy_source"]["source"] == "company_reference_notes.txt"
+    assert result["criteria"]["accuracy"]["score"] == 80
+    assert result["score"] == 75.0
+
+
+def test_a_company_answer_without_a_reference_is_not_scored_on_accuracy() -> None:
+    answer = EvaluationAnswer(evaluations=[_judgement("Q2", reference_used=None)])
+
+    assert evaluation.problems(answer, [COMPANY_PAIR], TURNS_BY_ID, {"Q2": []}) == []
+    [result] = evaluation.to_evaluations(answer, [COMPANY_PAIR], TURNS_BY_ID, {"Q2": []})
+
+    assert result["accuracy_source"] == {"type": "not_checked"}
+    # A guess from the AI is dropped, and only the other criteria count.
+    assert result["criteria"]["accuracy"] is None
+    assert result["score"] == 73.3  # (90 + 70 + 60) / 3
+
+
+def test_a_company_answer_needs_accuracy_when_a_reference_was_used() -> None:
+    answer = EvaluationAnswer(
+        evaluations=[_judgement("Q2", reference_used=1, accuracy=None)]
+    )
+
+    assert evaluation.problems(answer, [COMPANY_PAIR], TURNS_BY_ID, {"Q2": [POLICY]}) == [
+        "accuracy_missing"
+    ]
+
+
+def test_a_company_answer_without_a_reference_may_leave_accuracy_out() -> None:
+    answer = EvaluationAnswer(evaluations=[_judgement("Q2", accuracy=None)])
+
+    assert evaluation.problems(answer, [COMPANY_PAIR], TURNS_BY_ID, {"Q2": []}) == []
+
+
+def test_the_ai_sees_the_references_of_company_answers() -> None:
+    text = evaluation.batch_lines([COMPANY_PAIR], TURNS_BY_ID, {"Q2": [POLICY]})
+
+    assert 'kind="company"' in text and "[R1] (from company_reference_notes.txt)" in text
+
+
+def test_company_questions_are_evaluated_and_counted() -> None:
+    pairs = [PAIRS[0], COMPANY_PAIR]
+
+    assert evaluation.make_batches(pairs) == [[COMPANY_PAIR]]
+    assert segmentation.counts(pairs) == {"pairs": 2, "evaluated": 1, "small_talk": 1}
 
 
 # --- The graph ---------------------------------------------------------------
@@ -349,15 +532,21 @@ def _answers(items: list):
     return ask
 
 
+def _no_references(batch: list[dict], turns: dict) -> dict:
+    return {pair["id"]: [] for pair in batch if pair["kind"] == "technical"}
+
+
 def _run(
     monkeypatch: pytest.MonkeyPatch,
     store: FakeStore,
     segments: list,
     judgements: list | None = None,
+    find_references=_no_references,
 ) -> dict:
-    """Run the graph once with stand-ins for the AI. By default every answer
-    is judged validly."""
+    """Run the graph once with stand-ins for the AI and the Knowledge Base.
+    By default every answer is judged validly and no reference is found."""
     monkeypatch.setattr(qa, "store", store)
+    monkeypatch.setattr(qa.references, "for_batch", find_references)
     monkeypatch.setattr(qa.segmentation, "ask_ai", _answers(segments))
     monkeypatch.setattr(qa.evaluation, "ask_ai", _answers(judgements or [_judge_all] * 10))
     graph = qa.build_qa_analysis_graph(InMemorySaver())
@@ -452,6 +641,84 @@ def test_an_unavailable_ai_during_evaluation_saves_nothing(
     result = _run(monkeypatch, store, [GOOD_ANSWER], [ServiceUnavailableError("down")])
 
     assert result["failure"] == qa.AI_UNAVAILABLE and not store.saved
+
+
+def test_references_reach_the_ai_and_are_kept_with_the_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+    given: list[dict] = []
+
+    def judge_with_reference(batch: list[dict]) -> EvaluationAnswer:
+        return EvaluationAnswer(
+            evaluations=[
+                _judgement(pair["id"], reference_used=1 if pair["id"] == "Q2" else None)
+                for pair in batch
+            ]
+        )
+
+    def ask(job_title: str, batch: list[dict], turns: dict, found: dict):
+        given.append(found)
+        return judge_with_reference(batch)
+
+    monkeypatch.setattr(qa, "store", store)
+    monkeypatch.setattr(qa.segmentation, "ask_ai", _answers([GOOD_ANSWER]))
+    monkeypatch.setattr(
+        qa.references, "for_batch", lambda batch, turns: {"Q2": [PASSAGE], "Q3": [], "Q4": []}
+    )
+    monkeypatch.setattr(qa.evaluation, "ask_ai", ask)
+
+    qa.build_qa_analysis_graph(InMemorySaver()).invoke({"session_id": 9}, thread_config("t"))
+
+    assert given == [{"Q2": [PASSAGE], "Q3": [], "Q4": []}]
+    saved = {pair["id"]: pair["evaluation"] for pair in store.saved[9]}
+    assert saved["Q2"]["accuracy_source"]["source"] == "fastapi_guide.pdf"
+    assert saved["Q3"]["accuracy_source"] == {"type": "ai_judgement"}
+
+
+def test_behavioural_answers_need_no_reference_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = FakeStore(_interview())
+    searched: list[int] = []
+    behavioural = SegmentationAnswer(pairs=[_pair("A hard project", [6], [7], "behavioural")])
+
+    def find(batch: list[dict], turns: dict) -> dict:
+        searched.append(len(batch))
+        return {}
+
+    result = _run(monkeypatch, store, [behavioural], find_references=find)
+
+    assert not result.get("failure") and searched == []
+
+
+def test_company_answers_are_searched_in_the_knowledge_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+    searched: list[str] = []
+    company = SegmentationAnswer(pairs=[_pair("Our remote policy", [6], [7], "company")])
+
+    def find(batch: list[dict], turns: dict) -> dict:
+        searched.extend(pair["kind"] for pair in batch)
+        return {"Q1": []}
+
+    result = _run(monkeypatch, store, [company], find_references=find)
+
+    assert not result.get("failure") and searched == ["company"]
+    evaluation_saved = store.saved[9][0]["evaluation"]
+    assert evaluation_saved["accuracy_source"] == {"type": "not_checked"}
+
+
+def test_the_interview_fails_when_the_knowledge_base_cannot_be_searched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+
+    def unreachable(batch: list[dict], turns: dict) -> dict:
+        raise qa.references.ReferenceSearchError
+
+    result = _run(monkeypatch, store, [GOOD_ANSWER], find_references=unreachable)
+
+    assert result["failure"] == qa.NO_KNOWLEDGE_BASE and not store.saved
 
 
 def test_with_only_small_talk_nothing_is_sent_to_the_ai(
