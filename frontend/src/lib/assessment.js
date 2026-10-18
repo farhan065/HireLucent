@@ -7,6 +7,11 @@ export function evaluateInterview(sessionId) {
   return apiRequest(`/interviews/${sessionId}/evaluate`, { method: 'POST' })
 }
 
+// Writes only the report of an interview whose answers are evaluated.
+export function writeReport(sessionId) {
+  return apiRequest(`/interviews/${sessionId}/report`, { method: 'POST' })
+}
+
 // Evaluates every completed interview of the job not evaluated yet.
 export function evaluateAll(jobId) {
   return apiRequest(`/jobs/${jobId}/evaluate`, { method: 'POST' })
@@ -194,4 +199,98 @@ export function requirementNames(coverage) {
 // The transcript turns of a pair, by id, for showing the answer.
 export function turnsById(turns) {
   return new Map(turns.map((turn) => [turn.id, turn]))
+}
+
+// --- The job's ranked list -------------------------------------------------
+
+// Every completed interview of the job: ranked rows first, then unranked.
+export function readRanking(jobId) {
+  return apiRequest(`/jobs/${jobId}/assessments`)
+}
+
+// The shares the backend uses for the overall score.
+export const CV_SHARE = 0.4
+export const INTERVIEW_SHARE = 0.6
+
+export const SUITABILITY = {
+  strong_fit: {
+    label: 'Strong fit',
+    note: 'overall 70 or more',
+    className: 'bg-success-soft text-success',
+    bar: 'bg-success',
+  },
+  possible_fit: {
+    label: 'Possible fit',
+    note: 'overall 60–69',
+    className: 'bg-tint text-brand-dark',
+    bar: 'bg-brand',
+  },
+  not_a_fit: {
+    label: 'Not a fit',
+    note: 'overall below 60',
+    className: 'bg-danger-soft text-danger',
+    bar: 'bg-danger',
+  },
+}
+
+// What an interview's assessment status means, as a chip.
+export const REPORT_STATUS = {
+  analysed: { label: 'Answers evaluated', className: 'bg-tint text-brand-dark' },
+  draft: { label: 'Draft report', className: 'bg-amber-soft text-amber' },
+  approved: { label: 'Report approved', className: 'bg-success-soft text-success' },
+}
+
+export const RANK_FILTERS = [
+  ['all', 'All'],
+  ['strong_fit', 'Strong fit'],
+  ['possible_fit', 'Possible fit'],
+  ['not_a_fit', 'Not a fit'],
+  ['review', 'Needs review'],
+]
+
+export function matchesRankFilter(row, filter) {
+  if (filter === 'all') return true
+  if (filter === 'review') return row.status === 'draft'
+  return row.suitability === filter
+}
+
+// The counts above the list.
+export function rankingSummary(rows) {
+  const count = (test) => rows.filter(test).length
+  return {
+    strong_fit: count((row) => row.suitability === 'strong_fit'),
+    possible_fit: count((row) => row.suitability === 'possible_fit'),
+    not_a_fit: count((row) => row.suitability === 'not_a_fit'),
+    review: count((row) => row.status === 'draft'),
+  }
+}
+
+// 84.24 → 84.2, 74.0 → 74
+export function oneDecimal(value) {
+  return value == null ? null : Math.round(value * 10) / 10
+}
+
+// The two parts of the overall score, for "How the score is made".
+export function scoreParts(row) {
+  return {
+    cv: oneDecimal(row.cv_score * CV_SHARE),
+    interview: oneDecimal(row.interview_score * INTERVIEW_SHARE),
+  }
+}
+
+// Why an unranked interview has no place in the ranking yet.
+export function unrankedReason(row) {
+  if (!row.status) return 'Interview completed. Not evaluated yet.'
+  if (row.status === 'analysed') {
+    return 'Answers evaluated. The report has not been written yet.'
+  }
+  if (row.interview_score == null) {
+    return 'No overall score: the interview had no job-related questions.'
+  }
+  return 'No overall score: the candidate has no CV score.'
+}
+
+// How many drafts wait for review, from the interviews list.
+export function draftsToReview(interviews) {
+  return (interviews ?? []).filter((item) => item.assessment_status === 'draft').length
 }

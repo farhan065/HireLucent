@@ -1,5 +1,6 @@
 import { ArrowRight, LoaderCircle, Sparkles, Trash2, Video } from 'lucide-react'
 import { Link } from 'react-router'
+import { REPORT_STATUS } from '../../lib/assessment.js'
 import {
   dayLabel,
   formatShortDate,
@@ -279,9 +280,13 @@ export default function InterviewList({
                 <When interview={interview} now={now} />
                 <div className="flex flex-col items-start gap-1.5">
                   <StatusChip tone={status.tone}>{status.label}</StatusChip>
-                  {interview.assessment_status && (
-                    <span className="rounded-full bg-tint px-2.5 py-0.5 text-[12.5px] font-semibold text-brand-dark">
-                      Answers evaluated
+                  {REPORT_STATUS[interview.assessment_status] && (
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[12.5px] font-semibold ${
+                        REPORT_STATUS[interview.assessment_status].className
+                      }`}
+                    >
+                      {REPORT_STATUS[interview.assessment_status].label}
                     </span>
                   )}
                 </div>

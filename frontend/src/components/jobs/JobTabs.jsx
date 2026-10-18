@@ -48,13 +48,15 @@ function Tab({ number, label, to, isCurrent, isDone, badge }) {
 
 // The stages of one job, in order. The same row is shown on the job's pages
 // and above its conversation with the AI Agent. "today" is the number of
-// interviews still to come today, "inWaitingRoom" the candidates waiting now.
+// interviews still to come today, "inWaitingRoom" the candidates waiting now
+// and "toReview" the draft reports waiting for the interviewer's review.
 export default function JobTabs({
   job,
   threadId,
   waiting = 0,
   today = 0,
   inWaitingRoom = 0,
+  toReview = 0,
   current,
 }) {
   const stage = jobStage(job)
@@ -102,7 +104,17 @@ export default function JobTabs({
           )
         ),
     },
-    { key: 'decision', label: 'Decision' },
+    {
+      key: 'assessments',
+      label: 'Assessments',
+      // The ranked candidates, once the job is published.
+      to: isPublished ? `/app/jobs/${job.id}/assessments` : undefined,
+      badge: toReview > 0 && (
+        <span className="rounded-full bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber">
+          {toReview} to review
+        </span>
+      ),
+    },
   ]
 
   return (

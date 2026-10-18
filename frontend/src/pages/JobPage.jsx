@@ -17,10 +17,11 @@ import { useEvaluation } from '../hooks/useEvaluation.js'
 import { useInterviews } from '../hooks/useInterviews.js'
 import { useJob } from '../hooks/useJob.js'
 import { useJobActivity } from '../hooks/useJobActivity.js'
+import { draftsToReview } from '../lib/assessment.js'
 import { countToday, countWaiting } from '../lib/interviews.js'
 import { JOB_STAGES, formatDate, jobStage } from '../lib/jobs.js'
 
-const TABS = ['applications', 'screening', 'interviews']
+const TABS = ['applications', 'screening', 'interviews', 'assessments']
 
 function LoadingJob() {
   return (
@@ -123,6 +124,7 @@ export default function JobPage() {
             waiting={waiting}
             today={countToday(interviews.interviews, interviews.now)}
             inWaitingRoom={countWaiting(interviews.interviews)}
+            toReview={draftsToReview(interviews.interviews)}
             current={current}
           />
 

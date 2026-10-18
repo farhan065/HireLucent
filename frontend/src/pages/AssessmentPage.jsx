@@ -32,6 +32,12 @@ import { readInterview, readTranscript } from '../lib/room.js'
 import { whenLabel } from '../lib/transcript.js'
 
 const TABS = ['qa', 'coverage']
+// The header chip for each assessment status.
+const STATUS_CHIPS = {
+  analysed: { tone: 'info', label: 'Answers evaluated' },
+  draft: { tone: 'amber', label: 'Draft report' },
+  approved: { tone: 'success', label: 'Report approved' },
+}
 
 function LoadingAssessment() {
   return (
@@ -473,7 +479,9 @@ export default function AssessmentPage() {
               <span aria-hidden="true">·</span>
               <span>Interview {whenLabel(interview)}</span>
               {assessment && !isRunning && (
-                <StatusChip tone="success">Answers evaluated</StatusChip>
+                <StatusChip tone={STATUS_CHIPS[assessment.status].tone}>
+                  {STATUS_CHIPS[assessment.status].label}
+                </StatusChip>
               )}
             </div>
           </div>
