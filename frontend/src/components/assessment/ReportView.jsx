@@ -1,11 +1,14 @@
-import { CircleAlert, CircleCheck, LoaderCircle, PenLine } from 'lucide-react'
+import { CircleAlert, CircleCheck, Download, LoaderCircle, PenLine, Printer } from 'lucide-react'
 import { useState } from 'react'
 import {
   MAX_NOTE_CHARS,
   MAX_SUMMARY_CHARS,
   SUITABILITY,
   oneDecimal,
+  printFile,
+  readReportPdf,
   reviewReport,
+  saveFile,
   scoreParts,
 } from '../../lib/assessment.js'
 import { clock, shortDay } from '../../lib/interviews.js'
@@ -252,7 +255,7 @@ function EditForm({ assessment, isSaving, onCancel, onSave }) {
 // The report of one interview: summary, strengths and weaknesses with their
 // sources, evidence gaps and areas to verify. A draft can be approved,
 // edited or rewritten by the AI following a note.
-export default function ReportView({ assessment, candidateName, onChanged }) {
+export default function ReportView({ assessment, candidateName, fileName, onChanged }) {
   const [mode, setMode] = useState('view')
   const [dialog, setDialog] = useState(null)
   const [note, setNote] = useState('')
@@ -289,8 +292,43 @@ export default function ReportView({ assessment, candidateName, onChanged }) {
 
   const isRewriting = busy === 'rewrite'
 
+  // The same PDF is printed or saved, so both always match.
+  async function exportPdf(kind) {
+    setBusy(kind)
+    setError('')
+    try {
+      const file = await readReportPdf(sessionId)
+      if (kind === 'print') printFile(file)
+      else saveFile(file, fileName)
+    } catch (exportError) {
+      setError(exportError.message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center justify-end gap-2.5">
+        <button
+          type="button"
+          disabled={busy !== null || mode === 'edit'}
+          onClick={() => exportPdf('print')}
+          className="inline-flex min-h-10 items-center gap-2 rounded-full border border-line bg-white px-4 text-sm font-semibold text-navy hover:bg-tint disabled:cursor-not-allowed disabled:text-[#A8B3C6]"
+        >
+          <Printer className="size-4.5" aria-hidden="true" />
+          {busy === 'print' ? 'Preparing…' : 'Print'}
+        </button>
+        <Button
+          variant="outline"
+          className="min-h-10 px-4.5 text-sm"
+          disabled={busy !== null || mode === 'edit'}
+          onClick={() => exportPdf('pdf')}
+        >
+          <Download className="size-4.5" aria-hidden="true" />
+          {busy === 'pdf' ? 'Preparing…' : 'Download PDF'}
+        </Button>
+      </div>
       {isDraft && mode === 'view' && !isRewriting && (
         <section
           role="status"

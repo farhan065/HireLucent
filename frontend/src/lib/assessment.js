@@ -1,7 +1,8 @@
 // The post-interview assessment: evaluating interviews and showing what the
 // evaluation found. Scores, labels and colours are worked out here, so the
 // pages and cards only lay them out.
-import { apiRequest, ApiError } from './api.js'
+import { apiFile, apiRequest, ApiError } from './api.js'
+import { dateValue } from './interviews.js'
 
 export function evaluateInterview(sessionId) {
   return apiRequest(`/interviews/${sessionId}/evaluate`, { method: 'POST' })
@@ -313,4 +314,56 @@ export const MAX_NOTE_CHARS = 1000
 
 export function hasReport(assessment) {
   return assessment?.status === 'draft' || assessment?.status === 'approved'
+}
+
+// --- The report as a PDF ---------------------------------------------------
+
+// The report PDF, with dates in the interviewer's time zone.
+export function readReportPdf(sessionId) {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  return apiFile(`/interviews/${sessionId}/assessment/report.pdf?tz=${encodeURIComponent(zone)}`)
+}
+
+// "assessment_HL-BE-01_2026-10-13.pdf". The candidate's name is left out of
+// the file name, which shows up in download lists and email attachments.
+export function reportFileName(info) {
+  const code = info.job_code.replace(/[^A-Za-z0-9_-]+/g, '-')
+  const day = new Date(info.interview.started_at ?? info.interview.scheduled_start)
+  return `assessment_${code}_${dateValue(day)}.pdf`
+}
+
+// Saves the PDF under its file name.
+export function saveFile(file, name) {
+  const url = URL.createObjectURL(file)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
+// Opens the browser's print dialog for the PDF, from a hidden frame. Where
+// a browser cannot print from a frame, the PDF opens in a new tab instead.
+export function printFile(file) {
+  const url = URL.createObjectURL(file)
+  const frame = document.createElement('iframe')
+  frame.style.position = 'fixed'
+  frame.style.width = '0'
+  frame.style.height = '0'
+  frame.style.border = '0'
+  frame.src = url
+  frame.onload = () => {
+    try {
+      frame.contentWindow.focus()
+      frame.contentWindow.print()
+    } catch {
+      window.open(url, '_blank')
+    }
+    // The frame stays until the print dialog has surely closed.
+    setTimeout(() => {
+      frame.remove()
+      URL.revokeObjectURL(url)
+    }, 60_000)
+  }
+  document.body.appendChild(frame)
 }

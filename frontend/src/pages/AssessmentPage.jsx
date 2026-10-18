@@ -28,6 +28,7 @@ import {
   oneDecimal,
   qaSummary,
   readAssessment,
+  reportFileName,
   requirementNames,
   turnsById,
 } from '../lib/assessment.js'
@@ -642,6 +643,7 @@ export default function AssessmentPage() {
               <ReportView
                 assessment={assessment}
                 candidateName={interview.candidate_name}
+                fileName={reportFileName(info)}
                 onChanged={(updated) => setAssessment(updated)}
               />
             ) : (
