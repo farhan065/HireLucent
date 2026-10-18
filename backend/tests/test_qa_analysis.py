@@ -13,6 +13,7 @@ from app.core.errors import AppError, ConflictError, ServiceUnavailableError
 from app.core.security import create_access_token
 from app.db.session import get_db
 from app.graphs.base import MAX_ATTEMPTS, thread_config
+from app.graphs.final_assessment import graph as final
 from app.graphs.qa_analysis import graph as qa
 from app.graphs.qa_analysis import coverage, evaluation, references, segmentation, suggestions
 from app.graphs.qa_analysis.evaluation import Criterion, EvaluationAnswer, PairJudgement
@@ -1001,12 +1002,39 @@ class FakeGraph:
         return SimpleNamespace(values={"failure": failure} if failure else {})
 
 
+class FakeReportGraph:
+    """Writes the report, or fails for the given interviews."""
+
+    checkpointer = None
+
+    def __init__(self, failures: dict[int, str] | None = None) -> None:
+        self.failures = failures or {}
+        self.seen: list[int] = []
+
+    def invoke(self, state: dict, config: dict) -> dict:
+        self.seen.append(state["session_id"])
+        return {}
+
+    def get_state(self, config: dict):
+        failure = self.failures.get(self.seen[-1])
+        return SimpleNamespace(values={"failure": failure} if failure else {})
+
+
+def _graphs(
+    failures: dict[int, str], report_failures: dict[int, str] | None = None
+) -> evaluation_service.EvaluationGraphs:
+    return evaluation_service.EvaluationGraphs(
+        FakeGraph(failures), FakeReportGraph(report_failures)
+    )
+
+
 def test_one_failed_interview_does_not_stop_the_others() -> None:
-    graph, progress = FakeGraph({2: qa.NO_PAIRS}), FakeProgress()
+    graphs, progress = _graphs({2: qa.NO_PAIRS}), FakeProgress()
 
-    summary = evaluation_service.run_evaluation(graph, [1, 2, 3], progress)
+    summary = evaluation_service.run_evaluation(graphs, [1, 2, 3], progress)
 
-    assert graph.seen == [1, 2, 3]
+    assert graphs.qa_analysis.seen == [1, 2, 3]
+    assert graphs.final_assessment.seen == [1, 3]
     assert summary["total"] == 3 and summary["evaluated"] == 2 and summary["failed"] == 1
     assert summary["failures"] == [{"session_id": 2, "reason": qa.NO_PAIRS}]
     assert progress.updates[-1] == (3, 3, "Evaluated 2 of 3 interviews")
@@ -1015,7 +1043,7 @@ def test_one_failed_interview_does_not_stop_the_others() -> None:
 def test_the_task_keeps_which_interview_it_is_on() -> None:
     progress = FakeProgress()
 
-    evaluation_service.run_evaluation(FakeGraph({1: qa.NO_PAIRS}), [1, 2], progress)
+    evaluation_service.run_evaluation(_graphs({1: qa.NO_PAIRS}), [1, 2], progress)
 
     assert [note["current"] for note in progress.notes] == [1, 2, None]
     assert progress.notes[1]["failures"] == [{"session_id": 1, "reason": qa.NO_PAIRS}]
@@ -1025,16 +1053,26 @@ def test_the_task_keeps_which_interview_it_is_on() -> None:
 def test_progress_follows_the_answers_of_a_single_interview() -> None:
     progress = FakeProgress()
 
-    evaluation_service.run_evaluation(FakeGraph({}), [1], progress)
+    evaluation_service.run_evaluation(_graphs({}), [1], progress)
 
     assert (3, 3, "Interview 1 of 1 · 3 of 3 answers evaluated") in progress.updates
+    assert (3, 3, "Interview 1 of 1 · writing the report") in progress.updates
+
+
+def test_an_interview_fails_when_its_report_cannot_be_written() -> None:
+    graphs = _graphs({}, {2: final.AI_UNAVAILABLE})
+
+    summary = evaluation_service.run_evaluation(graphs, [1, 2], FakeProgress())
+
+    assert summary["evaluated"] == 1
+    assert summary["failures"] == [{"session_id": 2, "reason": final.AI_UNAVAILABLE}]
 
 
 def test_the_task_fails_with_the_reason_when_nothing_could_be_evaluated() -> None:
-    graph = FakeGraph({1: qa.AI_UNAVAILABLE})
+    graphs = _graphs({1: qa.AI_UNAVAILABLE})
 
     with pytest.raises(evaluation_service.EvaluationFailed) as error:
-        evaluation_service.run_evaluation(graph, [1], FakeProgress())
+        evaluation_service.run_evaluation(graphs, [1], FakeProgress())
 
     assert error.value.message == qa.AI_UNAVAILABLE
 
@@ -1076,7 +1114,7 @@ def test_an_evaluation_starts_only_when_it_can_run(
     )
 
     with pytest.raises(ConflictError) as error:
-        evaluation_service.start_evaluation(db, None, FakeGraph({}), 9, 1)
+        evaluation_service.start_evaluation(db, None, _graphs({}), 9, 1)
 
     assert error.value.message == message and not started
 
@@ -1256,7 +1294,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     )
     app = create_app()
     app.dependency_overrides[get_db] = lambda: None
-    app.dependency_overrides[qa.get_qa_analysis_graph] = lambda: SimpleNamespace()
+    graphs = evaluation_service.get_evaluation_graphs
+    app.dependency_overrides[graphs] = lambda: SimpleNamespace()
     return TestClient(app)
 
 
