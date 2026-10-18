@@ -64,7 +64,10 @@ function CriterionBox({ name, criterion }) {
         </span>
       </div>
       <span aria-hidden="true" className="h-1.5 overflow-hidden rounded-full bg-[#E4EAF4]">
-        <span className={`block h-full rounded-full ${tone.bar}`} style={{ width: `${criterion.score}%` }} />
+        <span
+          className={`block h-full rounded-full ${tone.bar}`}
+          style={{ width: `${criterion.score}%` }}
+        />
       </span>
       <span className="text-[13.5px] leading-relaxed">{criterion.reason}</span>
     </div>
@@ -73,7 +76,7 @@ function CriterionBox({ name, criterion }) {
 
 // Where the accuracy judgement came from, in words, with the passage when a
 // reference was used.
-function AccuracySource({ source }) {
+function AccuracySource({ source, kind }) {
   if (source.type === 'reference') {
     return (
       <div className="flex flex-col gap-2 rounded-2xl border border-[#BFE6D3] bg-[#F2FBF7] px-4 py-3.5">
@@ -98,11 +101,18 @@ function AccuracySource({ source }) {
     return (
       <p className="flex items-start gap-2 rounded-2xl border border-[#F3D9A8] bg-[#FFF9EE] px-3.5 py-3 text-[13.5px] leading-relaxed text-[#6B3A00]">
         <CircleAlert className="mt-0.5 size-4.5 shrink-0" aria-hidden="true" />
-        <span>
-          <strong>Accuracy not checked.</strong> No company reference covers this, and the AI does
-          not guess company facts. The score uses relevance, completeness and articulation only.
-          Upload the policy as a Reference to check it next time.
-        </span>
+        {kind === 'company' ? (
+          <span>
+            <strong>Accuracy not checked.</strong> No company reference covers this, and the AI does
+            not guess company facts. The score uses relevance, completeness and articulation only.
+            Upload the policy as a Reference to check it next time.
+          </span>
+        ) : (
+          <span>
+            <strong>Accuracy not checked.</strong> The AI could not judge the accuracy of this
+            answer. The score uses relevance, completeness and articulation only.
+          </span>
+        )}
       </p>
     )
   }
@@ -184,7 +194,9 @@ function Details({ sessionId, pair, turns }) {
         )}
       </div>
 
-      {evaluation.accuracy_source && <AccuracySource source={evaluation.accuracy_source} />}
+      {evaluation.accuracy_source && (
+        <AccuracySource source={evaluation.accuracy_source} kind={pair.kind} />
+      )}
     </div>
   )
 }
@@ -216,9 +228,7 @@ export default function QuestionCard({
     <article
       className={`rounded-[18px] border ${
         isOpen ? 'border-[1.5px] border-[#A9C8FF] bg-white shadow-card' : 'border-line'
-      } ${isSmallTalk && !isOpen ? 'bg-[#FBFCFE]' : 'bg-white'} ${
-        followUpOf ? 'ml-10' : ''
-      }`}
+      } ${isSmallTalk && !isOpen ? 'bg-[#FBFCFE]' : 'bg-white'} ${followUpOf ? 'ml-10' : ''}`}
     >
       <button
         type="button"

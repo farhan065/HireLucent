@@ -413,10 +413,6 @@ def test_a_valid_answer_has_no_problems() -> None:
             "accuracy_missing",
         ),
         (
-            [_judgement("Q2", evidence_turn=5), _judgement("Q3"), _judgement("Q4")],
-            "evidence_turn_wrong",
-        ),
-        (
             [
                 _judgement("Q2", evidence_quote="ten years of Kubernetes"),
                 _judgement("Q3"),
@@ -440,6 +436,167 @@ def test_a_quote_may_differ_in_case_and_punctuation() -> None:
     )
 
     assert evaluation.problems(answer, [PAIRS[1]], TURNS_BY_ID, {}) == []
+
+
+def test_a_wrong_turn_number_is_corrected_when_the_quote_is_in_the_answer() -> None:
+    answer = EvaluationAnswer(evaluations=[_judgement("Q2", evidence_turn=5)])
+
+    assert evaluation.problems(answer, [PAIRS[1]], TURNS_BY_ID, {}) == []
+    [result] = evaluation.to_evaluations(answer, [PAIRS[1]], TURNS_BY_ID, {})
+    assert result["evidence"]["turn_id"] == 4
+
+
+# A real answer: split over three turns at pauses, with the interviewer's
+# "mm-hmm" in between, and technical words misspelled by the speech-to-text.
+MESSY_TURNS = {
+    20: _turn(20, "interviewer", 100, "How do you handle overfitting?"),
+    21: _turn(21, "candidate", 104, "Um, so, so basically I use drop out"),
+    22: _turn(22, "interviewer", 108, "Mm-hmm."),
+    23: _turn(23, "candidate", 110, "and early stopping in pie torch, and I watch the"),
+    24: _turn(24, "candidate", 115, "validation loss to see the gap."),
+}
+MESSY_PAIR = {
+    "id": "Q1",
+    "question": "How do you handle overfitting?",
+    "question_turn_ids": [20],
+    "answer_turn_ids": [21, 23, 24],
+    "start_ms": 100_000,
+    "end_ms": 119_000,
+    "kind": "technical",
+    "follow_up_of": None,
+    "requirement_ids": [],
+}
+
+
+@pytest.mark.parametrize(
+    ("quote", "turn_id", "kept"),
+    [
+        # Across the pause between two turns.
+        ("I watch the validation loss", 23, "I watch the validation loss"),
+        # The AI corrected the speech-to-text spelling; the transcript's own
+        # words are kept.
+        ("early stopping in PyTorch", 23, "early stopping in pie torch"),
+        ("I use dropout and early stopping", 21, "I use drop out and early stopping"),
+    ],
+)
+def test_a_real_quote_is_found_despite_pauses_and_misspellings(
+    quote: str, turn_id: int, kept: str
+) -> None:
+    found = evaluation.find_quote(MESSY_PAIR, quote, MESSY_TURNS)
+
+    assert found == {
+        "turn_id": turn_id,
+        "start_ms": MESSY_TURNS[turn_id]["start_ms"],
+        "quote": kept,
+    }
+
+
+@pytest.mark.parametrize("quote", ["I trained a GAN on images", "PyTorch", "", "   "])
+def test_words_the_candidate_did_not_say_are_not_found(quote: str) -> None:
+    assert evaluation.find_quote(MESSY_PAIR, quote, MESSY_TURNS) is None
+
+
+def test_the_interviewers_words_are_never_a_quote() -> None:
+    asked = "How do you handle overfitting"
+
+    assert evaluation.find_quote(MESSY_PAIR, asked, MESSY_TURNS) is None
+
+
+def _messy_judgement(**changes) -> PairJudgement:
+    values = {
+        "id": "Q1",
+        "answered": "answered",
+        "relevance": _criterion(90),
+        "accuracy": _criterion(80),
+        "completeness": _criterion(70),
+        "articulation": _criterion(60),
+        "justification": "Names two methods and how to spot overfitting.",
+        "evidence_turn": 23,
+        "evidence_quote": "early stopping in PyTorch",
+    }
+    return PairJudgement(**(values | changes))
+
+
+def test_a_messy_but_real_answer_passes_the_checks() -> None:
+    answer = EvaluationAnswer(evaluations=[_messy_judgement()])
+
+    assert evaluation.problems(answer, [MESSY_PAIR], MESSY_TURNS, {}) == []
+    [result] = evaluation.to_evaluations(answer, [MESSY_PAIR], MESSY_TURNS, {})
+    assert result["evidence"]["quote"] == "early stopping in pie torch"
+    assert result["score"] == 75.0
+
+
+def test_a_technical_question_the_candidate_did_not_answer_needs_no_accuracy() -> None:
+    not_sure = {
+        **MESSY_TURNS,
+        21: _turn(21, "candidate", 104, "Sorry, I am not sure about that one."),
+    }
+    pair = {**MESSY_PAIR, "answer_turn_ids": [21]}
+    answer = EvaluationAnswer(
+        evaluations=[
+            _messy_judgement(
+                answered="not_answered",
+                accuracy=None,
+                evidence_turn=21,
+                evidence_quote="I don't know this one",
+            )
+        ]
+    )
+
+    assert evaluation.problems(answer, [pair], not_sure, {}) == []
+    [result] = evaluation.to_evaluations(answer, [pair], not_sure, {})
+    assert result["score"] == 0.0 and result["answered"] == "not_answered"
+    assert result["criteria"]["accuracy"] is None and result["accuracy_source"] is None
+    # The AI's quote is not in the transcript, so no quote is shown.
+    assert result["evidence"] is None
+
+
+def test_an_answered_technical_question_still_needs_accuracy() -> None:
+    answer = EvaluationAnswer(
+        evaluations=[_messy_judgement(answered="partly_answered", accuracy=None)]
+    )
+
+    assert evaluation.problems(answer, [MESSY_PAIR], MESSY_TURNS, {}) == ["accuracy_missing"]
+
+
+def test_after_the_last_attempt_only_what_can_be_trusted_is_kept() -> None:
+    answer = EvaluationAnswer(
+        evaluations=[
+            _messy_judgement(accuracy=None, evidence_quote="ten years of Kubernetes")
+        ]
+    )
+
+    [result] = evaluation.to_evaluations(answer, [MESSY_PAIR], MESSY_TURNS, {"Q1": []})
+
+    # No made-up quote, and accuracy is "not checked" instead of a guess.
+    assert result["evidence"] is None
+    assert result["accuracy_source"] == {"type": "not_checked"}
+    assert result["criteria"]["accuracy"] is None
+    assert result["score"] == 73.3  # (90 + 70 + 60) / 3
+
+
+def test_a_reference_that_was_not_given_is_ignored_when_kept() -> None:
+    answer = EvaluationAnswer(evaluations=[_messy_judgement(reference_used=3)])
+
+    [result] = evaluation.to_evaluations(answer, [MESSY_PAIR], MESSY_TURNS, {"Q1": []})
+
+    assert result["accuracy_source"] == {"type": "ai_judgement"}
+    assert result["criteria"]["accuracy"]["score"] == 80
+
+
+def test_repeated_and_unknown_judgements_are_ignored() -> None:
+    answer = EvaluationAnswer(
+        evaluations=[
+            _messy_judgement(),
+            _messy_judgement(relevance=_criterion(10)),
+            _messy_judgement(id="Q9"),
+        ]
+    )
+
+    results = evaluation.to_evaluations(answer, [MESSY_PAIR], MESSY_TURNS, {})
+
+    assert [item["pair_id"] for item in results] == ["Q1"]
+    assert results[0]["criteria"]["relevance"]["score"] == 90
 
 
 def test_the_score_is_the_average_of_the_criteria_that_apply() -> None:
@@ -812,13 +969,49 @@ def test_an_invalid_evaluation_is_asked_for_again(monkeypatch: pytest.MonkeyPatc
     assert not result.get("failure") and store.saved[9][3]["evaluation"]["score"] == 75.0
 
 
-def test_the_interview_fails_when_an_evaluation_stays_invalid(
+def test_after_the_last_attempt_the_judged_answers_are_kept(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = FakeStore(_interview())
-    invalid = EvaluationAnswer(evaluations=[_judgement("Q2")])
+    # Q2's quote is never found, attempt after attempt.
+    invalid = EvaluationAnswer(
+        evaluations=[
+            _judgement("Q2", evidence_quote="ten years of Kubernetes"),
+            _judgement("Q3"),
+            _judgement("Q4"),
+        ]
+    )
 
     result = _run(monkeypatch, store, [GOOD_ANSWER], [invalid] * MAX_ATTEMPTS)
+
+    assert not result.get("failure")
+    saved = {pair["id"]: pair["evaluation"] for pair in store.saved[9]}
+    assert saved["Q2"]["score"] == 75.0 and saved["Q2"]["evidence"] is None
+    assert saved["Q3"]["evidence"]["quote"] == "Docker Compose"
+
+
+def test_a_question_the_ai_keeps_leaving_out_is_asked_for_on_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+    without_q4 = EvaluationAnswer(evaluations=[_judgement("Q2"), _judgement("Q3")])
+
+    result = _run(
+        monkeypatch, store, [GOOD_ANSWER], [without_q4] * MAX_ATTEMPTS + [_judge_all]
+    )
+
+    assert not result.get("failure")
+    assert store.saved[9][3]["evaluation"]["score"] == 75.0
+
+
+def test_the_interview_fails_only_when_a_question_is_never_judged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore(_interview())
+    without_q4 = EvaluationAnswer(evaluations=[_judgement("Q2"), _judgement("Q3")])
+    nothing = EvaluationAnswer(evaluations=[])
+
+    result = _run(monkeypatch, store, [GOOD_ANSWER], [without_q4] * MAX_ATTEMPTS + [nothing])
 
     assert result["failure"] == qa.INVALID_EVALUATION and not store.saved
 
@@ -899,7 +1092,7 @@ def test_company_answers_are_searched_in_the_knowledge_base(
     assert evaluation_saved["accuracy_source"] == {"type": "not_checked"}
 
 
-def test_the_interview_fails_when_the_knowledge_base_cannot_be_searched(
+def test_answers_are_judged_without_references_when_the_knowledge_base_is_down(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = FakeStore(_interview())
@@ -909,7 +1102,9 @@ def test_the_interview_fails_when_the_knowledge_base_cannot_be_searched(
 
     result = _run(monkeypatch, store, [GOOD_ANSWER], find_references=unreachable)
 
-    assert result["failure"] == qa.NO_KNOWLEDGE_BASE and not store.saved
+    assert not result.get("failure")
+    saved = store.saved[9][1]["evaluation"]
+    assert saved["accuracy_source"] == {"type": "ai_judgement"} and saved["score"] == 75.0
 
 
 def test_coverage_and_suggestions_are_saved_with_the_pairs(
