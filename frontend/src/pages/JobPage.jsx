@@ -13,6 +13,7 @@ import DeleteJobButton from '../components/jobs/DeleteJobButton.jsx'
 import JobTabs from '../components/jobs/JobTabs.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
+import { useEvaluation } from '../hooks/useEvaluation.js'
 import { useInterviews } from '../hooks/useInterviews.js'
 import { useJob } from '../hooks/useJob.js'
 import { useJobActivity } from '../hooks/useJobActivity.js'
@@ -52,6 +53,9 @@ export default function JobPage() {
   // Interviews are loaded here, so the tab's "today" badge and the
   // Interviews tab share one list.
   const interviews = useInterviews(job?.status === 'published' ? jobId : null, listVersion)
+  // Interview evaluations. When one ends, the interviews load again, so their
+  // rows show View assessment.
+  const evaluation = useEvaluation(job?.status === 'published' ? jobId : null, handleFinished)
 
   // After a shortlist change or a deletion, the same as after a run.
   function handleChanged() {
@@ -130,6 +134,7 @@ export default function JobPage() {
               run,
               listVersion,
               interviews,
+              evaluation,
               onChanged: handleChanged,
             }}
           />
