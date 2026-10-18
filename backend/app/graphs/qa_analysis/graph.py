@@ -11,8 +11,14 @@ Turns one interview's transcript into evaluated question-answer pairs:
                          batches, one branch each (Send) -> evaluate_answers
                       -> (nothing to send to the AI) -> collect_evaluations
     evaluate_answers  -> collect_evaluations
-    collect_evaluations -> (every batch judged) -> save_analysis -> end
+    collect_evaluations -> (every batch judged) -> map_coverage
                         -> (a batch failed)     -> handle_error -> end
+    map_coverage -> suggest_questions -> save_analysis -> end
+
+map_coverage (rule-based) works out, for each job requirement, which
+questions explored it and how well they were answered, next to the CV
+screening result. suggest_questions offers the new questions worth adding
+to the question bank; the interviewer decides which are added.
 
 Each evaluate_answers branch runs its own small pipeline:
 
@@ -29,7 +35,7 @@ technical and company answer, and judge_batch checks accuracy against them
 first. With no usable reference, a technical answer's accuracy is the AI
 interviewer's own judgement, and a company answer's accuracy is not scored,
 because the AI cannot know the company's own facts. The evaluation says
-which it was. Mapping the job's requirements follows in a later step.
+which it was.
 """
 
 import logging
@@ -46,7 +52,14 @@ from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import BaseState, can_retry
 from app.graphs.checkpointer import get_checkpointer
-from app.graphs.qa_analysis import evaluation, references, segmentation, store
+from app.graphs.qa_analysis import (
+    coverage,
+    evaluation,
+    references,
+    segmentation,
+    store,
+    suggestions,
+)
 from app.models.enums import SessionStatus
 
 logger = get_logger(__name__)
@@ -70,11 +83,18 @@ class QAState(BaseState, total=False):
     session_id: int
     candidate_id: int
     job_title: str
+    # The job's requirement items, and the CV screening result for each.
+    requirements: list[dict]
+    cv_matches: list[dict] | None
     # The transcript turns: id, speaker, start_ms, end_ms and text.
     turns: list[dict]
     # The question-answer pairs (see segmentation.build_pairs), each with its
     # evaluation once collect_evaluations has run.
     pairs: list[dict]
+    # One entry per job requirement (see coverage.map_coverage).
+    coverage: list[dict]
+    # New questions for the question bank; None if it could not be searched.
+    suggestions: list[dict] | None
     # Added by each evaluate_answers branch as it finishes.
     evaluations: Annotated[list[dict], operator.add]
     batch_failures: Annotated[list[str], operator.add]
@@ -198,6 +218,8 @@ def load_transcript(state: QAState) -> dict:
     return {
         "candidate_id": interview["candidate_id"],
         "job_title": interview["job_title"],
+        "requirements": interview["requirements"],
+        "cv_matches": interview["cv_matches"],
         "turns": interview["turns"],
         "attempts": 0,
     }
@@ -211,10 +233,11 @@ def segment_qa(state: QAState) -> dict:
     """Ask the AI to split the transcript into pairs, then check them."""
     attempts = state.get("attempts", 0) + 1
     try:
-        answer = segmentation.ask_ai(state["job_title"], state["turns"])
+        answer = segmentation.ask_ai(state["job_title"], state["turns"], state["requirements"])
     except ServiceUnavailableError:
         return {"failure": AI_UNAVAILABLE, "attempts": attempts}
-    pairs = segmentation.build_pairs(answer, state["turns"])
+    known = [item["id"] for item in state["requirements"]]
+    pairs = segmentation.build_pairs(answer, state["turns"], known)
     if not pairs:
         log_event(
             logger,
@@ -278,18 +301,47 @@ def collect_evaluations(state: QAState) -> dict:
     return {"pairs": evaluation.attach(state["pairs"], state.get("evaluations", []))}
 
 
-def route_after_collect(state: QAState) -> Literal["save_analysis", "handle_error"]:
-    return "handle_error" if state.get("failure") else "save_analysis"
+def route_after_collect(state: QAState) -> Literal["map_coverage", "handle_error"]:
+    return "handle_error" if state.get("failure") else "map_coverage"
+
+
+def map_coverage(state: QAState) -> dict:
+    """For each job requirement: the questions that explored it, their answer
+    scores and the status, next to the CV screening result. No AI call."""
+    return {
+        "coverage": coverage.map_coverage(
+            state["pairs"], state["requirements"], state.get("cv_matches")
+        )
+    }
+
+
+def suggest_questions(state: QAState) -> dict:
+    """Find the new questions worth offering for the question bank. When the
+    bank cannot be searched, the evaluation goes on without suggestions."""
+    try:
+        found = suggestions.suggest(state["pairs"], state["job_title"])
+    except suggestions.QuestionBankSearchError:
+        return {"suggestions": None}
+    return {"suggestions": found}
 
 
 def save_analysis(state: QAState) -> dict:
-    """Keep the evaluated pairs on the interview's assessment."""
-    store.save_analysis(state["session_id"], state["candidate_id"], state["pairs"])
+    """Keep the evaluated pairs, the coverage and the suggestions on the
+    interview's assessment."""
+    store.save_analysis(
+        state["session_id"],
+        state["candidate_id"],
+        state["pairs"],
+        state["coverage"],
+        state.get("suggestions"),
+    )
     log_event(
         logger,
         "qa_analysis_saved",
         session_id=state["session_id"],
+        suggestions=len(state.get("suggestions") or []),
         **segmentation.counts(state["pairs"]),
+        **coverage.counts(state["coverage"]),
     )
     return {}
 
@@ -313,6 +365,8 @@ def build_qa_analysis_graph(checkpointer: BaseCheckpointSaver) -> CompiledStateG
     graph.add_node("segment_qa", segment_qa)
     graph.add_node("evaluate_answers", evaluate_answers)
     graph.add_node("collect_evaluations", collect_evaluations)
+    graph.add_node("map_coverage", map_coverage)
+    graph.add_node("suggest_questions", suggest_questions)
     graph.add_node("save_analysis", save_analysis)
     graph.add_node("handle_error", handle_error)
 
@@ -325,6 +379,8 @@ def build_qa_analysis_graph(checkpointer: BaseCheckpointSaver) -> CompiledStateG
     )
     graph.add_edge("evaluate_answers", "collect_evaluations")
     graph.add_conditional_edges("collect_evaluations", route_after_collect)
+    graph.add_edge("map_coverage", "suggest_questions")
+    graph.add_edge("suggest_questions", "save_analysis")
     graph.add_edge("save_analysis", END)
     graph.add_edge("handle_error", END)
     return graph.compile(checkpointer=checkpointer)
