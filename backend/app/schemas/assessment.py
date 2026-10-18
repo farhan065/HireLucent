@@ -13,7 +13,10 @@ class Criterion(BaseModel):
 
 class Criteria(BaseModel):
     relevance: Criterion
-    accuracy: Criterion | None = Field(default=None, description="Technical questions only.")
+    accuracy: Criterion | None = Field(
+        default=None,
+        description="Technical questions, and company questions checked against a reference.",
+    )
     completeness: Criterion
     articulation: Criterion
 
@@ -27,7 +30,19 @@ class Evidence(BaseModel):
 
 
 class AccuracySource(BaseModel):
-    type: Literal["ai_judgement"] = Field(description="ai_judgement: the AI's own knowledge.")
+    """Where a technical or company answer's accuracy judgement comes from."""
+
+    type: Literal["reference", "ai_judgement", "not_checked"] = Field(
+        description="reference: checked against a Knowledge Base reference passage. "
+        "ai_judgement: a technical answer with no usable reference, judged from the "
+        "AI interviewer's own knowledge. not_checked: a company answer with no usable "
+        "reference, so its accuracy is not scored."
+    )
+    source: str | None = Field(default=None, description="The reference document's name.")
+    passage: str | None = Field(default=None, description="The passage checked against.")
+    similarity: float | None = Field(
+        default=None, description="How close the passage is to the answer, 0 to 1."
+    )
 
 
 class AnswerEvaluation(BaseModel):
@@ -52,7 +67,7 @@ class QAPair(BaseModel):
     )
     start_ms: int = Field(description="Milliseconds from the start of the interview.")
     end_ms: int
-    kind: Literal["technical", "behavioural", "small_talk"] = Field(
+    kind: Literal["technical", "behavioural", "company", "small_talk"] = Field(
         description="Small talk stays in the transcript but is not evaluated."
     )
     follow_up_of: str | None = Field(

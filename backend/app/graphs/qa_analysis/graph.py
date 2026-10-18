@@ -14,10 +14,22 @@ Turns one interview's transcript into evaluated question-answer pairs:
     collect_evaluations -> (every batch judged) -> save_analysis -> end
                         -> (a batch failed)     -> handle_error -> end
 
-Each evaluate_answers branch runs its own small pipeline: the AI judges the
-batch, the answer is checked, and an answer that fails the checks is asked
-for again, up to MAX_ATTEMPTS times. Checking answers against the Knowledge
-Base and mapping the job's requirements follow in later steps.
+Each evaluate_answers branch runs its own small pipeline:
+
+    start -> (technical or company answers) -> retrieve_references
+          -> (behavioural answers only)     -> judge_batch
+    retrieve_references -> (searched)                   -> judge_batch
+                        -> (Knowledge Base not reached) -> end (failed)
+    judge_batch -> (valid)                                -> end
+                -> (fails the checks, attempts left)      -> judge_batch
+                -> (AI not available, or still invalid)   -> end (failed)
+
+retrieve_references finds approved Knowledge Base passages for each
+technical and company answer, and judge_batch checks accuracy against them
+first. With no usable reference, a technical answer's accuracy is the AI
+interviewer's own judgement, and a company answer's accuracy is not scored,
+because the AI cannot know the company's own facts. The evaluation says
+which it was. Mapping the job's requirements follows in a later step.
 """
 
 import logging
@@ -34,7 +46,7 @@ from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import BaseState, can_retry
 from app.graphs.checkpointer import get_checkpointer
-from app.graphs.qa_analysis import evaluation, segmentation, store
+from app.graphs.qa_analysis import evaluation, references, segmentation, store
 from app.models.enums import SessionStatus
 
 logger = get_logger(__name__)
@@ -46,6 +58,10 @@ AI_UNAVAILABLE = "The AI service was not available. Evaluate the interview again
 NO_PAIRS = "No questions and answers could be found in the transcript."
 INVALID_EVALUATION = (
     "The AI could not give a valid evaluation of every answer. "
+    "Evaluate the interview again to retry."
+)
+NO_KNOWLEDGE_BASE = (
+    "The Knowledge Base could not be searched for references. "
     "Evaluate the interview again to retry."
 )
 
@@ -74,6 +90,8 @@ class BatchState(TypedDict, total=False):
     batch: list[dict]
     # Only the turns this batch needs.
     turns: list[dict]
+    # Reference passages for each technical pair, by pair id.
+    references: dict[str, list[dict]]
     attempts: int
     evaluations: list[dict]
     problems: list[str]
@@ -83,15 +101,48 @@ class BatchState(TypedDict, total=False):
 # --- Per-batch pipeline ------------------------------------------------------
 
 
+def _turns(state: BatchState) -> dict[int, dict]:
+    return {turn["id"]: turn for turn in state["turns"]}
+
+
+def route_start(state: BatchState) -> Literal["retrieve_references", "judge_batch"]:
+    """Only technical and company answers are checked against references."""
+    if any(pair["kind"] in evaluation.CHECKED_KINDS for pair in state["batch"]):
+        return "retrieve_references"
+    return "judge_batch"
+
+
+def retrieve_references(state: BatchState) -> dict:
+    """Find approved Knowledge Base passages for each technical answer,
+    through the RAG MCP server."""
+    try:
+        found = references.for_batch(state["batch"], _turns(state))
+    except references.ReferenceSearchError:
+        return {"failure": NO_KNOWLEDGE_BASE}
+    log_event(
+        logger,
+        "qa_references_found",
+        session_id=state["session_id"],
+        answers=len(found),
+        with_references=sum(bool(passages) for passages in found.values()),
+    )
+    return {"references": found}
+
+
+def route_after_retrieve(state: BatchState) -> Literal["judge_batch", "__end__"]:
+    return END if state.get("failure") else "judge_batch"
+
+
 def judge_batch(state: BatchState) -> dict:
     """Ask the AI to judge the batch, then check its answer."""
     attempts = state.get("attempts", 0) + 1
-    turns = {turn["id"]: turn for turn in state["turns"]}
+    turns = _turns(state)
+    found_references = state.get("references", {})
     try:
-        answer = evaluation.ask_ai(state["job_title"], state["batch"], turns)
+        answer = evaluation.ask_ai(state["job_title"], state["batch"], turns, found_references)
     except ServiceUnavailableError:
         return {"failure": AI_UNAVAILABLE, "attempts": attempts}
-    found = evaluation.problems(answer, state["batch"], turns)
+    found = evaluation.problems(answer, state["batch"], turns, found_references)
     if found:
         log_event(
             logger,
@@ -103,7 +154,9 @@ def judge_batch(state: BatchState) -> dict:
         )
         return {"problems": found, "attempts": attempts}
     return {
-        "evaluations": evaluation.to_evaluations(answer, state["batch"], turns),
+        "evaluations": evaluation.to_evaluations(
+            answer, state["batch"], turns, found_references
+        ),
         "problems": [],
         "attempts": attempts,
     }
@@ -119,8 +172,10 @@ def route_after_judge(state: BatchState) -> Literal["judge_batch", "__end__"]:
 
 def build_batch_pipeline() -> CompiledStateGraph:
     graph = StateGraph(BatchState)
+    graph.add_node("retrieve_references", retrieve_references)
     graph.add_node("judge_batch", judge_batch)
-    graph.add_edge(START, "judge_batch")
+    graph.add_conditional_edges(START, route_start)
+    graph.add_conditional_edges("retrieve_references", route_after_retrieve)
     graph.add_conditional_edges("judge_batch", route_after_judge)
     return graph.compile()
 

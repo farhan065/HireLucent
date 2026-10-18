@@ -8,7 +8,9 @@ interviewer and an answer from the candidate. The pairs keep turn numbers
 and times, never copied text, so every pair points back to the transcript.
 
 Greetings and small talk are kept as pairs labelled "small_talk", so they
-stay visible, but they are not evaluated.
+stay visible, but they are not evaluated. Questions about the company itself
+are labelled "company", so they are always checked against the company's
+own reference documents.
 """
 
 from typing import Literal
@@ -25,9 +27,9 @@ MAX_TRANSCRIPT_CHARS = 120_000
 # Longer question wording from the AI is cut to this.
 MAX_QUESTION_CHARS = 500
 
-Kind = Literal["technical", "behavioural", "small_talk"]
+Kind = Literal["technical", "behavioural", "company", "small_talk"]
 # Kinds that are evaluated in the next steps.
-EVALUATED_KINDS = ("technical", "behavioural")
+EVALUATED_KINDS = ("technical", "behavioural", "company")
 
 PROMPT = """You analyse job interview transcripts for a recruitment team. \
 The interview is for the role "{job_title}". Split the transcript below into \
@@ -41,8 +43,10 @@ For each pair give:
 - answer_turns: the numbers of the candidate turns that answer it, in order \
 ([] when the candidate did not answer)
 - kind: "technical" (knowledge, skills, tools, problem solving), \
-"behavioural" (past experience, teamwork, situations, motivation) or \
-"small_talk" (greetings, introductions of the process, scheduling, thanks, \
+"behavioural" (past experience, teamwork, situations, motivation), \
+"company" (what the candidate knows about this company itself: its policies, \
+products, services, values or culture) or "small_talk" (greetings, the \
+interviewer explaining the process or the company, scheduling, thanks, \
 "any questions for us?")
 - follow_up_of: the number of the earlier pair this question follows up or \
 clarifies (counting pairs from 1), or null
@@ -86,12 +90,18 @@ def clock(ms: int) -> str:
     return f"{hours}:{minutes:02}:{seconds:02}" if hours else f"{minutes:02}:{seconds:02}"
 
 
+def mask_text(text: str) -> str:
+    """The text with email addresses, phone numbers and links masked, so they
+    never leave the backend."""
+    return mask_contact(text, find_contact(text))
+
+
 def transcript_lines(turns: list[dict]) -> str:
     """The turns as numbered lines, with contact details masked, so the AI
     provider receives no email address, phone number or link."""
     lines = []
     for turn in turns:
-        text = mask_contact(turn["text"], find_contact(turn["text"]))
+        text = mask_text(turn["text"])
         speaker = "Interviewer" if turn["speaker"] == Speaker.INTERVIEWER else "Candidate"
         lines.append(f"[T{turn['id']}] {speaker} ({clock(turn['start_ms'])}): {text}")
     return "\n".join(lines)[:MAX_TRANSCRIPT_CHARS]
