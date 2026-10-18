@@ -224,6 +224,40 @@ class AssessmentOut(BaseModel):
     updated_at: datetime
 
 
+class CoverageCounts(BaseModel):
+    covered: int
+    weak: int
+    not_explored: int
+    total: int
+
+
+class RankedAssessment(BaseModel):
+    """One completed interview in the job's ranked list. Interviews without
+    an overall score are listed too, unranked."""
+
+    session_id: int
+    candidate_id: int
+    candidate_name: str
+    started_at: datetime | None
+    ended_at: datetime | None
+    scheduled_start: datetime
+    rank: int | None = Field(description="1 for the highest overall score; empty if unranked.")
+    status: Literal["analysed", "draft", "approved"] | None = Field(
+        description="The assessment's status; empty until the interview is evaluated."
+    )
+    cv_score: float | None
+    interview_score: float | None
+    overall_score: float | None
+    suitability: Literal["strong_fit", "possible_fit", "not_a_fit"] | None
+    answers_evaluated: int = Field(description="Answers the interview score averages.")
+    coverage: CoverageCounts | None
+    strengths: list[Claim] | None
+    weaknesses: list[Claim] | None
+    gaps: list[Claim] | None
+    areas_to_verify: list[Claim] | None
+    approved_at: datetime | None
+
+
 class EvaluationActivity(BaseModel):
     """A job's interview evaluations: the one running, the last finished one
     and how many completed interviews are waiting. While a task runs, its

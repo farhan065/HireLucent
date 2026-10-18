@@ -14,6 +14,7 @@ from app.schemas.assessment import (
     AssessmentOut,
     EvaluationActivity,
     QuestionSuggestion,
+    RankedAssessment,
     ReviewRequest,
 )
 from app.schemas.error import ErrorResponse
@@ -58,6 +59,35 @@ def evaluate_interview(
     )
 
 
+@session_router.post(
+    "/{session_id}/report",
+    response_model=TaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Write the report of an interview whose answers are evaluated",
+    responses={
+        404: {"model": ErrorResponse, "description": "Interview not found or not evaluated"},
+        409: {
+            "model": ErrorResponse,
+            "description": "It already has a report, or an evaluation is running",
+        },
+    },
+)
+def write_interview_report(
+    session_id: int,
+    background_tasks: BackgroundTasks,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+    graph: CompiledStateGraph = Depends(get_final_assessment_graph),
+) -> Task:
+    """Starts in the background and returns a task, like an evaluation. Only
+    the report is written, from the answers already evaluated, and it waits
+    for review as a draft. For an interview evaluated before reports
+    existed."""
+    return evaluation_service.start_report(
+        db, background_tasks, graph, session_id, principal.subject_id
+    )
+
+
 @job_router.post(
     "/evaluate",
     response_model=TaskResponse,
@@ -97,6 +127,22 @@ def read_evaluation(job_id: int, db: Session = Depends(get_db)) -> dict:
     many completed interviews have not been evaluated yet. The screens ask
     every few seconds while one runs."""
     return evaluation_service.evaluation_activity(db, job_id)
+
+
+@job_router.get(
+    "/assessments",
+    response_model=list[RankedAssessment],
+    summary="List the job's assessed candidates, ranked",
+    responses={404: {"model": ErrorResponse, "description": "Job not found"}},
+)
+def list_ranked_assessments(job_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    """Every completed interview of the job. Those with an overall score come
+    first, ranked by it (draft and approved reports alike; a tie goes to the
+    higher interview score, then by name), each with its scores, label,
+    requirement coverage counts and the report's points with their sources.
+    The rest follow unranked: not evaluated yet, only analysed, or without
+    an overall score."""
+    return evaluation_service.ranked_assessments(db, job_id)
 
 
 @session_router.get(

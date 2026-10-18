@@ -19,7 +19,7 @@ from fastapi import BackgroundTasks
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from sqlalchemy import exists, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.ai import client as ai_client
 from app.core.config import get_settings
@@ -27,6 +27,8 @@ from app.core.errors import AppError, ConflictError, NotFoundError, ServiceUnava
 from app.core.logging import get_logger, log_event
 from app.graphs.base import thread_config
 from app.graphs.final_assessment import graph as final_graph
+from app.graphs.final_assessment import scoring
+from app.graphs.qa_analysis import coverage as coverage_rules
 from app.graphs.qa_analysis.graph import answers_to_judge, get_qa_analysis_graph
 from app.models import Assessment, InterviewSession, Job, Task, TranscriptTurn
 from app.models.enums import AssessmentStatus, SessionStatus
@@ -48,6 +50,7 @@ NO_SUGGESTIONS = (
 )
 UNKNOWN_SUGGESTION = "Some of the chosen questions are not among the suggestions."
 NOT_A_DRAFT = "This report is not waiting for review."
+HAS_REPORT = "This interview already has a report. Evaluate it again to write a new one."
 UNKNOWN_POINT = "Some of the chosen points are not in the report."
 REWRITE_FAILED = (
     "The AI service was not available, so the report was not rewritten. "
@@ -232,6 +235,55 @@ def evaluate_one(
         return write_report(graphs.final_assessment, session_id)
 
 
+def start_report(
+    db: Session,
+    background_tasks: BackgroundTasks,
+    graph: CompiledStateGraph,
+    session_id: int,
+    user_id: int,
+) -> Task:
+    """Write the report of an interview whose answers are already evaluated
+    but that has no report yet, for example one evaluated before reports
+    existed. The answers are not evaluated again."""
+    session = session_service.get_session(db, session_id)
+    assessment = get_assessment(db, session_id)
+    if assessment.status != AssessmentStatus.ANALYSED:
+        raise ConflictError(HAS_REPORT)
+    ensure_no_evaluation(db)
+    return task_service.start_task(
+        db,
+        background_tasks,
+        TASK_KIND,
+        user_id,
+        lambda progress: run_report(graph, session_id, progress),
+        job_id=session.job_id,
+    )
+
+
+def run_report(graph: CompiledStateGraph, session_id: int, progress: TaskProgress) -> dict:
+    """Write one report, keeping the same task details as an evaluation, so
+    the screens show its progress and any failure the same way."""
+    progress.note({"session_ids": [session_id], "current": session_id, "failures": []})
+    progress.update(0, 1, "Interview 1 of 1 · writing the report")
+    with ai_client.background_calls():
+        result = write_report(graph, session_id)
+    failures = []
+    if result.get("failure"):
+        failures = [{"session_id": session_id, "reason": result["failure"]}]
+    progress.note({"session_ids": [session_id], "current": None, "failures": failures})
+    log_event(logger, "report_written", session_id=session_id, failed=len(failures))
+    if failures:
+        raise EvaluationFailed(result["failure"])
+    progress.update(1, 1, "Report written")
+    return {
+        "total": 1,
+        "evaluated": 1,
+        "failed": 0,
+        "session_ids": [session_id],
+        "failures": [],
+    }
+
+
 def write_report(graph: CompiledStateGraph, session_id: int) -> dict:
     """Run the Final Assessment graph until the report waits for review. An
     earlier report of the interview is started afresh."""
@@ -257,6 +309,87 @@ def evaluation_activity(db: Session, job_id: int) -> dict:
         "last": task_service.last_finished(db, job_id, TASK_KIND),
         "waiting": len(sessions_to_evaluate(db, job_id)),
     }
+
+
+def _coverage_counts(coverage: list[dict] | None) -> dict | None:
+    if coverage is None:
+        return None
+    statuses = [entry["status"] for entry in coverage]
+    return {
+        "covered": statuses.count(coverage_rules.COVERED),
+        "weak": statuses.count(coverage_rules.WEAK),
+        "not_explored": statuses.count(coverage_rules.NOT_EXPLORED),
+        "total": len(statuses),
+    }
+
+
+def _ranked_row(session: InterviewSession) -> dict:
+    assessment = session.assessment
+    candidate = session.candidate
+    # Scores and points exist once the report is written (draft or approved).
+    has_report = assessment is not None and assessment.status != AssessmentStatus.ANALYSED
+    report = assessment if has_report else None
+    screening = candidate.scores["final_score"] if candidate and candidate.scores else None
+    return {
+        "session_id": session.id,
+        "candidate_id": session.candidate_id,
+        "candidate_name": candidate.full_name if candidate else "",
+        "started_at": session.started_at,
+        "ended_at": session.ended_at,
+        "scheduled_start": session.scheduled_start,
+        "rank": None,
+        "status": assessment.status if assessment else None,
+        "cv_score": report.cv_score if report else screening,
+        "interview_score": report.interview_score if report else None,
+        "overall_score": report.overall_score if report else None,
+        "suitability": report.suitability if report else None,
+        "answers_evaluated": len(scoring.evaluated(assessment.qa_evaluations))
+        if assessment
+        else 0,
+        "coverage": _coverage_counts(assessment.coverage_map if assessment else None),
+        "strengths": report.strengths if report else None,
+        "weaknesses": report.weaknesses if report else None,
+        "gaps": report.gaps if report else None,
+        "areas_to_verify": report.areas_to_verify if report else None,
+        "approved_at": report.approved_at if report else None,
+    }
+
+
+def ranked_assessments(db: Session, job_id: int) -> list[dict]:
+    """The job's completed interviews, ranked by overall score (draft and
+    approved reports alike). A tie goes to the higher interview score, then
+    by name. Interviews without an overall score follow, unranked, latest
+    first."""
+    if db.get(Job, job_id) is None:
+        raise NotFoundError("This job does not exist.")
+    sessions = db.scalars(
+        select(InterviewSession)
+        .where(
+            InterviewSession.job_id == job_id,
+            InterviewSession.status == SessionStatus.COMPLETED,
+        )
+        .options(
+            selectinload(InterviewSession.candidate),
+            selectinload(InterviewSession.assessment),
+        )
+    ).all()
+    rows = [_ranked_row(session) for session in sessions]
+    ranked = sorted(
+        (row for row in rows if row["overall_score"] is not None),
+        key=lambda row: (
+            -row["overall_score"],
+            -(row["interview_score"] or 0),
+            row["candidate_name"].lower(),
+        ),
+    )
+    for rank, row in enumerate(ranked, start=1):
+        row["rank"] = rank
+    unranked = sorted(
+        (row for row in rows if row["overall_score"] is None),
+        key=lambda row: row["started_at"] or row["scheduled_start"],
+        reverse=True,
+    )
+    return ranked + unranked
 
 
 def get_assessment(db: Session, session_id: int) -> Assessment:

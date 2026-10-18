@@ -18,7 +18,7 @@ from app.graphs.final_assessment import findings, report, scoring
 from app.graphs.final_assessment import graph as final
 from app.graphs.final_assessment.report import ClaimOut, QuoteOut, ReportAnswer
 from app.main import create_app
-from app.models import Assessment
+from app.models import Assessment, InterviewSession
 from app.models.enums import UserRole
 from app.schemas.assessment import ReviewRequest
 from app.services import evaluation_service
@@ -665,3 +665,164 @@ def test_candidate_cannot_review_a_report(client: TestClient) -> None:
     )
 
     assert response.status_code == 403
+
+
+# --- The job's ranked list ---------------------------------------------------
+
+
+def _completed(
+    sid: int, name: str, status: str | None, overall: float | None, interview: float | None
+):
+    session = InterviewSession(
+        id=sid,
+        job_id=2,
+        candidate_id=sid,
+        status="completed",
+        scheduled_start=NOW,
+        started_at=NOW - timedelta(days=sid),
+    )
+    session.__dict__["candidate"] = SimpleNamespace(
+        full_name=name, scores={"final_score": 80.0}
+    )
+    assessment = None
+    if status:
+        assessment = Assessment(
+            status=status,
+            qa_evaluations=PAIRS,
+            coverage_map=COVERAGE,
+            cv_score=80.0 if status != "analysed" else None,
+            interview_score=interview,
+            overall_score=overall,
+            strengths=[] if status != "analysed" else None,
+        )
+    session.__dict__["assessment"] = assessment
+    return session
+
+
+class FakeRankingDB:
+    def __init__(self, sessions: list) -> None:
+        self.sessions = sessions
+
+    def get(self, model, key):
+        return SimpleNamespace(id=key)
+
+    def scalars(self, query):
+        return SimpleNamespace(all=lambda: self.sessions)
+
+
+def test_candidates_are_ranked_by_overall_score_then_interview_then_name() -> None:
+    sessions = [
+        _completed(1, "Bina", "approved", 64.0, 52.7),
+        _completed(2, "Arif", "draft", 78.6, 75.7),
+        _completed(3, "Chaya", "draft", 78.6, 80.0),
+        _completed(4, "Dipu", "approved", 78.6, 80.0),
+        _completed(5, "Esha", None, None, None),
+        _completed(6, "Faruk", "analysed", None, None),
+        _completed(7, "Gazi", "draft", None, None),
+    ]
+
+    rows = evaluation_service.ranked_assessments(FakeRankingDB(sessions), 2)
+
+    assert [(row["candidate_name"], row["rank"]) for row in rows] == [
+        ("Chaya", 1),
+        ("Dipu", 2),
+        ("Arif", 3),
+        ("Bina", 4),
+        ("Esha", None),
+        ("Faruk", None),
+        ("Gazi", None),
+    ]
+    first = rows[0]
+    assert first["suitability"] == "strong_fit" and first["status"] == "draft"
+    assert first["answers_evaluated"] == 4
+    assert first["coverage"] == {"covered": 1, "weak": 1, "not_explored": 2, "total": 4}
+
+
+def test_an_unevaluated_interview_shows_the_screening_score_only() -> None:
+    rows = evaluation_service.ranked_assessments(
+        FakeRankingDB([_completed(5, "Esha", None, None, None)]), 2
+    )
+
+    row = rows[0]
+    assert row["cv_score"] == 80.0 and row["overall_score"] is None
+    assert row["coverage"] is None and row["answers_evaluated"] == 0
+
+
+def test_an_analysis_without_a_report_has_no_report_points() -> None:
+    rows = evaluation_service.ranked_assessments(
+        FakeRankingDB([_completed(6, "Faruk", "analysed", None, None)]), 2
+    )
+
+    assert rows[0]["strengths"] is None and rows[0]["status"] == "analysed"
+
+
+def test_interviewer_reads_the_ranked_list(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = evaluation_service._ranked_row(_completed(2, "Arif", "draft", 78.6, 75.7))
+    monkeypatch.setattr(
+        evaluation_service, "ranked_assessments", lambda db, job_id: [{**row, "rank": 1}]
+    )
+
+    response = client.get("/jobs/2/assessments", headers=_auth(UserRole.INTERVIEWER))
+    refused = client.get("/jobs/2/assessments", headers=_auth(UserRole.CANDIDATE))
+
+    assert response.status_code == 200
+    first = response.json()[0]
+    assert first["rank"] == 1 and first["suitability"] == "strong_fit"
+    assert refused.status_code == 403
+
+
+# --- Writing only the report -------------------------------------------------
+
+
+def test_a_report_is_written_for_evaluated_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    progress = SimpleNamespace(task_id="t", updates=[], notes=[])
+    progress.update = lambda current, total, message=None: progress.updates.append(message)
+    progress.note = lambda details: progress.notes.append(details)
+    written: list[int] = []
+
+    def write(graph, sid):
+        written.append(sid)
+        return {}
+
+    monkeypatch.setattr(evaluation_service, "write_report", write)
+
+    summary = evaluation_service.run_report(None, 9, progress)
+
+    assert written == [9] and summary["evaluated"] == 1
+    assert "Interview 1 of 1 · writing the report" in progress.updates
+    assert progress.notes[0]["current"] == 9 and progress.notes[-1]["current"] is None
+
+
+def test_a_report_that_cannot_be_written_fails_with_the_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    progress = SimpleNamespace(task_id="t", update=lambda *args: None, notes=[])
+    progress.note = lambda details: progress.notes.append(details)
+    monkeypatch.setattr(
+        evaluation_service,
+        "write_report",
+        lambda graph, sid: {"failure": final.AI_UNAVAILABLE},
+    )
+
+    with pytest.raises(evaluation_service.EvaluationFailed) as error:
+        evaluation_service.run_report(None, 9, progress)
+
+    assert error.value.message == final.AI_UNAVAILABLE
+    failure = {"session_id": 9, "reason": final.AI_UNAVAILABLE}
+    assert progress.notes[-1]["failures"] == [failure]
+
+
+def test_only_an_interview_without_a_report_gets_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        evaluation_service.session_service,
+        "get_session",
+        lambda db, sid: SimpleNamespace(job_id=2),
+    )
+    monkeypatch.setattr(evaluation_service, "get_assessment", lambda db, sid: _draft())
+
+    with pytest.raises(ConflictError) as error:
+        evaluation_service.start_report(None, None, None, 9, 1)
+
+    assert error.value.message == evaluation_service.HAS_REPORT
