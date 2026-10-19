@@ -17,8 +17,8 @@ import { useEvaluation } from '../hooks/useEvaluation.js'
 import { useInterviews } from '../hooks/useInterviews.js'
 import { useJob } from '../hooks/useJob.js'
 import { useJobActivity } from '../hooks/useJobActivity.js'
-import { draftsToReview } from '../lib/assessment.js'
-import { countToday, countWaiting } from '../lib/interviews.js'
+import { allAssessed, draftsToReview } from '../lib/assessment.js'
+import { allInterviewsDone, countToday, countWaiting } from '../lib/interviews.js'
 import { JOB_STAGES, formatDate, jobStage } from '../lib/jobs.js'
 
 const TABS = ['applications', 'screening', 'interviews', 'assessments']
@@ -125,6 +125,8 @@ export default function JobPage() {
             today={countToday(interviews.interviews, interviews.now)}
             inWaitingRoom={countWaiting(interviews.interviews)}
             toReview={draftsToReview(interviews.interviews)}
+            interviewsDone={allInterviewsDone(interviews.interviews)}
+            assessmentsDone={allAssessed(interviews.interviews)}
             current={current}
           />
 

@@ -50,6 +50,7 @@ function Tab({ number, label, to, isCurrent, isDone, badge }) {
 // and above its conversation with the AI Agent. "today" is the number of
 // interviews still to come today, "inWaitingRoom" the candidates waiting now
 // and "toReview" the draft reports waiting for the interviewer's review.
+// "interviewsDone" and "assessmentsDone" tick the last two stages.
 export default function JobTabs({
   job,
   threadId,
@@ -57,6 +58,8 @@ export default function JobTabs({
   today = 0,
   inWaitingRoom = 0,
   toReview = 0,
+  interviewsDone = false,
+  assessmentsDone = false,
   current,
 }) {
   const stage = jobStage(job)
@@ -91,6 +94,7 @@ export default function JobTabs({
       // Open once the job is published. Until someone is shortlisted it
       // explains what to do first.
       to: isPublished ? `/app/jobs/${job.id}/interviews` : undefined,
+      isDone: interviewsDone,
       badge:
         inWaitingRoom > 0 ? (
           <span className="rounded-full bg-success-soft px-2 py-0.5 text-xs font-semibold text-success">
@@ -109,6 +113,7 @@ export default function JobTabs({
       label: 'Assessments',
       // The ranked candidates, once the job is published.
       to: isPublished ? `/app/jobs/${job.id}/assessments` : undefined,
+      isDone: assessmentsDone,
       badge: toReview > 0 && (
         <span className="rounded-full bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber">
           {toReview} to review

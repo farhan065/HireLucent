@@ -291,6 +291,13 @@ export function unrankedReason(row) {
   return 'No overall score: the candidate has no CV score.'
 }
 
+// The Assessments tab is done when every completed interview has an
+// approved report: none waits to be evaluated and no draft waits for review.
+export function allAssessed(interviews) {
+  const completed = (interviews ?? []).filter((item) => item.status === 'completed')
+  return completed.length > 0 && completed.every((item) => item.assessment_status === 'approved')
+}
+
 // How many drafts wait for review, from the interviews list.
 export function draftsToReview(interviews) {
   return (interviews ?? []).filter((item) => item.assessment_status === 'draft').length
