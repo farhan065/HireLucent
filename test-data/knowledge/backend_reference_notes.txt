@@ -1,0 +1,41 @@
+Backend Engineering Reference Notes (synthetic sample)
+
+Upload this file in the Knowledge Base with the type "Reference". It is used to check the accuracy of interview answers.
+
+FastAPI
+
+FastAPI is a Python web framework for building APIs. It reads the type hints of the function parameters to validate request data and to generate OpenAPI documentation automatically, which is served at /docs.
+
+Request and response bodies are described with Pydantic models. FastAPI validates incoming data against the model and returns a 422 error with the details when the data is not valid.
+
+Dependency injection in FastAPI is done with Depends. A dependency is a function that runs before the endpoint, for example to open a database session or to check the user's access token. Dependencies can depend on other dependencies.
+
+FastAPI supports both regular and async endpoint functions. Async endpoints suit work that waits on input and output, such as calls to other services. Long-running work should be moved to a background task or a worker, so the request does not wait for it.
+
+Docker and Docker Compose
+
+A Docker image is a packaged, read-only template of an application and everything it needs to run. A container is a running instance of an image. The image is built from a Dockerfile.
+
+Docker Compose describes a multi-container application in one docker-compose.yml file: its services, networks and volumes. "docker compose up -d --build" builds the images and starts every service in the background.
+
+Data written inside a container is lost when the container is removed. Named volumes keep data, such as a database's files, across restarts and rebuilds.
+
+Containers on the same Compose network reach each other by service name, for example a backend reaching its database at the host name "postgres".
+
+SQL and PostgreSQL
+
+An INNER JOIN returns only the rows that have a match in both tables. A LEFT JOIN returns every row of the left table, with empty values where the right table has no match.
+
+An index speeds up searching and sorting on a column, at the cost of extra storage and slower writes. Columns used often in WHERE clauses and joins are good candidates for an index.
+
+A transaction groups several statements so that they all succeed or all fail together. This keeps the data consistent when, for example, money is moved between two accounts.
+
+Database migrations record changes to the database schema as versioned scripts, so every environment can be brought to the same schema. In Python projects with SQLAlchemy, Alembic is the usual migration tool: "alembic upgrade head" applies every migration that has not run yet.
+
+REST APIs
+
+REST APIs use HTTP methods for their meaning: GET reads, POST creates, PUT replaces, PATCH changes part of a resource and DELETE removes it. GET, PUT and DELETE should be idempotent: repeating the same request has the same effect as sending it once.
+
+Status codes tell the client what happened: 200 OK, 201 Created, 400 Bad Request, 401 Unauthorized (not signed in), 403 Forbidden (signed in but not allowed), 404 Not Found, 409 Conflict and 500 Internal Server Error.
+
+Authentication with JSON Web Tokens (JWT): the server signs a token after the user signs in, and the client sends it in the Authorization header as "Bearer <token>". The server checks the signature and the expiry time on every request, so it does not need to store sessions.

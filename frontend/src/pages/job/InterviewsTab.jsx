@@ -1,4 +1,14 @@
-import { Bot, CalendarDays, CircleCheck, Info, TriangleAlert, Video, X } from 'lucide-react'
+import {
+  Bot,
+  CalendarDays,
+  CircleCheck,
+  Info,
+  LoaderCircle,
+  Sparkles,
+  TriangleAlert,
+  Video,
+  X,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
@@ -8,6 +18,7 @@ import { DialogMessage } from '../../components/interviews/EmailMessage.jsx'
 import SchedulePanel from '../../components/interviews/SchedulePanel.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import { useCandidates } from '../../hooks/useCandidates.js'
+import { answersPart, batchPosition, evaluationOf } from '../../lib/assessment.js'
 import {
   cancelInterview,
   clock,
@@ -173,6 +184,66 @@ function NoneWaiting() {
   )
 }
 
+// The completed list's own bar: how many interviews wait to be evaluated,
+// and Evaluate all for them.
+function EvaluateAllBar({ waiting, isRunning, onEvaluateAll }) {
+  return (
+    <section className="flex flex-wrap items-center justify-between gap-4">
+      <span className="text-[15px]">
+        {waiting === 0
+          ? 'Every completed interview has been evaluated.'
+          : `${waiting} completed ${waiting === 1 ? 'interview has' : 'interviews have'} not been evaluated yet.`}
+      </span>
+      {waiting > 0 && (
+        <Button
+          disabled={isRunning}
+          onClick={onEvaluateAll}
+          title={isRunning ? 'An evaluation is running. Wait for it to finish.' : undefined}
+        >
+          <Sparkles className="size-4.5" aria-hidden="true" />
+          Evaluate all
+          <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{waiting} new</span>
+        </Button>
+      )}
+    </section>
+  )
+}
+
+// While Evaluate all runs: which interview it is on, and its answers.
+function EvaluatingAllBanner({ running, interviews }) {
+  const position = batchPosition(running)
+  if (!position) return null
+  const name = interviews.find((item) => item.id === position.sessionId)?.candidate_name
+  return (
+    <section
+      role="status"
+      className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#A9C8FF] bg-white px-5 py-3.5"
+    >
+      <span className="flex items-center gap-3">
+        <LoaderCircle
+          className="size-4.5 shrink-0 animate-spin text-brand motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+        <span>
+          <span className="block text-[14.5px] font-semibold text-navy">
+            Evaluating all new interviews · Interview {position.index} of {position.total}
+            {name ? ` (${name})` : ''} · {answersPart(running.message)}
+          </span>
+          <span className="block text-[13px]">
+            One interview at a time. Each one shows View assessment as soon as it is done.
+          </span>
+        </span>
+      </span>
+      <span aria-hidden="true" className="h-1.5 w-56 overflow-hidden rounded-full bg-[#E4EAF4]">
+        <span
+          className="block h-full rounded-full bg-brand transition-[width]"
+          style={{ width: `${Math.max(((position.index - 1) / position.total) * 100, 4)}%` }}
+        />
+      </span>
+    </section>
+  )
+}
+
 const NOTICE_STYLES = {
   success: { icon: CircleCheck, className: 'bg-success-soft text-success' },
   warning: { icon: TriangleAlert, className: 'bg-warning-soft text-warning' },
@@ -197,7 +268,14 @@ function Notice({ notice, onClose }) {
 // The Interviews tab of a job: schedule, move and cancel interviews, and
 // see when each one can start.
 export default function InterviewsTab() {
-  const { job, threadId, listVersion, interviews: data, onChanged } = useOutletContext()
+  const {
+    job,
+    threadId,
+    listVersion,
+    interviews: data,
+    evaluation,
+    onChanged,
+  } = useOutletContext()
   const { candidates, error: candidatesError } = useCandidates(job.id, listVersion)
   const { interviews, rules, now, error } = data
   // What the side panel is doing: null, { preselected } or { interview }.
@@ -284,6 +362,14 @@ export default function InterviewsTab() {
       {sortInterviews(interviews.filter((item) => item.candidate_waiting)).map((item) => (
         <WaitingBanner key={item.id} interview={item} now={now} />
       ))}
+      {evaluation.activity?.running && (
+        <EvaluatingAllBanner running={evaluation.activity.running} interviews={interviews} />
+      )}
+      {evaluation.error && (
+        <p role="alert" className="font-semibold text-danger">
+          {evaluation.error}
+        </p>
+      )}
 
       <section className="flex flex-wrap items-center justify-between gap-4">
         <ViewPills view={currentView} counts={counts} onChange={setView} />
@@ -312,6 +398,14 @@ export default function InterviewsTab() {
       )}
       {waiting.length === 0 && upcoming.size === 0 && <NoneWaiting />}
 
+      {currentView === 'completed' && evaluation.isLoaded && (
+        <EvaluateAllBar
+          waiting={evaluation.activity.waiting}
+          isRunning={evaluation.isRunning}
+          onEvaluateAll={() => evaluation.start()}
+        />
+      )}
+
       {shown.length === 0 ? (
         <NoUpcoming />
       ) : (
@@ -332,6 +426,9 @@ export default function InterviewsTab() {
             setCancelError('')
             setDeleting(interview)
           }}
+          evaluationOf={(interview) => evaluationOf(evaluation.activity, interview.id)}
+          isEvaluating={evaluation.isRunning}
+          onEvaluate={(interview) => evaluation.start(interview.id)}
         />
       )}
 

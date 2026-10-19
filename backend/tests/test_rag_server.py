@@ -46,3 +46,39 @@ def test_search_is_limited_to_the_job_description_collection(
 
     assert rag_server.find_jd_references("anything") == []
     assert searched == [rag_server.store.JD_REFERENCES]
+
+
+# --- Reference passages for checking interview answers ---
+
+
+def test_references_come_only_from_the_reference_documents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    searched = []
+
+    def fake_search(collection: str, query: str, limit: int) -> list:
+        searched.append((collection, query))
+        return [_match("fastapi_guide.pdf", 0.2), _match("cooking.pdf", 0.9)]
+
+    monkeypatch.setattr(rag_server.store, "search", fake_search)
+
+    references = rag_server.find_references("What is FastAPI?", "A Python web framework.")
+
+    assert [reference["source"] for reference in references] == ["fastapi_guide.pdf"]
+    assert references[0]["similarity"] == 0.8
+    [(collection, query)] = searched
+    assert collection == rag_server.store.RAG_DOCUMENTS
+    assert "What is FastAPI?" in query and "A Python web framework." in query
+
+
+def test_a_long_answer_is_cut_before_the_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    queries = []
+    monkeypatch.setattr(
+        rag_server.store,
+        "search",
+        lambda collection, query, limit: queries.append(query) or [],
+    )
+
+    rag_server.find_references("Question", "word " * 2000)
+
+    assert len(queries[0]) == rag_server.MAX_QUERY_CHARS

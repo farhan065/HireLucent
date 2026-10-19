@@ -56,7 +56,8 @@ def call_tool(
 
 
 async def _list_tools(server_name: str) -> list[dict[str, Any]]:
-    """The server's allowed tools, described the way chat models expect."""
+    """The server's tools the agent may use, described the way chat models
+    expect."""
     server = _server(server_name)
     async with Client(server.url) as client:
         listed = await client.list_tools()
@@ -70,7 +71,7 @@ async def _list_tools(server_name: str) -> list[dict[str, Any]]:
             },
         }
         for tool in listed.tools
-        if tool.name in server.allowed_tools
+        if tool.name in server.allowed_tools and tool.name not in server.backend_only
     ]
 
 
@@ -105,7 +106,11 @@ def call_agent_tool(tool: str, arguments: dict) -> Any:
     else is refused.
     """
     for name, server in mcp_servers().items():
-        if server.offer_to_agent and tool in server.allowed_tools:
+        if (
+            server.offer_to_agent
+            and tool in server.allowed_tools
+            and tool not in server.backend_only
+        ):
             result = call_tool(name, tool, arguments)
             if result.is_error:
                 raise RuntimeError(f"MCP tool {tool} reported an error")

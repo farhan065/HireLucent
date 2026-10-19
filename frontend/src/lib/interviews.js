@@ -183,6 +183,14 @@ export function opensLabel(interview, rules, now = new Date()) {
   return isSameDay(opens, now) ? clock(opens) : formatShortDate(opens)
 }
 
+// The Interviews tab is done when at least one interview is completed and
+// none is still scheduled or in progress. Scheduling another one makes it
+// open again.
+export function allInterviewsDone(interviews) {
+  const list = interviews ?? []
+  return list.some((item) => item.status === 'completed') && !list.some(isActive)
+}
+
 // Candidates in the waiting room now, for the tab's badge.
 export function countWaiting(interviews) {
   return (interviews ?? []).filter((item) => item.candidate_waiting).length

@@ -1,0 +1,35 @@
+Brightleaf Software - Company Reference Notes (synthetic sample)
+
+Upload this file in the Knowledge Base with the type "Reference". Brightleaf Software is an invented company used only for testing and demonstrations. It is used to check candidates' answers to questions about the company.
+
+About the company
+
+Brightleaf Software builds software for small and medium-sized clinics. It was founded in 2016 and has about 120 employees, with its engineering team based in Dhaka.
+
+Products
+
+ClinicFlow is Brightleaf's main product: a web application for booking patient appointments, keeping patient records and sending appointment reminders by SMS and email.
+
+ClinicFlow Insights is a reporting add-on that shows clinics their appointment numbers, missed appointments and busiest hours on a dashboard.
+
+The products are built with Python and FastAPI on the backend, React on the frontend and PostgreSQL as the database, and they run in Docker containers.
+
+Work policy
+
+Employees may work remotely up to two days a week. The other three days are spent in the Dhaka office.
+
+Core hours are 11:00 to 16:00 Dhaka time. Outside core hours, employees choose when they work.
+
+New engineers get a four-week onboarding period with a named mentor before they own features on their own.
+
+Values
+
+Patients first: every feature is judged by whether it helps clinics care for patients.
+
+Ship small, ship often: work is released in small steps, at least once a week.
+
+Own it: the engineer who builds a feature also tests it, releases it and watches it in production.
+
+Learning time
+
+Every employee has four hours each month for learning, and a yearly budget for courses and conferences.

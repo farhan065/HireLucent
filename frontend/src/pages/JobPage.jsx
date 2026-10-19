@@ -13,13 +13,15 @@ import DeleteJobButton from '../components/jobs/DeleteJobButton.jsx'
 import JobTabs from '../components/jobs/JobTabs.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
+import { useEvaluation } from '../hooks/useEvaluation.js'
 import { useInterviews } from '../hooks/useInterviews.js'
 import { useJob } from '../hooks/useJob.js'
 import { useJobActivity } from '../hooks/useJobActivity.js'
-import { countToday, countWaiting } from '../lib/interviews.js'
+import { allAssessed, draftsToReview } from '../lib/assessment.js'
+import { allInterviewsDone, countToday, countWaiting } from '../lib/interviews.js'
 import { JOB_STAGES, formatDate, jobStage } from '../lib/jobs.js'
 
-const TABS = ['applications', 'screening', 'interviews']
+const TABS = ['applications', 'screening', 'interviews', 'assessments']
 
 function LoadingJob() {
   return (
@@ -52,6 +54,9 @@ export default function JobPage() {
   // Interviews are loaded here, so the tab's "today" badge and the
   // Interviews tab share one list.
   const interviews = useInterviews(job?.status === 'published' ? jobId : null, listVersion)
+  // Interview evaluations. When one ends, the interviews load again, so their
+  // rows show View assessment.
+  const evaluation = useEvaluation(job?.status === 'published' ? jobId : null, handleFinished)
 
   // After a shortlist change or a deletion, the same as after a run.
   function handleChanged() {
@@ -119,6 +124,9 @@ export default function JobPage() {
             waiting={waiting}
             today={countToday(interviews.interviews, interviews.now)}
             inWaitingRoom={countWaiting(interviews.interviews)}
+            toReview={draftsToReview(interviews.interviews)}
+            interviewsDone={allInterviewsDone(interviews.interviews)}
+            assessmentsDone={allAssessed(interviews.interviews)}
             current={current}
           />
 
@@ -130,6 +138,7 @@ export default function JobPage() {
               run,
               listVersion,
               interviews,
+              evaluation,
               onChanged: handleChanged,
             }}
           />

@@ -1,5 +1,6 @@
-import { Trash2, Video } from 'lucide-react'
+import { ArrowRight, LoaderCircle, Sparkles, Trash2, Video } from 'lucide-react'
 import { Link } from 'react-router'
+import { REPORT_STATUS } from '../../lib/assessment.js'
 import {
   dayLabel,
   formatShortDate,
@@ -88,6 +89,89 @@ function StartButton({ interview, rules, now }) {
   )
 }
 
+// A completed interview: its transcript, and its evaluation as it stands.
+function CompletedActions({ interview, evaluation, isBusy, onEvaluate }) {
+  const transcript = (
+    <Link
+      to={`/app/interviews/${interview.id}/transcript`}
+      aria-label={`View the transcript of the interview with ${interview.candidate_name}`}
+      className={`${LINK} inline-flex items-center text-brand hover:text-brand-dark`}
+    >
+      View transcript
+    </Link>
+  )
+  if (evaluation.state === 'running') {
+    return (
+      <div role="status" className="flex flex-col items-end gap-1.5">
+        <span className="inline-flex items-center gap-2 text-sm font-semibold text-brand-dark">
+          <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          Evaluating · {evaluation.message}
+        </span>
+        <span aria-hidden="true" className="h-1.5 w-60 overflow-hidden rounded-full bg-[#E4EAF4]">
+          <span
+            className="block h-full rounded-full bg-brand transition-[width]"
+            style={{ width: `${Math.max(evaluation.percent ?? 0, 4)}%` }}
+          />
+        </span>
+        <span className="text-[12.5px]">About a minute. You can leave this page.</span>
+      </div>
+    )
+  }
+  if (evaluation.state === 'queued') {
+    return (
+      <>
+        {transcript}
+        <span className="text-sm font-semibold text-body">Waiting to be evaluated</span>
+      </>
+    )
+  }
+  if (interview.assessment_status) {
+    return (
+      <>
+        {transcript}
+        <Link
+          to={`/app/interviews/${interview.id}/assessment`}
+          className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-full border-[1.5px] border-brand bg-white px-4.5 font-display text-sm font-bold text-brand hover:bg-tint"
+        >
+          View assessment
+          <ArrowRight className="size-4" aria-hidden="true" />
+        </Link>
+      </>
+    )
+  }
+  const button = (
+    <button
+      type="button"
+      disabled={isBusy}
+      onClick={onEvaluate}
+      title={isBusy ? 'Another evaluation is running. Wait for it to finish.' : undefined}
+      className="inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-full bg-brand px-4.5 font-display text-sm font-bold text-white shadow-button hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-line disabled:text-body disabled:shadow-none"
+    >
+      <Sparkles className="size-4" aria-hidden="true" />
+      {evaluation.state === 'failed' ? 'Try again' : 'Evaluate'}
+    </button>
+  )
+  if (evaluation.state === 'failed') {
+    return (
+      <div className="flex flex-col items-end gap-2">
+        <span role="alert" className="max-w-sm text-right text-[13.5px] leading-snug text-danger">
+          {evaluation.reason}
+        </span>
+        <div className="flex items-center gap-3.5">
+          {transcript}
+          {button}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <>
+      {transcript}
+      {button}
+    </>
+  )
+}
+
 function Actions({
   interview,
   rules,
@@ -123,17 +207,6 @@ function Actions({
       </>
     )
   }
-  if (status === 'completed') {
-    return (
-      <Link
-        to={`/app/interviews/${interview.id}/transcript`}
-        aria-label={`View the transcript of the interview with ${interview.candidate_name}`}
-        className={`${LINK} inline-flex items-center text-brand hover:text-brand-dark`}
-      >
-        View transcript
-      </Link>
-    )
-  }
   const isMissed = joinState(interview, rules, now) === 'missed'
   return (
     <>
@@ -153,6 +226,8 @@ function Actions({
 }
 
 // Every interview of the job: upcoming first, then finished and cancelled.
+// evaluationOf(interview) says where its evaluation stands; isEvaluating is
+// true while any evaluation runs, since only one runs at a time.
 export default function InterviewList({
   interviews,
   scores,
@@ -163,6 +238,9 @@ export default function InterviewList({
   onCancel,
   onScheduleAgain,
   onDelete,
+  evaluationOf,
+  isEvaluating,
+  onEvaluate,
 }) {
   return (
     <section
@@ -200,20 +278,38 @@ export default function InterviewList({
                   <span className="text-[13px]">{scoreLabel(scores.get(interview.candidate_id))}</span>
                 </div>
                 <When interview={interview} now={now} />
-                <div>
+                <div className="flex flex-col items-start gap-1.5">
                   <StatusChip tone={status.tone}>{status.label}</StatusChip>
+                  {REPORT_STATUS[interview.assessment_status] && (
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[12.5px] font-semibold ${
+                        REPORT_STATUS[interview.assessment_status].className
+                      }`}
+                    >
+                      {REPORT_STATUS[interview.assessment_status].label}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center justify-end gap-3.5">
-                  <Actions
-                    interview={interview}
-                    rules={rules}
-                    now={now}
-                    canScheduleAgain={canScheduleAgain(interview.candidate_id)}
-                    onMove={() => onMove(interview)}
-                    onCancel={() => onCancel(interview)}
-                    onScheduleAgain={() => onScheduleAgain(interview.candidate_id)}
-                    onDelete={() => onDelete(interview)}
-                  />
+                  {interview.status === 'completed' ? (
+                    <CompletedActions
+                      interview={interview}
+                      evaluation={evaluationOf(interview)}
+                      isBusy={isEvaluating}
+                      onEvaluate={() => onEvaluate(interview)}
+                    />
+                  ) : (
+                    <Actions
+                      interview={interview}
+                      rules={rules}
+                      now={now}
+                      canScheduleAgain={canScheduleAgain(interview.candidate_id)}
+                      onMove={() => onMove(interview)}
+                      onCancel={() => onCancel(interview)}
+                      onScheduleAgain={() => onScheduleAgain(interview.candidate_id)}
+                      onDelete={() => onDelete(interview)}
+                    />
+                  )}
                 </div>
               </div>
             )

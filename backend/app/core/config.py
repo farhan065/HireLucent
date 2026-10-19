@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     jd_reference_max_distance: float = Field(default=0.6, ge=0, le=2)
     # How close a question in the question bank must be to the topic asked.
     question_bank_max_distance: float = Field(default=0.6, ge=0, le=2)
+    # How close a Knowledge Base reference passage must be to a question and
+    # its answer to be used for checking the answer's accuracy.
+    reference_max_distance: float = Field(default=0.6, ge=0, le=2)
 
     # The Blogger MCP server, which publishes approved job posts.
     mcp_blogger_url: str = "http://mcp-blogger:8002/mcp"

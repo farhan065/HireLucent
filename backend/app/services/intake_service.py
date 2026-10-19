@@ -47,7 +47,7 @@ def start_intake(
 ) -> Task:
     """Start fetching a job's CVs in the background and return the task."""
     job = _published_job(db, job_id)
-    task_service.ensure_idle(db, job_id)
+    task_service.ensure_idle(db, job_id, exclude=(task_service.EVALUATION,))
     form_id = job.form_id
     return task_service.start_task(
         db,

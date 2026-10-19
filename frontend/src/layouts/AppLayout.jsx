@@ -45,10 +45,11 @@ function UserPanel() {
 }
 
 // The interviewer workspace: navigation on the left, the current page on the right.
+// On a wide screen the navigation stays in place while the page scrolls.
 export default function AppLayout() {
   return (
     <div className="min-h-screen bg-mist md:flex">
-      <aside className="flex flex-col gap-6 border-b border-line bg-white p-4 md:w-64 md:border-b-0 md:border-r md:px-4 md:py-6">
+      <aside className="flex flex-col gap-6 border-b border-line bg-white p-4 md:sticky md:top-0 md:h-screen md:w-64 md:shrink-0 md:self-start md:overflow-y-auto md:border-b-0 md:border-r md:px-4 md:py-6">
         <div className="px-2">
           <Logo to="/app" />
         </div>

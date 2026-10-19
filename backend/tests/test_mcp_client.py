@@ -38,6 +38,15 @@ def test_an_unknown_server_is_refused() -> None:
         asyncio.run(client.call_tool_async("shell", "run", {}))
 
 
+def test_the_answer_check_is_for_the_backend_only() -> None:
+    rag = mcp_servers()["rag"]
+
+    assert "verify_answer" in rag.allowed_tools
+    assert rag.backend_only == {"verify_answer"}
+    with pytest.raises(ToolNotAllowedError):
+        client.call_agent_tool("verify_answer", {"question": "q", "answer": "a"})
+
+
 def test_the_agent_cannot_call_a_publishing_tool() -> None:
     with pytest.raises(ToolNotAllowedError):
         client.call_agent_tool("create_post", {"title": "x"})
@@ -67,6 +76,7 @@ def test_tools_not_on_the_allow_list_are_not_described(
     tools = [
         SimpleNamespace(name="search_jd_references", description="Search", input_schema={}),
         SimpleNamespace(name="delete_collection", description="Danger", input_schema={}),
+        SimpleNamespace(name="verify_answer", description="Backend only", input_schema={}),
     ]
 
     class FakeClient:

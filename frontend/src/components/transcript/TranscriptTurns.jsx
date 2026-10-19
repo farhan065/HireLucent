@@ -37,7 +37,15 @@ function Text({ text, query, currentAt }) {
 // Every turn of the finished interview, one row each as in the live
 // transcript, with the search matches marked. "data-turn", "data-ms" and
 // "data-end" let the page scroll to a turn and see which part is on screen.
-export default function TranscriptTurns({ turns, candidateName, query, currentMatch }) {
+// focusTurnId marks the turn the page was opened at, for example from an
+// answer's time on the assessment page.
+export default function TranscriptTurns({
+  turns,
+  candidateName,
+  query,
+  currentMatch,
+  focusTurnId = null,
+}) {
   const firstName = candidateName.split(/\s+/)[0]
   return (
     <div className="flex max-w-[920px] flex-col gap-1.5 py-4.5 pr-7 pl-5">
@@ -46,6 +54,7 @@ export default function TranscriptTurns({ turns, candidateName, query, currentMa
         const boundary = Math.floor(turn.start_ms / DIVIDER_MS)
         const previous = index > 0 ? Math.floor(turns[index - 1].start_ms / DIVIDER_MS) : 0
         const hasCurrent = currentMatch?.turnId === turn.id
+        const isFocus = focusTurnId === turn.id
         return (
           <Fragment key={turn.id}>
             {boundary > previous && <Divider ms={boundary * DIVIDER_MS} />}
@@ -54,7 +63,7 @@ export default function TranscriptTurns({ turns, candidateName, query, currentMa
               data-ms={turn.start_ms}
               data-end={turn.end_ms}
               className={`grid grid-cols-[32px_minmax(0,1fr)] gap-3 rounded-2xl px-2.5 py-2 ${
-                hasCurrent ? 'bg-warning-soft/60' : ''
+                hasCurrent ? 'bg-warning-soft/60' : isFocus ? 'bg-tint ring-1 ring-[#A9C8FF]' : ''
               }`}
             >
               <Avatar isInterviewer={isInterviewer} candidateName={candidateName} />

@@ -56,7 +56,7 @@ The two architecture diagrams still show the original plan for job posting (Link
 | Embeddings | `qwen3-embedding:0.6b` on Ollama, in a local container | Knowledge Base search and CV matching |
 | Vector store | ChromaDB | `jd_references`, `cv_embeddings`, `question_bank`, `rag_documents` |
 | Database | PostgreSQL 16 | Jobs, candidates, screening results, conversations, tasks, checkpoints |
-| MCP servers | Custom **RAG MCP** server; community **Blogger MCP** server | Knowledge Base search for the agent; publishing job posts |
+| MCP servers | Custom **RAG MCP** server; community **Blogger MCP** server | Knowledge Base search for the agent, and reference passages for checking interview answers; publishing job posts |
 | OCR | Tesseract (through PyMuPDF) | Scanned CVs |
 
 ### LangGraph workflows built so far
@@ -80,7 +80,7 @@ Candidates who miss a must-have, or have less than the minimum experience, are e
 
 - **FastAPI and Pydantic:** typed request and response models, validation, and automatic API documentation at `/docs`.
 - **LangGraph:** real multi-step workflows with branching, human approval (`interrupt`), parallel branches (`Send`) and checkpoints in PostgreSQL, so work survives a restart.
-- **MCP:** tools are separate services. The agent discovers the Knowledge Base search tool from the RAG MCP server. The Blogger MCP server is called only by the backend, after approval, so the AI can never publish on its own.
+- **MCP:** tools are separate services. The agent discovers the Knowledge Base search tool from the RAG MCP server. The same server's `verify_answer` tool, which finds approved reference passages for checking interview answers, is called only by the backend and is never offered to the agent. The Blogger MCP server is called only by the backend, after approval, so the AI can never publish on its own.
 - **Gemini Flash-Lite:** a free tier that is fast enough for drafting and screening. The provider is a configuration switch.
 - **Ollama embeddings:** run locally, so no CV text leaves the machine for embedding.
 - **React, Vite and Tailwind CSS:**
@@ -135,7 +135,7 @@ Candidates who miss a must-have, or have less than the minimum experience, are e
 docker compose exec backend python -m scripts.seed --sample-data
 ```
 
-**Sample Knowledge Base file:** `test-data/knowledge/backend_engineer_jd_template.txt` can be uploaded as a job description template.
+**Sample Knowledge Base files:** `test-data/knowledge/backend_engineer_jd_template.txt` can be uploaded as a job description template, and `test-data/knowledge/backend_reference_notes.txt` (technical) and `test-data/knowledge/company_reference_notes.txt` (an invented company) as reference documents for checking the accuracy of interview answers.
 
 ## Configuration
 
@@ -150,10 +150,11 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
 | `LLM_REQUESTS_PER_MINUTE`, `AI_TIMEOUT_SECONDS` | Rate limit for the chat model and the timeout of each AI call |
 | `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `OLLAMA_BASE_URL` | Embedding model |
 | `CHROMA_HOST`, `CHROMA_PORT` | Vector store |
-| `MCP_RAG_URL`, `JD_REFERENCE_MAX_DISTANCE` | RAG MCP server, and how close a template must be to count as a reference |
+| `MCP_RAG_URL`, `JD_REFERENCE_MAX_DISTANCE`, `REFERENCE_MAX_DISTANCE` | RAG MCP server; how close a template must be to count as a reference, and how close a Knowledge Base reference passage must be to check an interview answer against it |
 | `MCP_BLOGGER_URL`, `BLOGGER_BLOG_ID`, `BLOGGER_API_KEY` | Publishing to Blogger |
 | `GOOGLE_TOKEN_FILE` | The Google sign-in file inside the backend container |
 | `APP_ENV`, `LOG_LEVEL` | Environment name and log level |
+| `PGADMIN_EMAIL`, `PGADMIN_PASSWORD` | Sign-in for the optional pgAdmin database viewer |
 
 ## Usage walkthrough
 
@@ -175,7 +176,7 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
 
 | Service | Used for | What is sent |
 |---|---|---|
-| Google Gemini API | Job descriptions, CV parsing, requirement matching, scoring | Prompts with job details and **CV text with email addresses and phone numbers masked**. The CV text can still contain the candidate's name and other details written in the CV |
+| Google Gemini API | Job descriptions, CV parsing, requirement matching, scoring, interview evaluation | Prompts with job details, **CV text** and **interview transcript text**, both with email addresses, phone numbers and links masked. They can still contain the candidate's name and other details written in the CV or said in the interview |
 | Ollama (local container) | Embeddings | Nothing leaves the machine |
 | Google Blogger API | Publishing approved job posts | The job title, description, job code and application form link |
 | Google Forms and Drive APIs | Checking the application form and collecting CVs | Nothing is sent. Form responses and uploaded CVs are read |
@@ -253,6 +254,14 @@ npm install
 npm run lint
 npm run build
 ```
+
+**Database viewer (optional):** pgAdmin runs only when asked for, so the normal start is unchanged:
+
+```bash
+docker compose --profile tools up -d pgadmin
+```
+
+Open http://localhost:5050 (only from this computer), sign in with `PGADMIN_EMAIL` and `PGADMIN_PASSWORD` from `.env`, then open **Servers › HireLucent** and enter `POSTGRES_PASSWORD`. The connection uses the default database user `hirelucent`; if `POSTGRES_USER` is changed, change it in `pgadmin/servers.json` too. Stop it with `docker compose stop pgadmin`. It shows real candidate data, so use it only on your own machine.
 
 **Score stability check:** scores one already-screened candidate again 1–5 times, without saving, and compares the results with the saved scores. It prints IDs and numbers only:
 

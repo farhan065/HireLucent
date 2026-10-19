@@ -1,37 +1,46 @@
 # HireLucent handoff (update this every time you switch accounts)
 
-**Last updated:** 17 Oct 2026, 22:30 (Dhaka) · **by:** the account that finished Module 5 · **PC:** (fill in when switching)
+**Last updated:** 19 Oct 2026, 14:00 (Dhaka) · **by:** the account that finished Module 6 · **PC:** office
 
 ## Git state
-- Branch: `module/5-transcription`
-- Last code commit: `8ebaf13` feat(stt): Add AssemblyAI as a second provider (this docs update comes after it)
+- Branch: `module/6-assessment` (exists on both PCs; on a new PC: `git fetch origin` then `git checkout -b module/6-assessment origin/module/6-assessment`)
+- Last code commit: `0bee242` feat(jobs): Tick the Interviews and Assessments tabs (this docs update comes after it)
 - Uncommitted work: none
-- Tests: 419 backend tests (on the Windows venv 7 are skipped: 5 need Tesseract, 2 need `livekit`)
+- Tests: 602 backend tests (a few skipped on the Windows venv: Tesseract, `livekit`); frontend lint and build clean
 
-## Done in the last session
-- 5.6 transcript viewer: full page from View transcript on Completed rows, search with "3 of 12", timeline, Download .txt (closes #648375; Feature 26 complete)
-- 5.7 robustness: unreadable/error messages skipped without dropping the connection, delay measured, reconnect waits capped at 5 s (closes #648376; Feature 27 complete)
-- 5.8 AssemblyAI as a second, switchable provider with shared `stt_stream.py` (Refs #648360)
-- Full Module 5 test done by the owner
-- Redmine notes and descriptions given for #648375, #648376, #648360 (follow-up note), Feature 26, Feature 27 and Module 5
+## Done in the last sessions
+- Steps 6.1–6.10: LangGraph 3 (Q&A Analysis), LangGraph 4 (Final Assessment with HITL review), Evaluate / Evaluate all, assessment page (Q&A, Coverage, Report), Assessments tab with ranking, Approve all drafts, report PDF with Print / Download, compare up to 3 candidates
+- Extra: optional pgAdmin viewer (tools profile, localhost:5050) (`Refs #646551`)
+- 6.11 full test by the owner, all passed, with four fixes:
+  - evaluation keeps working on messy, real conversations (not answered, pauses, speech-to-text spelling, last-attempt keep, Knowledge Base down)
+  - report quotes traced with the same tolerance
+  - each finding listed once, neutral "double-check before deciding" wording
+  - green ticks on the Interviews and Assessments tabs
+- LangGraph 3 and 4 diagrams redrawn to match the code (PDFs in `docs/`, draw.io sources with the owner)
+- Study guides: "Module 6 Study Guide" and "Module 6 Backend Study Guide" (Claude docs)
+- Redmine daily notes given for #646551, #650075, #650076, #650081, #650084
 
 ## In progress
-- Nothing half-built. Module 5 is complete.
+- Nothing half-built. Module 6 is complete.
 
 ## Next step
-1. Commit this docs update, then open the pull request `module/5-transcription` → `dev` (Claude writes the PR description; the owner merges).
-2. Create `module/6-…` from `dev` and start Module 6 (F5 Q&A Analysis, F6 Final Assessment): understanding and questions first, mockups before any UI.
-3. After Module 6: same-Wi-Fi / hotspot demo mode ("Way 2", see project_context §5.4 item 9).
+1. Commit this docs update, then open the pull request `module/6-assessment` → `dev` (Claude writes the PR description; the owner merges).
+2. Redmine: feature descriptions for the finished Module 6 features and the Module 6 description (needs the Module 6 tree screenshot with story and feature ids).
+3. Create `module/7-…` from `dev` and start Module 7 (innovation: Candidate Feedback Composer, and the Hire / Hold / Reject decision): understanding and questions first, mockups before any UI.
 
-## Decisions made in the last session (already in project_context.md)
-- Transcript viewer: full page, Download .txt, text only (no audio is stored, so no playback).
-- Robustness scope limited to bad messages + delay measurement (+ 5 s retry cap).
-- STT providers: Deepgram (default) or AssemblyAI via `STT_PROVIDER`; switch with `docker compose up -d --force-recreate transcription-worker`. AssemblyAI uses the global address (its EU data zone sent no text). The README reports AssemblyAI's delay: 0.08–0.09 s average, under 0.9 s for the slowest 5%.
-- AssemblyAI free plan cannot opt out of model training: test interviews only.
-- Render/Vercel, Oracle VM, LiveKit Cloud and router port forwarding are not used.
-- Redmine: task description with each daily note; feature/module descriptions when complete; work without its own task uses the closest existing task (`Refs`).
-- Docs are updated only at the end of a module or when the owner asks.
+## Decisions made in Module 6 (already in project_context.md)
+- Evaluate on request, one at a time, in the background with progress.
+- Overall = 0.4 × CV + 0.6 × interview; label strong fit ≥ 70, possible fit ≥ 60, otherwise not a fit (decision support only).
+- Accuracy from Knowledge Base `reference` documents first; technical answers otherwise judged by the AI; company answers otherwise not checked.
+- Report review: approve / request changes / edit (no adding points) + Approve all drafts, all with confirms.
+- PDF export (no candidate name in the file name), comparison of up to 3 candidates.
+- Evaluation keeps what can be trusted instead of failing; each finding appears once.
+- pgAdmin optional (tools profile). Way 2 handled manually with Cloudflare quick tunnels (no code).
 
 ## Reminders
-- Google sign-in renewal due ~19 Oct 2026 (`python -m scripts.google_auth` in `backend/`, then `docker compose restart mcp-blogger mcp-google`).
-- Each PC's `.env` needs `DEEPGRAM_API_KEY`, `ASSEMBLYAI_API_KEY` (optional), `STT_PROVIDER`, `STT_KEYTERMS` and, for AssemblyAI, `ASSEMBLYAI_URL=wss://streaming.assemblyai.com/v3/ws` (copy by USB, never by chat or GitHub).
+- **Keep reminding (owner's request):** the question inferred from the candidate's answer when the interviewer's question is lost from the transcript (deferred item 12). Not built.
+- Re-evaluate in the UI is not built (deferred item 13); workaround `POST /interviews/{id}/evaluate` from http://localhost:8000/docs.
+- Google sign-in renewal was due ~19 Oct 2026 (`python -m scripts.google_auth` in `backend/`, then `docker compose restart mcp-blogger mcp-google`).
+- Each PC's `.env` needs `DEEPGRAM_API_KEY`, `ASSEMBLYAI_API_KEY` (optional), `STT_PROVIDER`, `STT_KEYTERMS` and, for AssemblyAI, `ASSEMBLYAI_URL=wss://streaming.assemblyai.com/v3/ws`; for pgAdmin `PGADMIN_EMAIL` and `PGADMIN_PASSWORD` (copy by USB, never by chat or GitHub).
+- Each PC has its own database: Knowledge Base files (for example `ml_reference_notes.txt`) and interviews must be added again on the other PC.
+- Check the running speech-to-text provider: `docker compose logs transcription-worker | grep transcription_worker_started | tail -1`.
