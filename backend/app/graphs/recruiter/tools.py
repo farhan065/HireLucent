@@ -101,6 +101,18 @@ def prepare_publication(arguments: dict[str, Any], state: dict[str, Any]) -> dic
             "The form has no file upload question, so candidates cannot send "
             "a CV. Add one, then try again."
         )
+    if not form.has_photo_upload:
+        raise ConflictError(
+            "The form needs a required photo upload question (its title must "
+            "contain \"photo\"), used to confirm the candidate's identity at the "
+            "interview. Add one, then try again."
+        )
+    if not form.has_consent_question:
+        raise ConflictError(
+            "The form needs a required consent question (its title must contain "
+            "\"consent\") asking candidates to agree that their photo is used to "
+            "confirm their identity. Add one, then try again."
+        )
 
     with SessionLocal() as db:
         job = job_service.get_job(db, job_id)

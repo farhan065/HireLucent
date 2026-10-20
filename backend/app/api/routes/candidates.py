@@ -39,6 +39,25 @@ def read_cv_file(candidate_id: int, db: Session = Depends(get_db)) -> FileRespon
     )
 
 
+@router.get(
+    "/{candidate_id}/photo",
+    response_class=FileResponse,
+    summary="Open a candidate's application photo",
+    responses={404: {"model": ErrorResponse, "description": "Candidate or photo not found"}},
+)
+def read_photo(candidate_id: int, db: Session = Depends(get_db)) -> FileResponse:
+    """For signed-in interviewers only, to compare with the live video
+    (F7). Candidates get 403. Sent under a neutral name."""
+    path = intake_service.photo_file(db, candidate_id)
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        filename="photo.jpg",
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 NOT_FOUND = {404: {"model": ErrorResponse, "description": "Candidate not found"}}
 
 
@@ -63,7 +82,7 @@ def change_shortlist(
     responses={**NOT_FOUND, 409: {"model": ErrorResponse, "description": "A task is running"}},
 )
 def delete_candidate(candidate_id: int, db: Session = Depends(get_db)) -> None:
-    """Removes the candidate, their CV file, their screening results and
-    their CV sections. Their application is never collected again. This
+    """Removes the candidate, their CV file, their application photo and
+    face code, their screening results and their CV sections. Their application is never collected again. This
     cannot be undone."""
     job_deletion.delete_candidate(db, candidate_id)
