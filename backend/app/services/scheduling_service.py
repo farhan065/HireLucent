@@ -5,7 +5,7 @@ behave the same. It is only ever called after the interviewer has approved
 (the confirm dialog, or the schedule card in the conversation).
 
 For each candidate:
-    session (with a private link) -> calendar event
+    session (with a private link and PIN) -> calendar event
 
 Google Calendar emails the candidate the invitation, with the join link in
 its description, so the candidate gets one email for each change. If the
@@ -24,12 +24,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.errors import AppError, NotFoundError, ServiceUnavailableError
+from app.core.errors import AppError, ConflictError, NotFoundError, ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.mcp_clients import client
 from app.models import Candidate, InterviewSession, Job
 from app.schemas.interview import InterviewChange, InterviewSessionSummary, ScheduleOutcome
-from app.services import interview_emails, session_service
+from app.services import interview_emails, pin_service, session_service
 from app.services.interview_times import app_zone
 
 logger = get_logger(__name__)
@@ -47,6 +47,10 @@ CALENDAR_FAILED = (
 NOT_TOLD = (
     "The interview is cancelled, but the candidate could not be told because "
     "Google could not be reached."
+)
+NEW_PIN_FAILED = (
+    "The new PIN could not be sent because the calendar invitation could not be "
+    "updated. The old link and PIN still work."
 )
 MOVE_FAILED = (
     "The interview could not be moved because its calendar invitation could "
@@ -94,8 +98,15 @@ def _schedule_one(
     except AppError as exc:
         return _failed(slot, candidate.full_name, exc.message)
 
+    pin = pin_service.new_pin(session)
     invitation = interview_emails.invitation(
-        candidate.full_name, job.title, slot.start, slot.end, join_link(token), message
+        candidate.full_name,
+        job.title,
+        slot.start,
+        slot.end,
+        join_link(token),
+        message,
+        pin_service.shown(pin),
     )
     try:
         event = _google(
@@ -135,16 +146,18 @@ def reschedule(
     link, and Google emails the candidate the updated invitation; the old
     link stops working."""
     session = session_service.get_session(db, session_id)
-    before = (
-        session.scheduled_start,
-        session.scheduled_end,
-        session.join_token_hash,
-        session.candidate_joined_at,
-    )
+    before = _link_state(session)
     session, token = session_service.reschedule(db, session_id, start, end)
+    pin = pin_service.new_pin(session)
     job = db.get(Job, session.job_id)
     invitation = interview_emails.moved(
-        session.candidate.full_name, job.title, start, end, join_link(token), message
+        session.candidate.full_name,
+        job.title,
+        start,
+        end,
+        join_link(token),
+        message,
+        pin_service.shown(pin),
     )
     try:
         if not session.calendar_event_id:
@@ -160,15 +173,75 @@ def reschedule(
             },
         )
     except ServiceUnavailableError as exc:
-        (
-            session.scheduled_start,
-            session.scheduled_end,
-            session.join_token_hash,
-            session.candidate_joined_at,
-        ) = before
+        _restore_link_state(session, before)
         db.commit()
         raise ServiceUnavailableError(MOVE_FAILED) from exc
+    db.commit()
     return _change(session, None)
+
+
+def send_new_pin(db: Session, session_id: int, message: str | None = None) -> InterviewChange:
+    """Give the candidate a new link and PIN for the same time, for a lost
+    PIN or a locked link. Google emails the updated invitation; the old
+    link and PIN stop working. Nothing changes if Google cannot be reached."""
+    session = session_service.get_session(db, session_id)
+    if session.status not in session_service.ACTIVE:
+        raise ConflictError("A new PIN can only be sent for an upcoming or running interview.")
+    before = _link_state(session)
+    token, token_hash = session_service.new_join_token()
+    session.join_token_hash = token_hash
+    pin = pin_service.new_pin(session)
+    job = db.get(Job, session.job_id)
+    invitation = interview_emails.new_pin(
+        session.candidate.full_name,
+        job.title,
+        session.scheduled_start,
+        session.scheduled_end,
+        join_link(token),
+        pin_service.shown(pin),
+        message,
+    )
+    try:
+        if not session.calendar_event_id:
+            raise ServiceUnavailableError(NEW_PIN_FAILED)
+        _google(
+            "update_calendar_event",
+            {
+                "event_id": session.calendar_event_id,
+                "start": _local_iso(session.scheduled_start),
+                "end": _local_iso(session.scheduled_end),
+                "time_zone": app_zone().key,
+                "description": invitation.description,
+            },
+        )
+    except ServiceUnavailableError as exc:
+        _restore_link_state(session, before)
+        db.commit()
+        raise ServiceUnavailableError(NEW_PIN_FAILED) from exc
+    db.commit()
+    log_event(logger, "interview_pin_renewed", session_id=session.id)
+    return _change(session, None)
+
+
+_LINK_FIELDS = (
+    "scheduled_start",
+    "scheduled_end",
+    "join_token_hash",
+    "candidate_joined_at",
+    "pin_hash",
+    "pin_failed_attempts",
+    "pin_locked_until",
+)
+
+
+def _link_state(session: InterviewSession) -> tuple:
+    """What a move or a new PIN changes, so it can be put back."""
+    return tuple(getattr(session, field) for field in _LINK_FIELDS)
+
+
+def _restore_link_state(session: InterviewSession, before: tuple) -> None:
+    for field, value in zip(_LINK_FIELDS, before, strict=True):
+        setattr(session, field, value)
 
 
 def cancel(db: Session, session_id: int, message: str | None = None) -> InterviewChange:

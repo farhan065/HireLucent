@@ -23,6 +23,7 @@ from app.schemas.interview import (
     InterviewRoomInfo,
     InterviewRules,
     InterviewSessionSummary,
+    NewPinRequest,
     QuestionAsked,
     RescheduleRequest,
     ScheduleOutcome,
@@ -269,8 +270,8 @@ def send_chat(
 def reschedule_interview(
     session_id: int, payload: RescheduleRequest, db: Session = Depends(get_db)
 ) -> InterviewChange:
-    """The candidate gets the new time and a new link; the old link stops
-    working."""
+    """The candidate gets the new time, a new link and a new PIN; the old
+    link and PIN stop working."""
     return scheduling_service.reschedule(
         db, session_id, payload.start, payload.end, payload.message
     )
@@ -291,6 +292,24 @@ def cancel_interview(
     the interviewer's message if one is given."""
     message = payload.message if payload else None
     return scheduling_service.cancel(db, session_id, message)
+
+
+@session_router.post(
+    "/{session_id}/pin",
+    response_model=InterviewChange,
+    summary="Send the candidate a new PIN",
+    responses=SESSION_ERRORS,
+)
+def send_new_pin(
+    session_id: int,
+    payload: NewPinRequest | None = None,
+    db: Session = Depends(get_db),
+) -> InterviewChange:
+    """Google Calendar sends an updated invitation with a new join link and
+    PIN for the same time; the old ones stop working. For a lost PIN or a
+    locked link. The PIN is never shown to the interviewer."""
+    message = payload.message if payload else None
+    return scheduling_service.send_new_pin(db, session_id, message)
 
 
 @session_router.delete(
