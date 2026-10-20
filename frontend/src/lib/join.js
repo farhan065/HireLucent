@@ -7,14 +7,34 @@ export function readLink(token) {
   return apiRequest('/join/info', { method: 'POST', body: { token }, auth: null })
 }
 
-// Returns the candidate's pass for this one interview.
-export async function enterWaitingRoom(token) {
-  const { access_token: pass } = await apiRequest('/join/enter', {
+// The interview PIN from the invitation: { result: "ok" | "wrong" |
+// "locked", tries_left, locked_until }.
+export function checkPin(token, pin) {
+  return apiRequest('/join/pin', { method: 'POST', body: { token, pin }, auth: null })
+}
+
+// Returns the candidate's pass for this one interview, and whether the
+// identity photo is still to be taken.
+export async function enterWaitingRoom(token, pin = null) {
+  const { access_token: pass, photo_needed: photoNeeded } = await apiRequest('/join/enter', {
     method: 'POST',
-    body: { token, consent: true },
+    body: pin ? { token, consent: true, pin } : { token, consent: true },
     auth: null,
   })
-  return pass
+  return { pass, photoNeeded }
+}
+
+// The one identity photo: { state: "done" | "retry", tries_left }. The
+// candidate is never told how well it matched.
+export function sendIdentityPhoto(pass, photo) {
+  const body = new FormData()
+  body.append('photo', photo, 'photo.jpg')
+  return apiRequest('/join/identity', { method: 'POST', body, auth: pass })
+}
+
+// Join without the photo: "no_camera" or "gave_up".
+export function skipIdentityPhoto(pass, reason) {
+  return apiRequest('/join/identity/skip', { method: 'POST', body: { reason }, auth: pass })
 }
 
 // "waiting", "started" or "ended".

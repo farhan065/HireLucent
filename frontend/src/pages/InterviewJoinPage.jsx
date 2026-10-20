@@ -1,7 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 import CandidateLayout from '../components/join/CandidateLayout.jsx'
+import IdentityCapture from '../components/join/IdentityCapture.jsx'
 import LinkEnded from '../components/join/LinkEnded.jsx'
+import PinEntry from '../components/join/PinEntry.jsx'
 import PreJoin from '../components/join/PreJoin.jsx'
 import ThankYou from '../components/join/ThankYou.jsx'
 import WaitingRoom from '../components/join/WaitingRoom.jsx'
@@ -25,13 +27,16 @@ function useNow(intervalMs) {
   return now
 }
 
-// A link that works: the camera check and Join, the waiting room, then the
-// interview room once the interviewer lets the candidate in. The camera is
-// only asked for here, never on a link that no longer works.
-function JoinFlow({ token, link, onEnded, onRoomChange }) {
+// A link that works: the camera check and Join, the identity photo (for an
+// interview with a PIN), the waiting room, then the interview room once the
+// interviewer lets the candidate in. The camera is only asked for here,
+// never on a link that no longer works.
+function JoinFlow({ token, link, pin, onEnded, onRoomChange, onPinRejected }) {
   // The candidate's pass for this interview, once they joined, and their
   // pass for the video room, once they were let in.
   const [pass, setPass] = useState(null)
+  // The identity photo: "needed", "taken", "skipped", or null for none.
+  const [photo, setPhoto] = useState(null)
   const [connection, setConnection] = useState(null)
   const preview = useDevicePreview(!connection)
   const now = useNow(TICK_MS)
@@ -43,9 +48,12 @@ function JoinFlow({ token, link, onEnded, onRoomChange }) {
     setIsBusy(true)
     setError('')
     try {
-      setPass(await enterWaitingRoom(token))
+      const joined = await enterWaitingRoom(token, pin)
+      if (joined.photoNeeded) setPhoto('needed')
+      setPass(joined.pass)
     } catch (joinError) {
       if (joinError.status === 404) onEnded(false)
+      else if (joinError.status === 401) onPinRejected()
       else setError(joinError.message)
     } finally {
       setIsBusy(false)
@@ -106,12 +114,24 @@ function JoinFlow({ token, link, onEnded, onRoomChange }) {
       </Suspense>
     )
   }
+  if (pass && photo === 'needed') {
+    return (
+      <IdentityCapture
+        link={link}
+        preview={preview}
+        pass={pass}
+        onDone={setPhoto}
+        onEnded={() => onEnded(false)}
+      />
+    )
+  }
   if (pass) {
     return (
       <WaitingRoom
         link={link}
         preview={preview}
         now={now}
+        photo={photo}
         isLeaving={isBusy}
         onLeave={handleLeaveWaiting}
       />
@@ -138,6 +158,8 @@ export default function InterviewJoinPage() {
   const [ending, setEnding] = useState(null)
   const [isInRoom, setIsInRoom] = useState(false)
   const [error, setError] = useState('')
+  // The PIN, kept only in this page while it is open.
+  const [pin, setPin] = useState(null)
   const handleEnded = useCallback(
     (wasInRoom) => setEnding((current) => current ?? (wasInRoom ? 'thanks' : 'gone')),
     [],
@@ -189,7 +211,19 @@ export default function InterviewJoinPage() {
       </CandidateLayout>
     )
   }
+  if (link.pin_required && !pin) {
+    return (
+      <PinEntry token={token} link={link} onAccepted={setPin} onEnded={() => handleEnded(false)} />
+    )
+  }
   return (
-    <JoinFlow token={token} link={link} onEnded={handleEnded} onRoomChange={setIsInRoom} />
+    <JoinFlow
+      token={token}
+      link={link}
+      pin={pin}
+      onEnded={handleEnded}
+      onRoomChange={setIsInRoom}
+      onPinRejected={() => setPin(null)}
+    />
   )
 }

@@ -24,7 +24,8 @@ function ReadyCheck({ isOk, children }) {
 
 // Where the candidate waits after joining, until the interviewer lets them
 // in. Their camera and microphone stay ready.
-export default function WaitingRoom({ link, preview, now, isLeaving, onLeave }) {
+// photo: "taken", "skipped" or null when there was no identity photo step.
+export default function WaitingRoom({ link, preview, now, photo = null, isLeaving, onLeave }) {
   return (
     <CandidateLayout note={`Interview for ${link.job_title}`}>
       <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
@@ -80,6 +81,15 @@ export default function WaitingRoom({ link, preview, now, isLeaving, onLeave }) 
                 : 'Microphone not heard yet: say something'}
             </ReadyCheck>
             <ReadyCheck isOk>You agreed to the written transcript</ReadyCheck>
+            {photo && (
+              <ReadyCheck isOk>
+                <strong className="font-semibold">
+                  {photo === 'taken'
+                    ? 'Photo taken. Thanks, you’re all set'
+                    : 'Photo skipped. You can still join'}
+                </strong>
+              </ReadyCheck>
+            )}
           </ul>
 
           <p className="rounded-2xl bg-amber-soft px-3.5 py-3 text-sm leading-normal text-amber">
