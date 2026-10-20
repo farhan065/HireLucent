@@ -202,7 +202,7 @@ Face data is the most sensitive data HireLucent handles (BID N17), so the check 
 
 **What happens**
 
-1. **Applying.** The job's Google Form asks for a recent passport-size photo and a required consent: *"I agree that my photo is stored with my application and used only to confirm my identity at the interview. It is deleted when my application or the job is deleted."*
+1. **Applying.** The job's Google Form asks for a recent passport-size photo (candidates are asked for one under 3 months old; its age cannot be checked) and a required consent: *"I agree that my photo is stored with my application and used only to confirm my identity at the interview. It is deleted when my application or the job is deleted."*
 2. **Fetch CVs.** With consent, the photo is checked in memory (exactly one face, big, sharp and light enough). A usable photo is re-saved as a small JPEG (which drops the file's hidden camera, place and time details) and turned into a **face code**: 128 numbers made by the SFace model. Without consent nothing is read. A photo problem never stops the application; the reason is recorded instead.
 3. **Interview PIN.** Each invitation has an 8-digit PIN right under the join link. Only its Argon2 hash is stored. Five wrong tries lock the link for 15 minutes; rescheduling or **Send a new PIN** gives a new link and PIN.
 4. **Joining.** After the PIN and the consent on the pre-join page, a face guide (an oval with tips, run in the browser by MediaPipe and served by HireLucent itself) helps the candidate take **one photo**. The backend compares it with the invited candidate's face code and with the other applicants of the same job, then **discards it**. The candidate only sees "Thanks, you're all set".
