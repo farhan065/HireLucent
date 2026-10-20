@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=10, ge=1)
     # Where collected CVs are kept. A Docker volume, never the repository.
     cv_storage_dir: str = "/data/cv_intake"
+    # Candidate identification (F7): where the two face models are kept
+    # (downloaded when the image is built), and the largest photo accepted
+    # from the application form or the join page.
+    face_models_dir: str = "models"
+    max_photo_mb: int = Field(default=5, ge=1, le=10)
     # CV screening: how many CVs are processed at once, and how many pages
     # of a scanned CV are read by OCR.
     screening_max_parallel: int = Field(default=4, ge=1)
