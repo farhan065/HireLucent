@@ -25,6 +25,12 @@ export function cancelInterview(sessionId, message = null) {
   return apiRequest(`/interviews/${sessionId}/cancel`, { method: 'POST', body: { message } })
 }
 
+// A new join link and PIN for the same time (F7), for a lost PIN or a
+// locked link. The PIN is never shown here.
+export function sendNewPin(sessionId, message = null) {
+  return apiRequest(`/interviews/${sessionId}/pin`, { method: 'POST', body: { message } })
+}
+
 export const MAX_MESSAGE = 1500
 
 // Why an email message cannot be sent, or '' when it can.
@@ -36,8 +42,8 @@ export function messageProblem(text) {
   return ''
 }
 
-// The email one candidate would get: "kind" is "invitation", "moved" or
-// "cancelled". Nothing is sent.
+// The email one candidate would get: "kind" is "invitation", "moved",
+// "cancelled" or "new_pin". Nothing is sent.
 export function previewEmail(jobId, body) {
   return apiRequest(`/jobs/${jobId}/interviews/preview`, { method: 'POST', body })
 }

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import Button from '../components/Button.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
+import IdentityChip from '../components/interviews/IdentityChip.jsx'
 import CandidateProfile from '../components/room/CandidateProfile.jsx'
 import ConnectionChip from '../components/room/ConnectionChip.jsx'
 import InterviewChat from '../components/room/InterviewChat.jsx'
@@ -24,6 +25,7 @@ import { useRoom } from '../hooks/useRoom.js'
 import { useTranscript } from '../hooks/useTranscript.js'
 import { useUnread } from '../hooks/useUnread.js'
 import { apiRequest } from '../lib/api.js'
+import { identityShown } from '../lib/identity.js'
 import { clock, minutesBetween, waitingFor } from '../lib/interviews.js'
 import {
   admitCandidate,
@@ -82,7 +84,7 @@ function AdmitBar({ interview, now, isAdmitting, error, onAdmit }) {
       role="status"
       className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-success/25 bg-success-soft px-4 py-3"
     >
-      <span className="flex items-center gap-3 text-[15px] text-navy">
+      <span className="flex flex-wrap items-center gap-3 text-[15px] text-navy">
         <span aria-hidden="true" className="relative size-3 shrink-0">
           <span className="absolute -inset-1.5 animate-ping rounded-full bg-success/20" />
           <span className="absolute inset-0 rounded-full bg-success" />
@@ -91,6 +93,7 @@ function AdmitBar({ interview, now, isAdmitting, error, onAdmit }) {
           <strong className="font-semibold">{name} is waiting</strong> · for{' '}
           {waitingFor(interview, now)}
         </span>
+        {identityShown(interview.identity) && <IdentityChip identity={interview.identity} isLong />}
       </span>
       <div className="flex items-center gap-3">
         {error && <span className="text-sm font-semibold text-danger">{error}</span>}
@@ -114,7 +117,7 @@ const TABS = [
 
 // The candidate at a glance, and questions to ask them. Both tabs stay
 // loaded, so switching between them keeps their place.
-function CandidatePanel({ sessionId, candidateName, candidate }) {
+function CandidatePanel({ sessionId, candidateName, candidate, identity }) {
   const [tab, setTab] = useState('info')
   return (
     <section className="@container flex min-h-[36rem] flex-col overflow-hidden rounded-card border border-line bg-white shadow-card lg:min-h-0">
@@ -138,7 +141,7 @@ function CandidatePanel({ sessionId, candidateName, candidate }) {
       </div>
       <div className={`min-h-0 flex-1 flex-col ${tab === 'info' ? 'flex' : 'hidden'}`}>
         {candidate ? (
-          <CandidateProfile candidate={candidate} />
+          <CandidateProfile candidate={candidate} identity={identity} />
         ) : (
           <div className="p-4.5">
             <Skeleton className="h-64 w-full" />
@@ -359,6 +362,7 @@ export default function InterviewRoomPage() {
           sessionId={interview.id}
           candidateName={interview.candidate_name}
           candidate={candidate}
+          identity={interview.identity}
         />
 
         <div className="flex min-h-0 min-w-0 flex-col gap-3 lg:overflow-hidden">

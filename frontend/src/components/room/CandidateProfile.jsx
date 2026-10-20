@@ -9,10 +9,15 @@ import {
   GraduationCap,
   Mail,
   Shield,
+  Target,
   UserRound,
+  X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useCandidatePhoto } from '../../hooks/useCandidatePhoto.js'
+import { identityMessage } from '../../lib/identity.js'
 import { openCv } from '../../lib/jobs.js'
+import IdentityChip from '../interviews/IdentityChip.jsx'
 
 const SKILLS_SHOWN = 8
 const CHIP = 'rounded-full px-2.5 py-1 text-[12.5px] font-semibold'
@@ -149,6 +154,112 @@ function Job({ job, isLast, startsOpen }) {
   )
 }
 
+const PROBE_STATUS = {
+  partially_met: { label: 'Partly met', className: 'bg-warning-soft text-warning' },
+  unmet: { label: 'Not met', className: 'bg-danger-soft text-danger' },
+}
+
+// Requirements the CV did not fully prove, from screening: what to ask about.
+function AreasToProbe({ items }) {
+  return (
+    <ul className="flex flex-col gap-2.5">
+      {items.map((item) => (
+        <li key={item.id} className="flex flex-col gap-1">
+          <span className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11.5px] font-bold text-body">{item.id}</span>
+            <strong className="text-[13.5px] font-semibold text-navy">{item.text}</strong>
+            <span
+              className={`rounded-full px-2 py-px text-[11px] font-bold ${PROBE_STATUS[item.status].className}`}
+            >
+              {PROBE_STATUS[item.status].label}
+            </span>
+          </span>
+          {item.reason && <span className="text-[13px] leading-snug">{item.reason}</span>}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// The identity check row (F7): the status chip and one short line. Before
+// F7 an interview has no check, and the row says so.
+function IdentityRow({ identity, hasPhoto }) {
+  const isCalm = !identity || ['pending', 'verified', 'not_checked'].includes(identity.result)
+  return (
+    <div
+      className={`flex flex-col gap-1.5 rounded-2xl border-[1.5px] px-3 py-2.5 ${
+        identity?.result === 'pending' || !identity ? 'border-dashed' : ''
+      } ${isCalm ? 'border-line' : identity.result === 'low' ? 'border-warning/40' : 'border-danger/40'}`}
+    >
+      <span className="flex items-center justify-between gap-2.5">
+        <span className="flex items-center gap-2 text-[13.5px] font-semibold text-navy">
+          <Shield className="size-4.25 text-body" aria-hidden="true" />
+          Identity check
+        </span>
+        {identity ? (
+          <IdentityChip identity={identity} />
+        ) : (
+          <span className="rounded-full bg-[#eef1f6] px-2.5 py-0.5 text-xs font-semibold text-[#44526b]">
+            Not set up
+          </span>
+        )}
+      </span>
+      <span className="text-[12.5px] leading-snug text-body">
+        {identity
+          ? identityMessage(identity, hasPhoto)
+          : 'This interview was scheduled before identity checks.'}
+      </span>
+    </div>
+  )
+}
+
+// The application photo, larger, to compare with the live video.
+function PhotoDialog({ url, name, onClose }) {
+  useEffect(() => {
+    function handleKey(event) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center bg-navy/30 p-4"
+      onClick={onClose}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label="Application photo"
+        onClick={(event) => event.stopPropagation()}
+        className="flex w-full max-w-105 animate-rise-in flex-col gap-3.5 rounded-card bg-white p-5 shadow-card"
+      >
+        <div className="flex items-center justify-between gap-2.5">
+          <h2 className="text-lg font-extrabold">Application photo</h2>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="flex size-10 items-center justify-center rounded-xl text-body hover:bg-mist"
+          >
+            <X className="size-4.5" aria-hidden="true" />
+          </button>
+        </div>
+        <img
+          src={url}
+          alt={`Application photo of ${name}`}
+          className="aspect-square w-full rounded-2xl object-cover"
+        />
+        <p className="text-[13.5px] leading-normal">
+          From the application form. Compare it with the live video. Only interviewers can see it;
+          it is deleted with the application or the job.
+        </p>
+      </section>
+    </div>
+  )
+}
+
 function OpenCvButton({ candidateId }) {
   const [error, setError] = useState('')
   async function handleClick() {
@@ -178,11 +289,16 @@ function OpenCvButton({ candidateId }) {
   )
 }
 
-// The candidate at a glance during the interview: who they are, how to
-// reach them, and the CV in parts that open on click. Phone numbers are
-// never stored, so they are not shown. The photo is a placeholder.
-export default function CandidateProfile({ candidate }) {
+// The candidate at a glance during the interview: who they are, the
+// identity check, how to reach them, and the CV in parts that open on click,
+// with the requirements to probe. Phone numbers are never stored, so they
+// are not shown. The application photo replaces the placeholder when there
+// is one.
+export default function CandidateProfile({ candidate, identity = null }) {
   const [open, setOpen] = useState(() => new Set(['skills']))
+  const [isPhotoOpen, setIsPhotoOpen] = useState(false)
+  const photoUrl = useCandidatePhoto(candidate.id, candidate.has_photo)
+  const probes = (candidate.requirement_matches ?? []).filter((item) => PROBE_STATUS[item.status])
   const facts = candidate.cv_facts ?? {}
   const skills = facts.skills ?? []
   const experience = facts.experience ?? []
@@ -282,6 +398,13 @@ export default function CandidateProfile({ candidate }) {
         </ul>
       ),
     },
+    probes.length > 0 && {
+      key: 'probe',
+      icon: Target,
+      title: 'Areas to probe',
+      count: probes.length,
+      body: <AreasToProbe items={probes} />,
+    },
     certifications.length > 0 && {
       key: 'certifications',
       icon: Award,
@@ -301,13 +424,27 @@ export default function CandidateProfile({ candidate }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4.5 [&>*]:shrink-0">
         <div className="flex items-center gap-3.5">
-          <span
-            role="img"
-            aria-label="Photo placeholder"
-            className="flex size-16 shrink-0 items-end justify-center overflow-hidden rounded-[18px] bg-teal-soft"
-          >
-            <UserRound className="-mb-1.5 size-14 fill-[#9cc9dd] text-[#9cc9dd]" aria-hidden="true" />
-          </span>
+          {photoUrl ? (
+            <button
+              type="button"
+              aria-label="Open the application photo"
+              onClick={() => setIsPhotoOpen(true)}
+              className="size-16 shrink-0 cursor-zoom-in overflow-hidden rounded-[18px] border-[1.5px] border-line"
+            >
+              <img src={photoUrl} alt="" className="size-full object-cover" />
+            </button>
+          ) : (
+            <span
+              role="img"
+              aria-label="Photo placeholder"
+              className="flex size-16 shrink-0 items-end justify-center overflow-hidden rounded-[18px] bg-teal-soft"
+            >
+              <UserRound
+                className="-mb-1.5 size-14 fill-[#9cc9dd] text-[#9cc9dd]"
+                aria-hidden="true"
+              />
+            </span>
+          )}
           <div className="flex min-w-0 flex-col gap-0.5">
             <h2 className="text-lg font-extrabold tracking-tight">{candidate.full_name}</h2>
             {current && (
@@ -330,15 +467,7 @@ export default function CandidateProfile({ candidate }) {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2.5 rounded-2xl border-[1.5px] border-dashed border-line px-3 py-2.5">
-          <span className="flex items-center gap-2 text-[13.5px] font-semibold text-navy">
-            <Shield className="size-4.25 text-body" aria-hidden="true" />
-            Identity check
-          </span>
-          <span className="rounded-full bg-[#eef1f6] px-2.5 py-0.5 text-xs font-semibold text-[#44526b]">
-            Coming later
-          </span>
-        </div>
+        <IdentityRow identity={identity} hasPhoto={Boolean(photoUrl)} />
 
         <div className="flex flex-col">
           <h3 className="mb-1 font-sans text-xs font-semibold uppercase tracking-wider text-body">
@@ -380,6 +509,13 @@ export default function CandidateProfile({ candidate }) {
       <div className="border-t border-line px-4.5 py-3">
         <OpenCvButton candidateId={candidate.id} />
       </div>
+      {isPhotoOpen && photoUrl && (
+        <PhotoDialog
+          url={photoUrl}
+          name={candidate.full_name}
+          onClose={() => setIsPhotoOpen(false)}
+        />
+      )}
     </div>
   )
 }
