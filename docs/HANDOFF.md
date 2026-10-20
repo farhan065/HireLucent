@@ -1,10 +1,10 @@
 # HireLucent handoff (update this every time you switch accounts)
 
-**Last updated:** 19 Oct 2026, 14:00 (Dhaka) · **by:** the account that finished Module 6 · **PC:** office
+**Last updated:** 20 Oct 2026, 10:15 (Dhaka) · **by:** the account that finished Module 6 · **PC:** office
 
 ## Git state
-- Branch: `module/6-assessment` (exists on both PCs; on a new PC: `git fetch origin` then `git checkout -b module/6-assessment origin/module/6-assessment`)
-- Last code commit: `0bee242` feat(jobs): Tick the Interviews and Assessments tabs (this docs update comes after it)
+- Module 6 merged into `dev` (PR #5, `59b344d`).
+- New branch: `module/8-stretch-1-candidate-identification` from `dev`; its first commit is this docs update (the F7 plan).
 - Uncommitted work: none
 - Tests: 602 backend tests (a few skipped on the Windows venv: Tesseract, `livekit`); frontend lint and build clean
 
@@ -21,12 +21,15 @@
 - Redmine daily notes given for #646551, #650075, #650076, #650081, #650084
 
 ## In progress
-- Nothing half-built. Module 6 is complete.
+- Nothing half-built. Module 6 is complete and merged. The F7 plan is agreed but not built (project_context §5.6).
 
 ## Next step
-1. Commit this docs update, then open the pull request `module/6-assessment` → `dev` (Claude writes the PR description; the owner merges).
-2. Redmine: feature descriptions for the finished Module 6 features and the Module 6 description (needs the Module 6 tree screenshot with story and feature ids).
-3. Create `module/7-…` from `dev` and start Module 7 (innovation: Candidate Feedback Composer, and the Hire / Hold / Reject decision): understanding and questions first, mockups before any UI.
+1. Redmine: feature descriptions for the finished Module 6 features (Module 6 description already given; needs the tree screenshot for feature ids).
+2. **Module 8 Stretch 1, F7 Candidate Identification** (plan: project_context §5.6; start text: pasted into the new chat by the owner):
+   - settle the open questions (capture button vs auto, blink check, retention, CV photo fallback)
+   - step 1: face-match test script with the owner's passport photo and webcam
+   - mockups (PIN entry, oval capture, identity labels, profile panel) before any UI
+3. Then Module 7 (innovation: Candidate Feedback Composer, and the Hire / Hold / Reject decision), then the other stretch features (`module/8-stretch-<n>-<feature>`).
 
 ## Decisions made in Module 6 (already in project_context.md)
 - Evaluate on request, one at a time, in the background with progress.

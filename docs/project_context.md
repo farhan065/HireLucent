@@ -2,7 +2,7 @@
 
 > **Status labels:** **BUILT** = implemented, tested and pushed · **FINAL** = agreed, do not change unless the owner asks · **PROPOSED** = suggested design, confirm before major work · **PENDING** = owner decides later · **Not specified** = no information yet.
 > Anything not marked **BUILT** is not in the code yet. For BUILT parts, the names in this file are the names used in the code. If the code and this file ever differ, **the code wins**; tell the owner which lines of this file to correct.
-> **Last updated:** 19 Oct 2026, **Module 6 complete** (steps 6.1–6.11 BUILT and pushed; full test passed). Branch `module/6-assessment`, last code commit `0bee242`; next: pull request into `dev`, then Module 7.
+> **Last updated:** 20 Oct 2026, **Module 6 complete and merged into `dev`** (PR #5). Next: **Module 8 Stretch 1 (F7, Candidate Identification)** on `module/8-stretch-1-candidate-identification`, before Module 7 (owner's decision). Plan in §5.6 (PROPOSED).
 
 ---
 
@@ -29,7 +29,7 @@ JD creation → job posting → CV collection → screening and ranking → sche
   - **F5** Q&A analysis: segmentation, per-answer evaluation with evidence, reference-checked accuracy, requirement coverage. **BUILT** (Module 6).
   - **F6** consolidated assessment: scores and label, traceable report with human review, ranked list, PDF export, side-by-side comparison. **BUILT** (Module 6).
 - **Client changes (override the BID):** the chatbot posts JDs to a portal with an API → **Blogger careers page** (BUILT); CVs arrive via **Google Form only for now** (BUILT; Gmail intake only if necessary, FINAL); future-dated interview scheduling is required (BUILT).
-- **Stretch (only after all core features work):** F7–F10. F7 is not required this phase.
+- **Stretch (only after all core features work):** F7–F10. Core F1–F6 are complete. **F7 is being built first** as Module 8 Stretch 1, one branch per stretch feature (`module/8-stretch-<n>-<feature>`), before the Module 7 innovation feature (owner's decision, 20 Oct). ⚠️ Clarification #21 says face or voice recognition is "not required in this phase"; the owner chose to go beyond it with face verification (Option B), which the BID's F7 and bonus rule (+3, N17) allow. Confirming with the trainer is suggested.
 - **Innovation (exactly one):** Candidate Feedback Composer (initial choice, §4.8).
 - **Out of scope:** cloud deployment/CI-CD, SSO, ATS/HRIS, offers/onboarding, multi-tenancy, mobile, model training.
 
@@ -258,6 +258,18 @@ After Hold/Reject: draft respectful feedback from saved job-related evidence onl
 - Findings appear once: unexplored requirements only as evidence gaps; areas to verify are about asked questions, worded "to double-check before deciding".
 - pgAdmin is optional (tools profile), localhost only, so the single-command startup is unchanged.
 - Way 2 (two devices on the same Wi-Fi): handled manually with Cloudflare quick tunnels (step-by-step guide given; no code change); ngrok kept as a backup.
+
+### 5.6 Module 8 Stretch 1: F7 Candidate Identification (PROPOSED, plan agreed 20 Oct)
+Branch `module/8-stretch-1-candidate-identification` (from `dev`). WBS: Module 8, Day 18. Nothing is built yet; the details below are the agreed plan.
+- **Enrolment (keeps the FINAL "Google Form only" decision):** the job's Google Form gets a **recent passport-size photo** upload (JPG/PNG, face clearly visible) and a **biometric consent** checkbox. At **Fetch CVs** the backend checks the photo (type, size, exactly one face, big and sharp enough), makes a **face code** (embedding) and **deletes the photo**. Statuses: face enrolled / photo not usable / no photo / no consent. A live photo at application would need an own Apply page (changes a FINAL decision): not chosen.
+- **Interview PIN (PROPOSED):** an **8-digit PIN** created at scheduling, placed in the **calendar invitation right under the join link** ("Interview PIN: 4829 1067", keeps the FINAL "calendar invitation only" decision). Pre-join asks for the PIN first; 5 wrong tries lock the link for 15 minutes; only an **Argon2 hash** is stored; new PIN on reschedule, dead on cancel; email preview shows "[private PIN]"; **"Send a new PIN"** updates the invitation (an old PIN can never be shown). Stops link-only leaks; a forwarded email still carries both, which the face check covers.
+- **Join check:** after the PIN and consent, a **guided capture**: an oval on the camera preview, live tips ("Move closer", "Face the light", "Look straight", "Hold still", "Only one person"), checked in the browser with **MediaPipe Face Landmarker** (served from our app; nothing leaves the browser), border turns **green** when the face is right; the one good photo goes to the backend, is matched with **OpenCV YuNet + SFace** against the invited candidate **and** the job's other applicants, then discarded.
+- **Never blocks (owner's rule):** every candidate can join whatever the score. The result is **interviewer-only** (the candidate sees "Thanks, you're all set"): ✅ Identity verified / ⚠️ Low match: check identity / ❗ Very low match (or matches another applicant): verify identity / ℹ️ Identity not checked (reason). Shown in the **waiting room** (Interviews tab) and at the top of the room's **candidate panel**. Band limits set from a test with the owner's own face.
+- **F7 profile panel** in the interviewer room: identity badge, name, headline experience, key skills, pre-interview score, areas to probe.
+- **Privacy (N16, N17, N19):** store only the face code and the consent time, never photos or snapshots; delete with the candidate and after the retention period; logs hold result and score only; README section (what, where, how long, nothing leaves the PC). Demo with the owner's own face (consented); sample CVs stay synthetic.
+- **Free and local:** `@mediapipe/tasks-vision` (Apache 2.0), OpenCV YuNet (MIT) and SFace (Apache 2.0) via `opencv-python-headless`; CPU only; no cloud face API (InsightFace models avoided: non-commercial licence).
+- **First step:** a small test script with the owner's passport photo and webcam (match scores for the owner vs another face) before building screens. UI needs mockups first (oval capture, PIN entry, labels, profile panel).
+- **Open (PENDING):** Take photo button vs automatic capture after ~1 s of green · blink check (liveness) now or later · retention period (e.g. 30 days or until the job closes) · whether the photo from inside the CV is used when no form photo is uploaded.
 
 ### 5.4 Deferred items (owner: "later")
 1. Remove the demo code (`routes/graphs.py`, demo part of `routes/tasks.py`, `graphs/demo.py`).
