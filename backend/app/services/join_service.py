@@ -9,6 +9,10 @@ it is refused once the interview has ended or was cancelled.
 
 While waiting, the candidate's page checks in every few seconds, so the
 interviewer sees who is really waiting.
+
+Interviews scheduled with F7 also have a PIN, asked for before joining, and
+an identity photo, taken after joining and before the waiting room
+(identity_service). Neither ever blocks a candidate who has the PIN.
 """
 
 from datetime import datetime, timedelta
@@ -23,13 +27,15 @@ from app.core.logging import get_logger, log_event
 from app.core.security import create_access_token
 from app.models import InterviewSession, Job
 from app.models.enums import SessionStatus, UserRole
-from app.services import room_service, session_service
+from app.services import identity_service, pin_service, room_service, session_service
 from app.services.session_service import JoinState, hash_token, now_utc
 
 logger = get_logger(__name__)
 
 LINK_NOT_FOUND = "This interview link no longer works."
 NOT_OPEN_YET = "The interview cannot be joined yet. Please come back when Join opens."
+WRONG_PIN = "That PIN is not right. Check your calendar invitation and try again."
+PIN_LOCKED = "Too many wrong tries. The link is locked for a few minutes."
 # The pass lasts until a while after the interview's end, in case it runs over.
 PASS_EXTRA = timedelta(hours=2)
 FINGERPRINT_LENGTH = 16
@@ -73,12 +79,32 @@ def link_info(db: Session, token: str, now: datetime | None = None) -> dict[str,
         "length_minutes": int(
             (session.scheduled_end - session.scheduled_start).total_seconds() // 60
         ),
+        "pin_required": session.pin_hash is not None,
     }
 
 
-def enter(db: Session, token: str, now: datetime | None = None) -> str:
+def check_pin(
+    db: Session, token: str, pin: str, now: datetime | None = None
+) -> pin_service.PinCheck:
+    """Check the PIN the candidate typed. Wrong tries are counted; the
+    fifth locks the link for a while."""
+    now = now or now_utc()
+    session = _find(db, token)
+    if _state(session, now) == "ended":
+        raise NotFoundError(LINK_NOT_FOUND)
+    if session.pin_hash is None:
+        return pin_service.PinCheck(pin_service.OK)
+    result = pin_service.check(session, pin, now)
+    db.commit()
+    return result
+
+
+def enter(
+    db: Session, token: str, now: datetime | None = None, pin: str | None = None
+) -> str:
     """Put the candidate in the waiting room after they agreed to the
-    transcript. Returns their pass for this interview."""
+    transcript (and the identity photo) and, for an interview with a PIN,
+    typed the right PIN. Returns their pass for this interview."""
     now = now or now_utc()
     session = _find(db, token)
     state = _state(session, now)
@@ -86,6 +112,13 @@ def enter(db: Session, token: str, now: datetime | None = None) -> str:
         raise NotFoundError(LINK_NOT_FOUND)
     if state == "too_early":
         raise ConflictError(NOT_OPEN_YET)
+    if session.pin_hash is not None:
+        result = pin_service.check(session, pin or "", now)
+        if result.result != pin_service.OK:
+            db.commit()
+            if result.result == pin_service.LOCKED:
+                raise ConflictError(PIN_LOCKED)
+            raise UnauthorizedError(WRONG_PIN)
     if session.consent_given_at is None:
         session.consent_given_at = now
     # Before the start the candidate waits to be let in. Once the interview
@@ -140,3 +173,34 @@ def leave(db: Session, session_id: int | None, link: str | None) -> None:
 def room_pass(db: Session, session_id: int | None, link: str | None) -> dict:
     """The candidate's pass for the video room, once they were admitted."""
     return room_service.candidate_pass(db, _session_for(db, session_id, link))
+
+
+def needs_photo(db: Session, token: str) -> bool:
+    """Whether the candidate still has to take the identity photo."""
+    return identity_service.needs_photo(_find(db, token))
+
+
+def identity_photo(
+    db: Session,
+    session_id: int | None,
+    link: str | None,
+    content: bytes,
+    now: datetime | None = None,
+) -> tuple[str, int | None]:
+    """Check the photo taken when joining (done, or retry with tries left)."""
+    now = now or now_utc()
+    session = _session_for(db, session_id, link)
+    if _state(session, now) == "ended":
+        raise NotFoundError(LINK_NOT_FOUND)
+    return identity_service.check_photo(db, session, content, now)
+
+
+def skip_identity(
+    db: Session, session_id: int | None, link: str | None, reason: str, now: datetime | None = None
+) -> None:
+    """The candidate joins without the photo (no camera, or gave up)."""
+    now = now or now_utc()
+    session = _session_for(db, session_id, link)
+    if _state(session, now) == "ended":
+        raise NotFoundError(LINK_NOT_FOUND)
+    identity_service.skip(db, session, reason, now)
