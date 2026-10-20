@@ -6,6 +6,7 @@ saved by scripts/google_auth.py.
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from google.auth.exceptions import GoogleAuthError
@@ -51,7 +52,12 @@ class FormInfo:
     # The address candidates open to apply.
     public_url: str
     accepts_responses: bool
+    # A file upload question for the CV (any upload not asking for the photo).
     has_file_upload: bool
+    # Candidate identification (F7): a required photo upload and a required
+    # consent question.
+    has_photo_upload: bool = False
+    has_consent_question: bool = False
 
 
 def parse_form_id(link: str) -> str:
@@ -64,10 +70,34 @@ def parse_form_id(link: str) -> str:
     raise FormLinkError(NOT_A_FORM_LINK)
 
 
+# The photo and consent questions are found by a word in their title, the
+# same way as the name and email questions.
+PHOTO_WORD = "photo"
+CONSENT_WORD = "consent"
+
+
+def _questions(form: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Each question with its title in lower case."""
+    return [
+        (item.get("title", "").lower(), item["questionItem"]["question"])
+        for item in form.get("items", [])
+        if "questionItem" in item
+    ]
+
+
 def _has_file_upload(form: dict[str, Any]) -> bool:
     return any(
-        "fileUploadQuestion" in item.get("questionItem", {}).get("question", {})
-        for item in form.get("items", [])
+        "fileUploadQuestion" in question and PHOTO_WORD not in title
+        for title, question in _questions(form)
+    )
+
+
+def _has_required(form: dict[str, Any], word: str, kind: str | None = None) -> bool:
+    """Whether a required question has the word in its title (and is of
+    the given kind, such as a file upload)."""
+    return any(
+        word in title and question.get("required", False) and (kind is None or kind in question)
+        for title, question in _questions(form)
     )
 
 
@@ -103,6 +133,8 @@ def get_form(link: str) -> FormInfo:
         # Older forms do not report this, and they accept responses.
         accepts_responses=publish_state.get("isAcceptingResponses", True),
         has_file_upload=_has_file_upload(form),
+        has_photo_upload=_has_required(form, PHOTO_WORD, "fileUploadQuestion"),
+        has_consent_question=_has_required(form, CONSENT_WORD),
     )
 
 
@@ -116,6 +148,12 @@ class FormResponse:
     # The uploaded CV in Google Drive. Empty if nothing was uploaded.
     file_id: str
     file_name: str
+    # The uploaded photo, whether the consent question was answered, and
+    # when the form was sent (F7). Empty for forms without these questions.
+    photo_file_id: str = ""
+    photo_file_name: str = ""
+    consent: bool = False
+    submitted_at: datetime | None = None
 
 
 def _question_ids(form: dict[str, Any], word: str) -> set[str]:
@@ -135,14 +173,43 @@ def _text_answer(answers: dict[str, Any], question_ids: set[str]) -> str:
     return ""
 
 
-def _to_response(raw: dict[str, Any], name_ids: set[str], email_ids: set[str]) -> FormResponse:
-    answers = raw.get("answers", {})
-    uploads = [
+def _uploads(answers: dict[str, Any], question_ids: set[str] | None) -> list[dict[str, Any]]:
+    """The uploaded files: of the given questions, or of all of them."""
+    return [
         upload
-        for answer in answers.values()
+        for question_id, answer in answers.items()
+        if question_ids is None or question_id in question_ids
         for upload in answer.get("fileUploadAnswers", {}).get("answers", [])
     ]
-    upload = uploads[0] if uploads else {}
+
+
+def _submitted(raw: dict[str, Any]) -> datetime | None:
+    value = raw.get("lastSubmittedTime") or raw.get("createTime")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+    except ValueError:
+        return None
+
+
+def _to_response(
+    raw: dict[str, Any],
+    name_ids: set[str],
+    email_ids: set[str],
+    photo_ids: set[str] | None = None,
+    consent_ids: set[str] | None = None,
+) -> FormResponse:
+    answers = raw.get("answers", {})
+    photo_ids = photo_ids or set()
+    # The CV is any upload that is not the photo.
+    cvs = [
+        upload
+        for question_id, answer in answers.items()
+        if question_id not in photo_ids
+        for upload in answer.get("fileUploadAnswers", {}).get("answers", [])
+    ]
+    upload = cvs[0] if cvs else {}
+    photos = _uploads(answers, photo_ids) if photo_ids else []
+    photo = photos[0] if photos else {}
     return FormResponse(
         response_id=raw["responseId"],
         full_name=_text_answer(answers, name_ids),
@@ -150,6 +217,10 @@ def _to_response(raw: dict[str, Any], name_ids: set[str], email_ids: set[str]) -
         email=(_text_answer(answers, email_ids) or raw.get("respondentEmail", "")).lower(),
         file_id=upload.get("fileId", ""),
         file_name=upload.get("fileName", ""),
+        photo_file_id=photo.get("fileId", ""),
+        photo_file_name=photo.get("fileName", ""),
+        consent=bool(consent_ids) and bool(_text_answer(answers, consent_ids)),
+        submitted_at=_submitted(raw),
     )
 
 
@@ -159,13 +230,16 @@ def list_responses(form_id: str) -> list[FormResponse]:
     form = _read(forms.get(formId=form_id))
     name_ids = _question_ids(form, "name")
     email_ids = _question_ids(form, "email")
+    photo_ids = _question_ids(form, PHOTO_WORD)
+    consent_ids = _question_ids(form, CONSENT_WORD)
 
     responses: list[FormResponse] = []
     page_token = None
     while True:
         page = _read(forms.responses().list(formId=form_id, pageToken=page_token))
         responses += [
-            _to_response(raw, name_ids, email_ids) for raw in page.get("responses", [])
+            _to_response(raw, name_ids, email_ids, photo_ids, consent_ids)
+            for raw in page.get("responses", [])
         ]
         page_token = page.get("nextPageToken")
         if not page_token:

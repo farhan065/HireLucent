@@ -1,6 +1,7 @@
 import { ArrowRight, LoaderCircle, Sparkles, Trash2, Video } from 'lucide-react'
 import { Link } from 'react-router'
 import { REPORT_STATUS } from '../../lib/assessment.js'
+import { identityShown } from '../../lib/identity.js'
 import {
   dayLabel,
   formatShortDate,
@@ -12,10 +13,16 @@ import {
   waitingFor,
 } from '../../lib/interviews.js'
 import StatusChip from '../StatusChip.jsx'
+import IdentityChip from './IdentityChip.jsx'
 
 const GRID =
   'grid grid-cols-[minmax(0,1.4fr)_minmax(0,1.5fr)_minmax(0,1.1fr)_minmax(0,1.6fr)] items-center gap-4 px-6'
 const LINK = 'min-h-10 text-sm font-semibold'
+
+// The identity label is shown while the interview is upcoming or running.
+function isActiveRow(interview) {
+  return interview.status === 'scheduled' || interview.status === 'in_progress'
+}
 
 function minutesUntil(date, now) {
   return Math.max(1, Math.ceil((new Date(date) - now) / 60000))
@@ -177,6 +184,7 @@ function Actions({
   rules,
   now,
   canScheduleAgain,
+  onNewPin,
   onMove,
   onCancel,
   onScheduleAgain,
@@ -212,6 +220,14 @@ function Actions({
     <>
       {status === 'scheduled' && (
         <>
+          <button
+            type="button"
+            onClick={onNewPin}
+            aria-label={`Send ${interview.candidate_name} a new PIN`}
+            className={`${LINK} text-brand hover:text-brand-dark`}
+          >
+            New PIN
+          </button>
           <button type="button" onClick={onMove} className={`${LINK} text-brand hover:text-brand-dark`}>
             Reschedule
           </button>
@@ -234,6 +250,7 @@ export default function InterviewList({
   rules,
   now,
   canScheduleAgain,
+  onNewPin,
   onMove,
   onCancel,
   onScheduleAgain,
@@ -276,6 +293,11 @@ export default function InterviewList({
                     {interview.candidate_name}
                   </span>
                   <span className="text-[13px]">{scoreLabel(scores.get(interview.candidate_id))}</span>
+                  {isActiveRow(interview) && identityShown(interview.identity) && (
+                    <span className="mt-1.5">
+                      <IdentityChip identity={interview.identity} isLong />
+                    </span>
+                  )}
                 </div>
                 <When interview={interview} now={now} />
                 <div className="flex flex-col items-start gap-1.5">
@@ -304,6 +326,7 @@ export default function InterviewList({
                       rules={rules}
                       now={now}
                       canScheduleAgain={canScheduleAgain(interview.candidate_id)}
+                      onNewPin={() => onNewPin(interview)}
                       onMove={() => onMove(interview)}
                       onCancel={() => onCancel(interview)}
                       onScheduleAgain={() => onScheduleAgain(interview.candidate_id)}

@@ -32,7 +32,8 @@ OPEN_INTERVIEWS = (
 
 
 def delete_job(db: Session, job_id: int) -> None:
-    """Remove a job, its candidates, their CV files and screening data, its
+    """Remove a job, its candidates, their CV files, photos, face codes and
+    screening data, its
     conversation, its interviews' chats and its background tasks. This cannot be undone.
 
     The public job post and the application form are outside the
@@ -84,8 +85,8 @@ def delete_draft(db: Session, user_id: int, thread_id: str) -> None:
 
 
 def delete_candidate(db: Session, candidate_id: int) -> None:
-    """Remove a candidate, their CV file, their screening results and their
-    CV sections. This cannot be undone.
+    """Remove a candidate, their CV file, their application photo and face
+    code, their screening results and their CV sections. This cannot be undone.
 
     Their form response is remembered by its ID only, so Fetch CVs never
     collects the application again. The ranks of the others are updated.
@@ -100,10 +101,13 @@ def delete_candidate(db: Session, candidate_id: int) -> None:
     if candidate.source_ref:
         db.add(RemovedApplication(job_id=job_id, response_id=candidate.source_ref))
     cv_path = Path(candidate.cv_path)
-    # The screening result goes with the candidate (cascade).
+    photo_path = Path(candidate.photo_path) if candidate.photo_path else None
+    # The screening result and the face code go with the candidate (cascade).
     db.delete(candidate)
     db.commit()
     cv_path.unlink(missing_ok=True)
+    if photo_path:
+        photo_path.unlink(missing_ok=True)
 
     screening_store.rerank(job_id)
     log_event(logger, "candidate_deleted", candidate_id=candidate_id, job_id=job_id)

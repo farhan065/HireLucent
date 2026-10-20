@@ -44,7 +44,8 @@ function JoinWindow({ link, isOpen, now }) {
 }
 
 // The page a candidate sees when they open their link: check the camera
-// and microphone, agree to the transcript, and join when Join opens.
+// and microphone, agree to the transcript (and, with a PIN, to the identity
+// photo), and join when Join opens.
 export default function PreJoin({ link, preview, now, isBusy, error, onJoin }) {
   const [hasConsent, setHasConsent] = useState(false)
   // Join opens on the clock, even before the next check with the server.
@@ -94,27 +95,34 @@ export default function PreJoin({ link, preview, now, isBusy, error, onJoin }) {
               className="mt-0.5 size-4.5 shrink-0 accent-brand"
             />
             <span>
-              I agree that what is said in this interview is turned into a written transcript for
-              the hiring team. The audio and video are not recorded or kept.
+              {link.pin_required
+                ? 'I agree that what is said in this interview is turned into a written transcript for the hiring team, and that one photo is taken to confirm it is me. The photo is compared with my application photo and deleted straight away. The audio and video are not recorded or kept.'
+                : 'I agree that what is said in this interview is turned into a written transcript for the hiring team. The audio and video are not recorded or kept.'}
             </span>
           </label>
 
           <Button className="min-h-13 text-base" disabled={!canJoin} onClick={onJoin}>
-            {isBusy ? 'Joining…' : 'Join interview'}
+            {isBusy ? 'Joining…' : link.pin_required ? 'Continue' : 'Join interview'}
           </Button>
           {error ? (
             <p role="alert" className="-mt-2 text-center text-sm font-semibold text-danger">
               {error}
             </p>
           ) : (
-            !canJoin &&
-            !isBusy && (
+            !isBusy &&
+            (!canJoin ? (
               <p className="-mt-2 text-center text-[13.5px]">
                 {isOpen
                   ? 'Tick the box above to join.'
                   : `Available from ${clock(link.opens_at)}, after you agree above.`}
               </p>
-            )
+            ) : (
+              link.pin_required && (
+                <p className="-mt-2 text-center text-[13.5px]">
+                  Next: one quick photo, then the waiting room.
+                </p>
+              )
+            ))
           )}
 
           <div className="flex flex-col gap-2 border-t border-line/60 pt-4 text-sm">

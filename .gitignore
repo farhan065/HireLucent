@@ -10,6 +10,12 @@ sample_cvs/
 *.sql
 *.dump
 
+# --- Face identification (F7) ---
+# Downloaded face models and private test photos.
+backend/models/
+face_test/
+frontend/public/mediapipe/
+
 # --- Logs ---
 logs/
 *.log

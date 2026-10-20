@@ -1,7 +1,16 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,6 +47,17 @@ class Candidate(TimestampMixin, Base):
     screening_error: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(30), default=CandidateStatus.APPLIED)
 
+    # Identity (F7). The application photo, kept under a random name next
+    # to the CV so the interviewer can compare it with the video, and its
+    # face code (SFace, 128 numbers). Both go when the candidate or the
+    # job is deleted. face_status says whether a face code could be made,
+    # face_problem why not, face_consent_at when the form's consent was given.
+    photo_path: Mapped[str | None] = mapped_column(String(500))
+    face_code: Mapped[bytes | None] = mapped_column(LargeBinary)
+    face_status: Mapped[str | None] = mapped_column(String(30))
+    face_problem: Mapped[str | None] = mapped_column(String(30))
+    face_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Final human decision (step 13).
     decision: Mapped[str | None] = mapped_column(String(30))
     decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
@@ -54,6 +74,11 @@ class Candidate(TimestampMixin, Base):
     assessments: Mapped[list["Assessment"]] = relationship(  
         back_populates="candidate", cascade="all, delete-orphan", passive_deletes=True
     )
+
+    @property
+    def has_photo(self) -> bool:
+        """Whether an application photo is stored."""
+        return bool(self.photo_path)
 
     @property
     def excluded_reason(self) -> str | None:

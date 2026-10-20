@@ -32,6 +32,27 @@ class CandidateStatus(StrEnum):
     ASSESSED = "assessed"
 
 
+class FaceStatus(StrEnum):
+    """Whether the application photo could be turned into a face code."""
+
+    ENROLLED = "enrolled"
+    PHOTO_UNUSABLE = "photo_unusable"
+    NO_PHOTO = "no_photo"
+    NO_CONSENT = "no_consent"
+
+
+class IdentityResult(StrEnum):
+    """The identity check when the candidate joins. Shown only to the
+    interviewer; it never stops the candidate from joining."""
+
+    PENDING = "pending"
+    VERIFIED = "verified"
+    LOW = "low"
+    VERY_LOW = "very_low"
+    OTHER_APPLICANT = "other_applicant"
+    NOT_CHECKED = "not_checked"
+
+
 class Decision(StrEnum):
     HIRE = "hire"
     HOLD = "hold"

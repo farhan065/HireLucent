@@ -16,6 +16,22 @@ MESSAGE_FIELD = Field(
 )
 
 
+class IdentityCheck(BaseModel):
+    """Whether the person who joined looks like the invited candidate (F7).
+    Interviewer-only; it never stops the candidate from joining."""
+
+    result: Literal["pending", "verified", "low", "very_low", "other_applicant", "not_checked"]
+    score: float | None = Field(
+        default=None, description="Match with the invited candidate's photo, -1 to 1."
+    )
+    other_candidate_name: str | None = Field(
+        default=None, description="The other applicant of the job the photo matched best."
+    )
+    other_score: float | None = None
+    reason: str | None = Field(default=None, description="Why it was not checked.")
+    checked_at: datetime | None = None
+
+
 class InterviewSessionSummary(BaseModel):
     """An interview as shown in a job's list of interviews. The join token
     and its hash are never included."""
@@ -39,6 +55,10 @@ class InterviewSessionSummary(BaseModel):
     assessment_status: str | None = Field(
         default=None,
         description="analysed, draft or approved; empty until the interview is evaluated.",
+    )
+    identity: IdentityCheck | None = Field(
+        default=None,
+        description="The identity check (F7). Empty for interviews scheduled before F7.",
     )
 
 
@@ -88,18 +108,24 @@ class CancelRequest(BaseModel):
     message: EmailMessage | None = MESSAGE_FIELD
 
 
+class NewPinRequest(BaseModel):
+    """Send the candidate a new link and PIN, with an optional message."""
+
+    message: EmailMessage | None = MESSAGE_FIELD
+
+
 class EmailPreviewRequest(InterviewTime):
     """The email one candidate would get. For a cancellation, the times are
     the interview's current ones."""
 
-    kind: Literal["invitation", "moved", "cancelled"]
+    kind: Literal["invitation", "moved", "cancelled", "new_pin"]
     candidate_id: int
     message: EmailMessage | None = MESSAGE_FIELD
 
 
 class EmailPreview(BaseModel):
-    """An email as the candidate will see it, with "[private link]" in
-    place of their link."""
+    """An email as the candidate will see it, with "[private link]" and
+    "[private PIN]" in place of their link and PIN."""
 
     subject: str
     text: str

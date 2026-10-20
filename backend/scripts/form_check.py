@@ -21,3 +21,5 @@ if __name__ == "__main__":
     print(f"Public link: {form.public_url}")
     print(f"Accepting responses: {'yes' if form.accepts_responses else 'no'}")
     print(f"Has a file upload question: {'yes' if form.has_file_upload else 'no'}")
+    print(f"Has a required photo upload: {'yes' if form.has_photo_upload else 'no'}")
+    print(f"Has a required consent question: {'yes' if form.has_consent_question else 'no'}")

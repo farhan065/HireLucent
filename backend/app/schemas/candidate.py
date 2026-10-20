@@ -56,6 +56,16 @@ class CandidateSummary(BaseModel):
             "or phone numbers. Empty until the CV is read."
         ),
     )
+    has_photo: bool = Field(
+        default=False, description="An application photo is stored (shown in the interview room)."
+    )
+    face_status: str | None = Field(
+        default=None,
+        description="enrolled, photo_unusable, no_photo or no_consent. Empty before F7.",
+    )
+    face_problem: str | None = Field(
+        default=None, description="Why the application photo could not be used."
+    )
     created_at: datetime
 
 

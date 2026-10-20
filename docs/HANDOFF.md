@@ -1,46 +1,46 @@
 # HireLucent handoff (update this every time you switch accounts)
 
-**Last updated:** 19 Oct 2026, 14:00 (Dhaka) · **by:** the account that finished Module 6 · **PC:** office
+**Last updated:** 20 Oct 2026, 20:40 (Dhaka) · **by:** the account that built F7 · **PC:** home
 
 ## Git state
-- Branch: `module/6-assessment` (exists on both PCs; on a new PC: `git fetch origin` then `git checkout -b module/6-assessment origin/module/6-assessment`)
-- Last code commit: `0bee242` feat(jobs): Tick the Interviews and Assessments tabs (this docs update comes after it)
+- Branch `module/8-stretch-1-candidate-identification`: F7 complete. Last code commit `d11e356`, then this docs commit (`Closes #650400`).
+- Next: **pull request `module/8-stretch-1-candidate-identification` → `dev`**, then create the Module 7 branch from `dev` (e.g. `module/7-innovation`).
 - Uncommitted work: none
-- Tests: 602 backend tests (a few skipped on the Windows venv: Tesseract, `livekit`); frontend lint and build clean
+- Tests: 647 backend tests (a few skipped on the Windows venv: Tesseract, `livekit`); frontend lint and build clean
 
-## Done in the last sessions
-- Steps 6.1–6.10: LangGraph 3 (Q&A Analysis), LangGraph 4 (Final Assessment with HITL review), Evaluate / Evaluate all, assessment page (Q&A, Coverage, Report), Assessments tab with ranking, Approve all drafts, report PDF with Print / Download, compare up to 3 candidates
-- Extra: optional pgAdmin viewer (tools profile, localhost:5050) (`Refs #646551`)
-- 6.11 full test by the owner, all passed, with four fixes:
-  - evaluation keeps working on messy, real conversations (not answered, pauses, speech-to-text spelling, last-attempt keep, Knowledge Base down)
-  - report quotes traced with the same tolerance
-  - each finding listed once, neutral "double-check before deciding" wording
-  - green ticks on the Interviews and Assessments tabs
-- LangGraph 3 and 4 diagrams redrawn to match the code (PDFs in `docs/`, draw.io sources with the owner)
-- Study guides: "Module 6 Study Guide" and "Module 6 Backend Study Guide" (Claude docs)
-- Redmine daily notes given for #646551, #650075, #650076, #650081, #650084
+## Done in the last session (20 Oct)
+- **F7 Candidate Identification** (Module 8 Stretch 1, Redmine #650400), full test passed by the owner:
+  - Google Form needs a required photo upload ("photo" in the title) and a required consent checkbox ("consent" in the title); publishing and `form_check` check both
+  - Fetch CVs: application photo checked, re-saved, face code made (OpenCV YuNet + SFace, local); photo kept for interviewers only; deleted with the candidate or job
+  - 8-digit interview PIN under the join link (Argon2 hash only), 5 wrong tries lock 15 min, New PIN sends a new link and PIN
+  - Candidate: PIN page → pre-join (consent incl. photo) → "Confirm it's you" photo step (MediaPipe oval, tips, 5 s auto photo / Take photo, 3 tries) → waiting room
+  - Interviewer: identity chip in the waiting row and Admit bar; room sidebar with the application photo, the Identity check row and Areas to probe
+  - README section "Candidate identification and biometric data"; migration `0015`
+- Face-match test with the owner's photos: same person 0.58–0.63, other 0.30 → bands 0.50 / 0.363
+- Redmine: task #650400 description and daily note, F7 feature description given
 
 ## In progress
-- Nothing half-built. Module 6 is complete.
+- Nothing half-built.
 
 ## Next step
-1. Commit this docs update, then open the pull request `module/6-assessment` → `dev` (Claude writes the PR description; the owner merges).
-2. Redmine: feature descriptions for the finished Module 6 features and the Module 6 description (needs the Module 6 tree screenshot with story and feature ids).
-3. Create `module/7-…` from `dev` and start Module 7 (innovation: Candidate Feedback Composer, and the Hire / Hold / Reject decision): understanding and questions first, mockups before any UI.
+1. Open the PR into `dev` and merge it.
+2. **New chat: Module 7 Innovation, Candidate Feedback Composer (F11)**. Start text: `claude/starting_context_module_7.md` in the Project files. Ask for the Module 7 Redmine ids first.
+3. After Module 7, in another new chat: stretch features F8–F10, each on `module/8-stretch-<n>-<feature>` from `dev`.
 
-## Decisions made in Module 6 (already in project_context.md)
-- Evaluate on request, one at a time, in the background with progress.
-- Overall = 0.4 × CV + 0.6 × interview; label strong fit ≥ 70, possible fit ≥ 60, otherwise not a fit (decision support only).
-- Accuracy from Knowledge Base `reference` documents first; technical answers otherwise judged by the AI; company answers otherwise not checked.
-- Report review: approve / request changes / edit (no adding points) + Approve all drafts, all with confirms.
-- PDF export (no candidate name in the file name), comparison of up to 3 candidates.
-- Evaluation keeps what can be trusted instead of failing; each finding appears once.
-- pgAdmin optional (tools profile). Way 2 handled manually with Cloudflare quick tunnels (no code).
+## Decisions made for F7 (already in project_context.md §5.6)
+- Trainer approved face verification beyond clarification #21.
+- Application photo kept (not only the face code); face data deleted with the candidate or job.
+- Photo and consent required in the form; one consent box at pre-join.
+- Never blocks: every candidate with the PIN can join; the result is interviewer-only.
+- Liveness check and face status on the Applications tab: later.
 
 ## Reminders
 - **Keep reminding (owner's request):** the question inferred from the candidate's answer when the interviewer's question is lost from the transcript (deferred item 12). Not built.
 - Re-evaluate in the UI is not built (deferred item 13); workaround `POST /interviews/{id}/evaluate` from http://localhost:8000/docs.
-- Google sign-in renewal was due ~19 Oct 2026 (`python -m scripts.google_auth` in `backend/`, then `docker compose restart mcp-blogger mcp-google`).
-- Each PC's `.env` needs `DEEPGRAM_API_KEY`, `ASSEMBLYAI_API_KEY` (optional), `STT_PROVIDER`, `STT_KEYTERMS` and, for AssemblyAI, `ASSEMBLYAI_URL=wss://streaming.assemblyai.com/v3/ws`; for pgAdmin `PGADMIN_EMAIL` and `PGADMIN_PASSWORD` (copy by USB, never by chat or GitHub).
-- Each PC has its own database: Knowledge Base files (for example `ml_reference_notes.txt`) and interviews must be added again on the other PC.
+- Google sign-in renewed 20 Oct; renew again before the demo (`python -m scripts.google_auth` in `backend/`, then `docker compose restart mcp-blogger mcp-google`).
+- **8 GB PC:** build one image at a time: `docker compose down` → `docker compose build backend` → `docker compose build frontend` → `docker compose up -d`. A full `up -d --build` crashed WSL once.
+- pgAdmin is not started by `up -d` (tools profile): `docker compose --profile tools up -d pgadmin`, then http://127.0.0.1:5050.
+- Each PC's `.env` needs `DEEPGRAM_API_KEY`, `ASSEMBLYAI_API_KEY` (optional), `STT_PROVIDER`, `STT_KEYTERMS` and, for AssemblyAI, `ASSEMBLYAI_URL=wss://streaming.assemblyai.com/v3/ws`; for pgAdmin `PGADMIN_EMAIL` and `PGADMIN_PASSWORD`; for F7 `MAX_PHOTO_MB=10` to match the form's 10 MB photo limit (copy by USB, never by chat or GitHub).
 - Check the running speech-to-text provider: `docker compose logs transcription-worker | grep transcription_worker_started | tail -1`.
+- Keep `face_test/` (owner's photos) local only; it is git-ignored. Delete the photos when no longer needed for demos.
+- Each PC has its own database: Knowledge Base files and interviews must be added again on the other PC.

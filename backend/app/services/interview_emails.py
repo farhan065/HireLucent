@@ -9,7 +9,10 @@ not written by AI. Only the message paragraph can be changed by the
 interviewer; the greeting, the time, the Join link, the tips and the
 signature are always added by the template, in this order:
 
-    Hello -> message -> When -> Join link -> tips -> signature
+    Hello -> message -> When -> Join link and PIN -> tips -> signature
+
+The interview PIN (F7) sits right under the join link. Previews show
+"[private link]" and "[private PIN]" instead of the real ones.
 """
 
 import re
@@ -22,8 +25,10 @@ from app.services.interview_times import describe
 INVITATION = "invitation"
 MOVED = "moved"
 CANCELLED = "cancelled"
+NEW_PIN = "new_pin"
 
 PREVIEW_LINK = "[private link]"
+PREVIEW_PIN = "[private PIN]"
 SIGNATURE = "Best regards,\nHireLucent Careers"
 MAX_MESSAGE_LENGTH = 1500
 HTML_TAG = re.compile(r"<\s*/?\s*[a-zA-Z!][^>]*>")
@@ -33,6 +38,9 @@ BEFORE_YOU_JOIN = [
     "What is said in the interview is turned into a written transcript for the "
     "hiring team. The audio and video are not recorded or kept. You will be asked "
     "to agree to this before you join.",
+    "When you join, you will be asked for your interview PIN, and one photo is "
+    "taken to confirm it is you. It is compared with your application photo and "
+    "deleted straight away.",
 ]
 
 
@@ -73,6 +81,11 @@ def default_message(kind: str, job_title: str, start: datetime, end: datetime) -
         )
     if kind == MOVED:
         return f"Your interview for the {job_title} role has moved to a new time."
+    if kind == NEW_PIN:
+        return (
+            f"Here is a new PIN and join link for your interview for the {job_title} "
+            "role. The time stays the same."
+        )
     return "The hiring team will contact you about the next steps."
 
 
@@ -80,10 +93,15 @@ def _length(start: datetime, end: datetime) -> int:
     return int((end - start).total_seconds() // 60)
 
 
-def _join(link: str, note: str = "") -> str:
+def _join(link: str, note: str = "", pin: str | None = None) -> str:
     opens = get_settings().join_opens_minutes_before
+    pin_line = (
+        f"\nInterview PIN: {pin} (you will be asked for this PIN; do not share it)"
+        if pin
+        else ""
+    )
     return (
-        f"Join the interview: {link}\n"
+        f"Join the interview: {link}{pin_line}\n"
         f"The Join button opens {opens} minutes before the start. "
         f"This link is personal. Please do not share it.{note}"
     )
@@ -100,6 +118,7 @@ def invitation(
     end: datetime,
     link: str,
     message: str | None = None,
+    pin: str | None = None,
 ) -> Invitation:
     return Invitation(
         title=calendar_title(job_title),
@@ -109,7 +128,7 @@ def invitation(
                 message or default_message(INVITATION, job_title, start, end),
                 f"When: {describe(start, end)}\n"
                 "Your calendar shows the time in your own time zone.",
-                _join(link),
+                _join(link, pin=pin),
                 _tips(),
                 SIGNATURE,
             ]
@@ -124,7 +143,13 @@ def moved(
     end: datetime,
     link: str,
     message: str | None = None,
+    pin: str | None = None,
 ) -> Invitation:
+    earlier = (
+        " The link and PIN in the earlier invitation no longer work."
+        if pin
+        else " The link in the earlier invitation no longer works."
+    )
     return Invitation(
         title=calendar_title(job_title),
         description="\n\n".join(
@@ -133,7 +158,34 @@ def moved(
                 message or default_message(MOVED, job_title, start, end),
                 f"New time: {describe(start, end)}\n"
                 "Your calendar shows the time in your own time zone.",
-                _join(link, " The link in the earlier invitation no longer works."),
+                _join(link, earlier, pin),
+                _tips(),
+                SIGNATURE,
+            ]
+        ),
+    )
+
+
+def new_pin(
+    candidate_name: str,
+    job_title: str,
+    start: datetime,
+    end: datetime,
+    link: str,
+    pin: str,
+    message: str | None = None,
+) -> Invitation:
+    """The updated invitation after "Send a new PIN": same time, new link
+    and new PIN."""
+    return Invitation(
+        title=calendar_title(job_title),
+        description="\n\n".join(
+            [
+                f"Hello {candidate_name},",
+                message or default_message(NEW_PIN, job_title, start, end),
+                f"When: {describe(start, end)}\n"
+                "Your calendar shows the time in your own time zone.",
+                _join(link, " The link and PIN in the earlier invitation no longer work.", pin),
                 _tips(),
                 SIGNATURE,
             ]
@@ -168,13 +220,21 @@ def preview(
     end: datetime,
     message: str | None = None,
 ) -> dict[str, str]:
-    """The email as the candidate will see it, with "[private link]" in
-    place of the link, and the message used in it."""
+    """The email as the candidate will see it, with "[private link]" and
+    "[private PIN]" in place of the link and PIN, and the message used in it."""
     used = message or default_message(kind, job_title, start, end)
     if kind == INVITATION:
-        text = invitation(candidate_name, job_title, start, end, PREVIEW_LINK, used).description
+        text = invitation(
+            candidate_name, job_title, start, end, PREVIEW_LINK, used, PREVIEW_PIN
+        ).description
     elif kind == MOVED:
-        text = moved(candidate_name, job_title, start, end, PREVIEW_LINK, used).description
+        text = moved(
+            candidate_name, job_title, start, end, PREVIEW_LINK, used, PREVIEW_PIN
+        ).description
+    elif kind == NEW_PIN:
+        text = new_pin(
+            candidate_name, job_title, start, end, PREVIEW_LINK, PREVIEW_PIN, used
+        ).description
     else:
         text = cancelled(candidate_name, job_title, start, end, used)
     return {

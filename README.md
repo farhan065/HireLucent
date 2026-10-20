@@ -24,6 +24,7 @@ The name reflects the platform's purpose of bringing clarity to candidate evalua
 | **F4** Live, speaker-attributed, timestamped transcription | Planned (Module 5) |
 | **F5** Interview Q&A analysis | Planned (Module 6) |
 | **F6** Consolidated candidate assessment, comparison and export | Planned (Module 6) |
+| **F7** (stretch) Candidate identification: interview PIN, face check when the candidate joins, and a profile panel in the interview room. See [Candidate identification and biometric data](#candidate-identification-and-biometric-data) | Done |
 | **F11** Innovation feature: Candidate Feedback Composer | Planned (Module 7) |
 
 **What works today (pre-interview stage):**
@@ -155,6 +156,7 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
 | `GOOGLE_TOKEN_FILE` | The Google sign-in file inside the backend container |
 | `APP_ENV`, `LOG_LEVEL` | Environment name and log level |
 | `PGADMIN_EMAIL`, `PGADMIN_PASSWORD` | Sign-in for the optional pgAdmin database viewer |
+| `FACE_MODELS_DIR`, `MAX_PHOTO_MB` | Where the two face models are kept (downloaded when the backend image is built; default `models`) and the largest photo accepted (default 5 MB) |
 
 ## Usage walkthrough
 
@@ -192,6 +194,35 @@ Prompts and model answers are never written to the logs.
 - **Deleting a candidate** (`DELETE /candidates/{id}`, also a button on the Screening tab) removes their record, screening results, CV file and CV embeddings. The form response is remembered only by its ID, so it is not collected again.
 - **Deleting a job** removes its candidates, CV files, embeddings and conversation.
 - Raw interview audio and video will never be stored (planned for Modules 4–5).
+- Candidate identification uses biometric data; how it is handled is described in the next section.
+
+## Candidate identification and biometric data
+
+Face data is the most sensitive data HireLucent handles (BID N17), so the check is built to keep as little as possible, for as short a time as possible, and never to decide anything on its own.
+
+**What happens**
+
+1. **Applying.** The job's Google Form asks for a recent passport-size photo (candidates are asked for one under 3 months old; its age cannot be checked) and a required consent: *"I agree that my photo is stored with my application and used only to confirm my identity at the interview. It is deleted when my application or the job is deleted."*
+2. **Fetch CVs.** With consent, the photo is checked in memory (exactly one face, big, sharp and light enough). A usable photo is re-saved as a small JPEG (which drops the file's hidden camera, place and time details) and turned into a **face code**: 128 numbers made by the SFace model. Without consent nothing is read. A photo problem never stops the application; the reason is recorded instead.
+3. **Interview PIN.** Each invitation has an 8-digit PIN right under the join link. Only its Argon2 hash is stored. Five wrong tries lock the link for 15 minutes; rescheduling or **Send a new PIN** gives a new link and PIN.
+4. **Joining.** After the PIN and the consent on the pre-join page, a face guide (an oval with tips, run in the browser by MediaPipe and served by HireLucent itself) helps the candidate take **one photo**. The backend compares it with the invited candidate's face code and with the other applicants of the same job, then **discards it**. The candidate only sees "Thanks, you're all set".
+5. **The result is for the interviewer only**, in the waiting row, the Admit bar and the room's Candidate info: *Identity verified* (match 0.50 or more), *Low match: check identity* (0.363 to 0.50), *Very low match: verify identity* (below 0.363), *Matches another applicant: verify identity*, or *Identity not checked* with the reason. The interviewer can open the application photo to compare it with the live video. The same panel shows the candidate's headline experience, key skills, pre-interview score and **Areas to probe** (requirements screening found only partly met or not met). **Nobody is ever blocked**: every candidate with the PIN can join, whatever the result. The limits come from a face-match test with the developer's own face (`backend/scripts/face_match_check.py`): the same person scored 0.58 to 0.63 against a passport photo, a different person 0.30; 0.363 is SFace's published same-person limit.
+
+**What is stored, where and for how long**
+
+| Data | Where | Kept until |
+|---|---|---|
+| Application photo (re-saved JPEG, random file name) | The `cv_data` Docker volume, next to the CVs | The candidate or the job is deleted |
+| Face code (128 numbers) and the consent time | PostgreSQL, on the candidate | The candidate or the job is deleted |
+| Identity result (label, match scores, reason, time) | PostgreSQL, on the interview | The candidate or the job is deleted |
+| PIN | Only its Argon2 hash, on the interview | Replaced by the next PIN |
+| Photo taken when joining, camera frames | **Never stored** | — |
+
+**Who can see it.** Only signed-in interviewers. A candidate's pass gets 403 on every photo, score and report endpoint.
+
+**Third parties.** None: both face models (OpenCV Zoo YuNet, MIT licence, and SFace, Apache 2.0) run on the local CPU in the backend container, and the browser model (MediaPipe BlazeFace, Apache 2.0) runs in the candidate's browser. No face ever goes to an external service. Google Drive only holds the photo the candidate uploaded to the form, like the CV.
+
+**Logs** hold interview ids, the result label and the match score only.
 
 ## Google setup (publishing and CV collection)
 
@@ -220,7 +251,7 @@ One-time setup with a personal Google account:
    docker compose exec backend python -m scripts.blogger_check
    ```
 
-**The application form** needs three questions: the applicant's name, email address and a CV file upload (PDF or DOCX). Each job uses its own form. To check a form without saving anything:
+**The application form** needs five questions: the applicant's full name, email address, a CV file upload (PDF or DOCX), a required photo upload whose title contains "photo" (JPG or PNG, a recent passport-size photo) and a required consent checkbox whose title contains "consent" (the text is in [Candidate identification and biometric data](#candidate-identification-and-biometric-data)). Publishing is refused until the photo and consent questions are there. Each job uses its own form. To check a form without saving anything:
 
 ```bash
 docker compose exec backend python -m scripts.form_check "<form link>"
@@ -292,6 +323,8 @@ docs/               architecture and LangGraph diagrams
 **Branches:** `main` (final release), `dev` (completed modules) and one branch per module, merged into `dev` by pull request.
 
 ## Known limitations
+
+- **Identity check (F7):** there is no liveness check yet, so a clear printed photo held up to the camera could pass; the interviewer still sees the live video and the label is advice only. Twins and close look-alikes can match each other. An old or poor application photo gives a lower score (the label then asks the interviewer to compare). Interviews scheduled before F7 have no PIN and no check. The photo inside a CV is not used.
 
 - **Score repeatability:** the model in use (Gemini 3.5 Flash-Lite) ignores the temperature setting, so scoring the same CV again can differ slightly. Measured on one candidate over 3 runs: requirement results, match and ATS scores were identical; the largest final-score difference was 2 points.
 - **Screening speed:** limited by the free-tier LLM rate (15 requests per minute by default; about 3 calls per CV). The time for 20 CVs is still to be measured and will be stated here.

@@ -18,6 +18,10 @@ COPY alembic ./alembic
 COPY app ./app
 COPY scripts ./scripts
 
+# The two face models for candidate identification (OpenCV Zoo: YuNet and
+# SFace), checked against their SHA-256. Downloaded once, at build time.
+RUN python -m app.services.face_models /app/models
+
 RUN useradd --create-home appuser \
     && mkdir -p /app/logs /data/cv_intake \
     && chown -R appuser /app /data

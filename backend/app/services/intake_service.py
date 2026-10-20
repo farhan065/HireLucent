@@ -8,6 +8,7 @@ Running it again later collects only what arrived since.
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path, PurePath
 from uuid import uuid4
 
@@ -20,8 +21,8 @@ from app.core.errors import AppError, ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.db.session import SessionLocal
 from app.models import Candidate, Job, RemovedApplication, Task
-from app.models.enums import CandidateSource, CandidateStatus, JobStatus
-from app.services import google_drive, google_forms, job_service, task_service
+from app.models.enums import CandidateSource, CandidateStatus, FaceStatus, JobStatus
+from app.services import face_service, google_drive, google_forms, job_service, task_service
 from app.services.google_forms import FormResponse
 from app.services.task_service import TaskProgress
 from app.services.text_extraction import UnsupportedFileError, check_file
@@ -30,10 +31,13 @@ logger = get_logger(__name__)
 
 TASK_KIND = "cv_intake"
 CV_EXTENSIONS = {".pdf", ".docx"}
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+PHOTO_FOLDER = "photos"
 NOT_PUBLISHED_MESSAGE = "Publish the job before fetching CVs."
 UNKNOWN_NAME = "Unknown applicant"
 DOWNLOAD_FAILED = "The CV could not be downloaded."
 CV_MISSING = "The CV file is no longer stored. Fetch the CVs again."
+NO_PHOTO = "This candidate has no application photo."
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # How long a count of waiting applications is reused before Google is asked
@@ -122,9 +126,11 @@ def _collect(
     and for a failure the reason in words that are safe to show."""
     if response.email in known_emails:
         return "duplicates", None
+    face: dict = {}
     try:
         extension, content = read_cv(response)
         path = _store(job_id, extension, content)
+        face = enrol_face(job_id, response)
         db.add(
             Candidate(
                 job_id=job_id,
@@ -134,11 +140,14 @@ def _collect(
                 source_ref=response.response_id,
                 cv_path=str(path),
                 status=CandidateStatus.APPLIED,
+                **face,
             )
         )
         db.commit()
     except Exception as exc:
         db.rollback()
+        if face.get("photo_path"):
+            Path(face["photo_path"]).unlink(missing_ok=True)
         # Only the kind of problem is logged, never the applicant's details.
         log_event(
             logger,
@@ -164,6 +173,77 @@ def read_cv(response: FormResponse) -> tuple[str, bytes]:
     max_mb = get_settings().max_upload_mb
     content = google_drive.download_file(response.file_id, max_mb)
     return check_file(response.file_name, content, max_mb), content
+
+
+def enrol_face(job_id: int, response: FormResponse) -> dict:
+    """The candidate's photo and face code from their application (F7), as
+    candidate columns. A photo problem never stops the application: the
+    face status says what went wrong. Without consent nothing is read."""
+    if not response.consent:
+        return {"face_status": FaceStatus.NO_CONSENT}
+    consent = {"face_consent_at": response.submitted_at or datetime.now(timezone.utc)}
+    if not response.photo_file_id:
+        return {**consent, "face_status": FaceStatus.NO_PHOTO}
+    check = _check_photo(response)
+    if check.problem:
+        log_event(
+            logger,
+            "face_photo_unusable",
+            level=logging.WARNING,
+            job_id=job_id,
+            problem=check.problem,
+        )
+        return {
+            **consent,
+            "face_status": FaceStatus.PHOTO_UNUSABLE,
+            "face_problem": check.problem,
+        }
+    photo_path = _store_photo(job_id, face_service.jpeg_for_storage(check.image))
+    log_event(logger, "face_enrolled", job_id=job_id)
+    return {
+        **consent,
+        "face_status": FaceStatus.ENROLLED,
+        "face_code": check.code,
+        "photo_path": str(photo_path),
+    }
+
+
+def _check_photo(response: FormResponse) -> face_service.FaceCheck:
+    """Download the photo and check it in memory. The original file is
+    never written; only a re-saved JPEG copy is kept, once it is usable."""
+    if PurePath(response.photo_file_name).suffix.lower() not in PHOTO_EXTENSIONS:
+        return face_service.FaceCheck(problem=face_service.NOT_AN_IMAGE)
+    try:
+        content = google_drive.download_file(response.photo_file_id, get_settings().max_photo_mb)
+    except AppError:
+        return face_service.FaceCheck(problem=face_service.NOT_DOWNLOADED)
+    try:
+        return face_service.check_photo(content)
+    except Exception as exc:
+        log_event(
+            logger, "face_check_failed", level=logging.WARNING, error_type=type(exc).__name__
+        )
+        return face_service.FaceCheck(problem=face_service.CHECK_FAILED)
+
+
+def _store_photo(job_id: int, content: bytes) -> Path:
+    """Save the photo under a random name, next to the job's CVs, so it is
+    removed with the job."""
+    folder = Path(get_settings().cv_storage_dir) / str(job_id) / PHOTO_FOLDER
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{uuid4().hex}.jpg"
+    path.write_bytes(content)
+    return path
+
+
+def photo_file(db: Session, candidate_id: int) -> Path:
+    """Where a candidate's application photo is stored, or a 404 error."""
+    candidate = db.get(Candidate, candidate_id)
+    if candidate is None:
+        raise NotFoundError("This candidate does not exist.")
+    if not candidate.photo_path or not Path(candidate.photo_path).is_file():
+        raise NotFoundError(NO_PHOTO)
+    return Path(candidate.photo_path)
 
 
 def _store(job_id: int, extension: str, content: bytes) -> Path:

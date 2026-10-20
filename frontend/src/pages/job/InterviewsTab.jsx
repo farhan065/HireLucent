@@ -3,6 +3,7 @@ import {
   CalendarDays,
   CircleCheck,
   Info,
+  KeyRound,
   LoaderCircle,
   Sparkles,
   TriangleAlert,
@@ -13,12 +14,14 @@ import { useState } from 'react'
 import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
 import ConfirmDialog from '../../components/ConfirmDialog.jsx'
+import IdentityChip from '../../components/interviews/IdentityChip.jsx'
 import InterviewList from '../../components/interviews/InterviewList.jsx'
 import { DialogMessage } from '../../components/interviews/EmailMessage.jsx'
 import SchedulePanel from '../../components/interviews/SchedulePanel.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import { useCandidates } from '../../hooks/useCandidates.js'
 import { answersPart, batchPosition, evaluationOf } from '../../lib/assessment.js'
+import { identityShown } from '../../lib/identity.js'
 import {
   cancelInterview,
   clock,
@@ -26,6 +29,7 @@ import {
   isActive,
   messageProblem,
   scoreLabel,
+  sendNewPin,
   shortDay,
   sortInterviews,
   span,
@@ -87,7 +91,7 @@ function WaitingBanner({ interview, now }) {
       role="status"
       className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-success/25 bg-success-soft px-5 py-4"
     >
-      <span className="flex items-center gap-3 text-[15.5px] text-navy">
+      <span className="flex flex-wrap items-center gap-3 text-[15.5px] text-navy">
         <span aria-hidden="true" className="relative size-3 shrink-0">
           <span className="absolute -inset-1.5 animate-ping rounded-full bg-success/20" />
           <span className="absolute inset-0 rounded-full bg-success" />
@@ -98,6 +102,7 @@ function WaitingBanner({ interview, now }) {
           </strong>{' '}
           · for {waitingFor(interview, now)} · interview at {clock(interview.scheduled_start)}
         </span>
+        {identityShown(interview.identity) && <IdentityChip identity={interview.identity} isLong />}
       </span>
       <Button
         to={`/app/interviews/${interview.id}/room`}
@@ -289,6 +294,9 @@ export default function InterviewsTab() {
   const [notice, setNotice] = useState(null)
   const [view, setView] = useState('upcoming')
   const [deleting, setDeleting] = useState(null)
+  // The interview getting a new PIN, and the message for it (null = default).
+  const [renewing, setRenewing] = useState(null)
+  const [pinMessage, setPinMessage] = useState(null)
 
   if (error || candidatesError) {
     return (
@@ -337,6 +345,21 @@ export default function InterviewsTab() {
       onChanged()
     } catch (cancelFailure) {
       setCancelError(cancelFailure.message)
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function confirmNewPin() {
+    setIsBusy(true)
+    setCancelError('')
+    try {
+      await sendNewPin(renewing.id, pinMessage)
+      setNotice({ tone: 'success', text: `New PIN sent to ${renewing.candidate_name}.` })
+      setRenewing(null)
+      onChanged()
+    } catch (pinError) {
+      setCancelError(pinError.message)
     } finally {
       setIsBusy(false)
     }
@@ -415,6 +438,11 @@ export default function InterviewsTab() {
           rules={rules}
           now={now}
           canScheduleAgain={canScheduleAgain}
+          onNewPin={(interview) => {
+            setCancelError('')
+            setPinMessage(null)
+            setRenewing(interview)
+          }}
           onMove={(interview) => setPanel({ interview })}
           onCancel={(interview) => {
             setCancelError('')
@@ -435,10 +463,10 @@ export default function InterviewsTab() {
       <p className="flex items-start gap-2.5 text-sm">
         <Info className="mt-0.5 size-4.5 shrink-0 text-brand" aria-hidden="true" />
         <span>
-          Each candidate gets a calendar invitation by email with a private link. Their Join
-          button opens{' '}
+          Each candidate gets a calendar invitation by email with a private link and PIN. Their
+          Join button opens{' '}
           {rules?.join_opens_minutes_before ?? 10} minutes before the start. Rescheduling sends a
-          new link and the old one stops working.
+          new link and PIN and the old ones stop working.
         </span>
       </p>
 
@@ -488,6 +516,40 @@ export default function InterviewsTab() {
             message={cancelMessage}
             onChange={setCancelMessage}
           />
+        </ConfirmDialog>
+      )}
+
+      {renewing && (
+        <ConfirmDialog
+          title={`Send a new PIN to ${renewing.candidate_name}?`}
+          icon={KeyRound}
+          confirmLabel="Send new PIN"
+          busyLabel="Sending…"
+          confirmVariant="primary"
+          isBusy={isBusy}
+          confirmDisabled={pinMessage != null && Boolean(messageProblem(pinMessage))}
+          isWide
+          error={cancelError}
+          onConfirm={confirmNewPin}
+          onCancel={() => setRenewing(null)}
+        >
+          <p>
+            Google Calendar sends an updated invitation with a new PIN and join link. The old ones
+            stop working straight away; the time stays the same. Use this when the candidate lost
+            the PIN or the link is locked.
+          </p>
+          <DialogMessage
+            jobId={job.id}
+            kind="new_pin"
+            candidateId={renewing.candidate_id}
+            candidateName={renewing.candidate_name}
+            start={new Date(renewing.scheduled_start)}
+            end={new Date(renewing.scheduled_end)}
+            label={`Message to ${renewing.candidate_name}`}
+            message={pinMessage}
+            onChange={setPinMessage}
+          />
+          <p className="text-sm">The PIN itself is never shown here: only its hash is stored.</p>
         </ConfirmDialog>
       )}
 

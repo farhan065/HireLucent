@@ -3,14 +3,16 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, object_session, relationship
 
 from app.models.base import Base, TimestampMixin
-from app.models.enums import SessionStatus
+from app.models.enums import IdentityResult, SessionStatus
 
 if TYPE_CHECKING:
     from app.models.assessment import Assessment
     from app.models.candidate import Candidate
+
+NOT_TAKEN = "No photo was taken before the interview started."
 
 # The candidate's waiting page checks in every few seconds. Without a check
 # for this long, they are no longer counted as waiting.
@@ -53,6 +55,16 @@ class InterviewSession(TimestampMixin, Base):
     # Questions the AI suggested for this candidate, with whether each was
     # asked. Kept for the interview room and the assessment after it.
     suggested_questions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    # The interview PIN (F7): only its Argon2 hash is stored. Five wrong
+    # tries lock the link for a while. Interviews scheduled before F7 have
+    # no PIN and no identity check.
+    pin_hash: Mapped[str | None] = mapped_column(String(255))
+    pin_failed_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    pin_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The identity check when the candidate joined: result, match scores,
+    # another applicant it matched, the reason when not checked, the time
+    # and the number of photos tried. Never the photo itself.
+    identity_check: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     candidate: Mapped["Candidate"] = relationship(  
         back_populates="sessions"
@@ -75,6 +87,28 @@ class InterviewSession(TimestampMixin, Base):
     def assessment_status(self) -> str | None:
         """analysed, draft or approved; None until the interview is evaluated."""
         return self.assessment.status if self.assessment else None
+
+    @property
+    def identity(self) -> dict[str, Any] | None:
+        """The identity check for the interviewer (F7): pending until the
+        candidate has taken the photo. None for interviews scheduled before
+        F7, which have no PIN."""
+        if self.pin_hash is None:
+            return None
+        check = dict(self.identity_check or {})
+        if not check.get("result"):
+            if self.status == SessionStatus.SCHEDULED:
+                return {"result": IdentityResult.PENDING}
+            return {"result": IdentityResult.NOT_CHECKED, "reason": NOT_TAKEN}
+        other_id = check.pop("other_candidate_id", None)
+        if other_id:
+            from app.models.candidate import Candidate
+
+            db = object_session(self)
+            other = db.get(Candidate, other_id) if db else None
+            check["other_candidate_name"] = other.full_name if other else None
+        check.pop("attempts", None)
+        return check
 
     @property
     def candidate_waiting(self) -> bool:
