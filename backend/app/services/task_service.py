@@ -34,6 +34,12 @@ INTERRUPTED_MESSAGE = "The operation was interrupted by a restart. Please start 
 # Interview evaluations belong to a job but work on its interviews, not its
 # candidates' CVs, so they do not stop a fetch or a screening.
 EVALUATION = "interview_evaluation"
+# Feedback emails (F11) work on emails only, so they do not stop a fetch or a
+# screening either.
+FEEDBACK_WRITING = "feedback_writing"
+FEEDBACK_SENDING = "feedback_sending"
+# Tasks that leave a job's CVs alone.
+NOT_CV_WORK = (EVALUATION, FEEDBACK_WRITING, FEEDBACK_SENDING)
 
 
 class TaskProgress:
