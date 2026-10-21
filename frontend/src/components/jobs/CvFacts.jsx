@@ -63,7 +63,9 @@ export default function CvFacts({ facts }) {
       <p className="mt-1 text-[13px] text-body/80">
         What the AI read from the CV. Phone numbers are not shown.
       </p>
-      {isEmpty && <p className="mt-3 text-sm">No skills, work history or education could be read.</p>}
+      {isEmpty && (
+        <p className="mt-3 text-sm">No skills, work history or education could be read.</p>
+      )}
 
       <div className="grid gap-x-8 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <div>
@@ -88,15 +90,21 @@ export default function CvFacts({ facts }) {
                   <li key={`${job.title}-${job.company}-${index}`} className="flex gap-3">
                     <div className="flex flex-col items-center" aria-hidden="true">
                       <span className="mt-1.5 size-2.5 rounded-full bg-brand" />
-                      {index < experience.length - 1 && <span className="mt-1 w-0.5 flex-1 bg-line" />}
+                      {index < experience.length - 1 && (
+                        <span className="mt-1 w-0.5 flex-1 bg-line" />
+                      )}
                     </div>
                     <div className="min-w-0 flex-1 pb-3.5">
                       <p className="text-[15px] font-bold text-navy">
                         {job.title || 'Role not stated'}
-                        {job.company && <span className="font-medium text-body"> · {job.company}</span>}
+                        {job.company && (
+                          <span className="font-medium text-body"> · {job.company}</span>
+                        )}
                       </p>
                       {period(job) && <p className="text-xs text-body/80">{period(job)}</p>}
-                      {job.description && <p className="mt-1 text-sm leading-relaxed">{job.description}</p>}
+                      {job.description && (
+                        <p className="mt-1 text-sm leading-relaxed">{job.description}</p>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -162,28 +170,49 @@ export default function CvFacts({ facts }) {
   )
 }
 
-// What an opened row under "Not ranked" shows: for an excluded candidate
-// every reason first, then the CV facts, so the two can be compared.
+// What an opened row under "Not ranked" shows: why it is not ranked (every
+// reason for an excluded candidate, the reason a CV could not be read, or
+// that screening is not finished), then the CV facts when there are any.
 export function UnrankedDetails({ candidate }) {
-  const reasons =
-    candidate.status === 'excluded' ? (candidate.excluded_reason ?? '').split('\n').filter(Boolean) : []
+  const box = {
+    excluded: {
+      title: 'Why excluded',
+      tone: 'border-warning text-warning',
+      lines: (candidate.excluded_reason ?? '').split('\n').filter(Boolean),
+      note: 'Excluded candidates are not matched or scored. Compare the reasons with the CV facts below.',
+    },
+    screening_failed: {
+      title: 'Why it could not be read',
+      tone: 'border-danger text-danger',
+      lines: [candidate.screening_error ?? 'The file could not be read.'],
+      note: 'There are no CV facts for this candidate. Open the CV to check it yourself.',
+    },
+  }[candidate.status] ?? {
+    title: 'Not scored yet',
+    tone: 'border-brand text-brand-dark',
+    lines: [
+      `Screening stopped before this CV was ${candidate.requirement_matches ? 'scored' : 'matched'}.`,
+    ],
+    note: 'Screen the CVs to finish.',
+  }
   return (
     <>
-      {reasons.length > 0 && (
-        <section className="rounded-2xl border-l-[3px] border-warning bg-white px-4 py-3.5">
-          <h3 className={`${LABEL} text-warning`}>Why excluded</h3>
+      <section
+        className={`rounded-2xl border-l-[3px] bg-white px-4 py-3.5 ${box.tone.split(' ')[0]}`}
+      >
+        <h3 className={`${LABEL} ${box.tone.split(' ')[1]}`}>{box.title}</h3>
+        {box.lines.length > 1 ? (
           <ul className="mt-1.5 list-disc pl-5 text-[15px] leading-relaxed text-navy">
-            {reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
+            {box.lines.map((line) => (
+              <li key={line}>{line}</li>
             ))}
           </ul>
-          <p className="mt-1.5 text-[13px] text-body/80">
-            Excluded candidates are not matched or scored. Compare the reasons with the CV facts
-            below.
-          </p>
-        </section>
-      )}
-      <CvFacts facts={candidate.cv_facts} />
+        ) : (
+          <p className="mt-1.5 text-[15px] leading-relaxed text-navy">{box.lines[0]}</p>
+        )}
+        <p className="mt-1.5 text-[13px] text-body/80">{box.note}</p>
+      </section>
+      {candidate.cv_facts && <CvFacts facts={candidate.cv_facts} />}
     </>
   )
 }

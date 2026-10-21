@@ -1,4 +1,4 @@
-import { ScanSearch, Search } from 'lucide-react'
+import { Mail, ScanSearch, Search } from 'lucide-react'
 import { useState } from 'react'
 import { useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
@@ -7,8 +7,10 @@ import MatchRanking from '../../components/jobs/MatchRanking.jsx'
 import ResultFilter from '../../components/jobs/ResultFilter.jsx'
 import RunPanel from '../../components/jobs/RunPanel.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
+import ScreeningFeedback from '../../components/feedback/ScreeningFeedback.jsx'
 import { useCandidates } from '../../hooks/useCandidates.js'
 import { formatDateTime } from '../../lib/jobs.js'
+import { isScreeningRejected } from '../../lib/feedback.js'
 import { countGroups, filterCandidates } from '../../lib/results.js'
 
 const SCREENING = 'cv_screening'
@@ -55,12 +57,15 @@ function LastScreening({ task }) {
 const SUB_TABS = [
   { key: 'final', label: 'Final ranking', note: 'after scoring' },
   { key: 'match', label: 'Requirement match' },
+  { key: 'feedback', label: 'Feedback emails', icon: Mail },
 ]
 
-// The two rankings of a job. The final ranking opens once someone is scored.
-function SubTabs({ view, hasScores, onChange }) {
+// The two rankings of a job and the feedback emails of everyone not
+// shortlisted (F11). The final ranking opens once someone is scored.
+// "toSend" is the Feedback emails badge: emails not sent yet.
+function SubTabs({ view, hasScores, toSend, onChange }) {
   return (
-    <div role="tablist" aria-label="Rankings" className="flex flex-wrap gap-2">
+    <div role="tablist" aria-label="Screening views" className="flex flex-wrap gap-2">
       {SUB_TABS.map((tab) => {
         const isActive = tab.key === view
         const isDisabled = tab.key === 'final' && !hasScores
@@ -80,8 +85,18 @@ function SubTabs({ view, hasScores, onChange }) {
                   : 'border-line bg-white text-navy hover:border-brand/40 hover:bg-tint'
             }`}
           >
+            {tab.icon && <tab.icon className="size-4" aria-hidden="true" />}
             {tab.label}
             {isDisabled && <span className="text-xs font-medium">{tab.note}</span>}
+            {tab.key === 'feedback' && toSend > 0 && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-amber-soft text-amber'
+                }`}
+              >
+                {toSend}
+              </span>
+            )}
           </button>
         )
       })}
@@ -107,22 +122,31 @@ function SearchBox({ value, onChange }) {
 
 // The rankings with their sub-tabs, the Show filter and the search. Kept in
 // its own component so every choice starts afresh for another job.
-function Results({ job, candidates, isLocked, onChanged }) {
+function Results({ job, candidates, isLocked, feedback, onChanged }) {
   // The final ranking is shown first once anyone is scored, unless the
   // interviewer picks the other view. evidenceFor opens one candidate there.
   const [chosenView, setChosenView] = useState(null)
   const [evidenceFor, setEvidenceFor] = useState(null)
+  // The candidate whose email opens when the Feedback emails view shows.
+  const [emailFor, setEmailFor] = useState(null)
   const [group, setGroup] = useState('all')
   const [query, setQuery] = useState('')
   const hasScores = candidates.some((item) => item.scores)
-  const view = hasScores ? (chosenView ?? 'final') : 'match'
+  const view =
+    chosenView === 'feedback' ? 'feedback' : hasScores ? (chosenView ?? 'final') : 'match'
   const counts = countGroups(candidates)
   const visible = filterCandidates(candidates, group, query)
   const isFiltered = group !== 'all' || query.trim() !== ''
 
   function changeView(next) {
     setEvidenceFor(null)
+    setEmailFor(null)
     setChosenView(next)
+  }
+
+  function showEmail(candidateId) {
+    setEmailFor(candidateId)
+    setChosenView('feedback')
   }
 
   function showEvidence(candidateId) {
@@ -136,17 +160,43 @@ function Results({ job, candidates, isLocked, onChanged }) {
   }
 
   const shared = { candidates, visible, isFiltered, onShowAll: showAll, isLocked, onChanged }
+  const activity = feedback?.activity
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <SubTabs view={view} hasScores={hasScores} onChange={changeView} />
+        <SubTabs
+          view={view}
+          hasScores={hasScores}
+          toSend={activity?.screening_to_send ?? 0}
+          onChange={changeView}
+        />
         <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
-          <ResultFilter value={group} counts={counts} onChange={setGroup} />
+          {view !== 'feedback' && (
+            <ResultFilter value={group} counts={counts} onChange={setGroup} />
+          )}
           <SearchBox value={query} onChange={setQuery} />
         </div>
       </div>
-      {view === 'final' ? (
-        <FinalRanking jobId={job.id} onShowEvidence={showEvidence} {...shared} />
+      {view === 'feedback' ? (
+        feedback?.isLoaded ? (
+          <ScreeningFeedback
+            candidates={candidates.filter(isScreeningRejected)}
+            query={query}
+            openFor={emailFor}
+            feedback={feedback}
+            onChanged={onChanged}
+          />
+        ) : (
+          <Skeleton className="h-48 w-full rounded-card" />
+        )
+      ) : view === 'final' ? (
+        <FinalRanking
+          jobId={job.id}
+          onShowEvidence={showEvidence}
+          feedbackActivity={activity}
+          onOpenEmail={showEmail}
+          {...shared}
+        />
       ) : (
         <MatchRanking key={evidenceFor ?? 'all'} initialOpenId={evidenceFor} {...shared} />
       )}
@@ -156,7 +206,7 @@ function Results({ job, candidates, isLocked, onChanged }) {
 
 // The Screening tab of a job: run the screening and see the results.
 export default function ScreeningTab() {
-  const { job, run, listVersion, onChanged } = useOutletContext()
+  const { job, run, listVersion, feedback, onChanged } = useOutletContext()
   const { candidates, error } = useCandidates(job.id, listVersion)
   const screening = run.running?.kind === SCREENING ? run.running : null
   const ready = run.ready_to_screen ?? 0
@@ -178,8 +228,8 @@ export default function ScreeningTab() {
               <strong className="font-semibold text-navy">
                 {ready} {ready === 1 ? 'CV is' : 'CVs are'} ready to screen.
               </strong>{' '}
-              Each CV is read, checked against the must-haves, matched with every
-              requirement by meaning, and scored. CVs already screened are skipped.
+              Each CV is read, checked against the must-haves, matched with every requirement by
+              meaning, and scored. CVs already screened are skipped.
             </>
           ) : (
             'All collected CVs are screened. Fetch new applications to screen more.'
@@ -218,6 +268,7 @@ export default function ScreeningTab() {
           job={job}
           candidates={screened}
           isLocked={Boolean(run.running)}
+          feedback={feedback}
           onChanged={onChanged}
         />
       )}

@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, Star } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { apiRequest } from '../../lib/api.js'
-import { canOpenUnranked } from '../../lib/results.js'
 import Button from '../Button.jsx'
 import ConfirmDialog from '../ConfirmDialog.jsx'
 import StatusChip from '../StatusChip.jsx'
@@ -19,9 +19,12 @@ import {
   UnrankedRow,
   ViewCvLink,
 } from './candidates.jsx'
-import { INTERVIEW_CHIP, SHORTLISTED_CHIP } from '../../lib/jobs.js'
+import { emailState, isScreeningRejected, stageChip } from '../../lib/feedback.js'
+import { SHORTLISTED_CHIP } from '../../lib/jobs.js'
+import EmailChip from '../feedback/EmailChip.jsx'
 
-const ROW = 'grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 lg:grid-cols-[3.25rem_minmax(0,1.5fr)_minmax(9.5rem,1fr)_minmax(0,1fr)_10.5rem_15.5rem]'
+const ROW =
+  'grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 lg:grid-cols-[2.75rem_minmax(0,1.8fr)_minmax(7rem,1.1fr)_minmax(6.5rem,0.8fr)_minmax(7.5rem,1.3fr)_minmax(7rem,1.1fr)_minmax(9rem,1.1fr)] lg:gap-x-2.5'
 
 // The same shares as the backend uses for the final score.
 const CRITERIA_SHARE = 0.8
@@ -32,8 +35,6 @@ const DIMENSIONS = [
   ['experience', 'Relevant experience'],
   ['qualifications', 'Qualifications'],
 ]
-
-const SCORED_CHIP = { tone: 'success', label: 'Scored' }
 
 // 82.14 → 82.1, 74.0 → 74
 function formatScore(value) {
@@ -77,6 +78,8 @@ function ShortlistButton({ candidate, onChanged }) {
   const [isBusy, setIsBusy] = useState(false)
   const [error, setError] = useState('')
   const isShortlisted = candidate.status === 'shortlisted'
+  // Once the rejection email is sent, the candidate has been told.
+  const isLocked = !isShortlisted && ['sent', 'sending'].includes(candidate.feedback_status)
 
   async function handleClick() {
     setIsBusy(true)
@@ -99,8 +102,9 @@ function ShortlistButton({ candidate, onChanged }) {
       <button
         type="button"
         onClick={handleClick}
-        disabled={isBusy}
-        className={`flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-full border-[1.5px] px-3.5 text-sm font-semibold disabled:opacity-60 ${
+        disabled={isBusy || isLocked}
+        title={isLocked ? 'The rejection email is already sent.' : undefined}
+        className={`flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-full border-[1.5px] px-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:border-line disabled:text-[#9AA6BA] disabled:opacity-100 ${
           isShortlisted
             ? 'border-line bg-white text-body hover:bg-mist'
             : 'border-brand/40 bg-white text-brand hover:bg-tint'
@@ -110,12 +114,56 @@ function ShortlistButton({ candidate, onChanged }) {
         {isShortlisted ? 'Remove' : 'Shortlist'}
         <span className="sr-only"> {candidate.full_name}</span>
       </button>
+      {isLocked && <span className="text-xs">Off: rejection email sent</span>}
       {error && (
         <span role="alert" className="text-xs text-danger">
           {error}
         </span>
       )}
     </span>
+  )
+}
+
+// The candidate's feedback email (F11). Someone not shortlisted has their
+// screening email; its chip opens the Feedback emails view. Someone
+// interviewed and decided has the email from the Assessments tab; the rest
+// hear after their interview.
+function FeedbackCell({ candidate, activity, onOpenEmail }) {
+  const muted = 'text-[13.5px] font-semibold text-[#6B7890]'
+  const isDecided = candidate.status === 'assessed' && candidate.decision
+  if (!isScreeningRejected(candidate) && !isDecided) {
+    return candidate.status === 'assessed' ? (
+      <span className="flex flex-col">
+        <span className={muted}>Decide first</span>
+        <span className="text-xs">on the Assessments tab</span>
+      </span>
+    ) : (
+      <span className={muted}>After the interview</span>
+    )
+  }
+  const state = emailState(candidate, candidate.id, activity)
+  const chip = <EmailChip state={state} warnings={candidate.feedback_warnings} note="" />
+  if (isDecided) {
+    return (
+      <Link
+        to="../assessments"
+        relative="path"
+        className="rounded-full"
+        title="Open the Assessments tab"
+      >
+        {chip}
+      </Link>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenEmail?.(candidate.id)}
+      className="rounded-full text-left"
+      title="Open in Feedback emails"
+    >
+      {chip}
+    </button>
   )
 }
 
@@ -389,14 +437,20 @@ function Breakdown({ candidate, onShowEvidence }) {
   )
 }
 
-function RankedRow({ candidate, isOpen, onToggle, isLocked, onChanged, onShowEvidence }) {
+function RankedRow({
+  candidate,
+  isOpen,
+  onToggle,
+  isLocked,
+  onChanged,
+  onShowEvidence,
+  feedbackActivity,
+  onOpenEmail,
+}) {
   const Chevron = isOpen ? ChevronDown : ChevronRight
-  const hasInterview = candidate.status === 'interview_scheduled'
-  const chip = hasInterview
-    ? INTERVIEW_CHIP
-    : candidate.status === 'shortlisted'
-      ? SHORTLISTED_CHIP
-      : SCORED_CHIP
+  // Interviewed candidates are past the shortlist: they show their interview.
+  const hasInterview = ['interview_scheduled', 'assessed'].includes(candidate.status)
+  const chip = stageChip(candidate)
   return (
     <li className="border-t border-line/60">
       <div className={`${ROW} py-3.5 ${isOpen ? 'bg-mist/60' : ''}`}>
@@ -409,7 +463,9 @@ function RankedRow({ candidate, isOpen, onToggle, isLocked, onChanged, onShowEvi
         >
           <Chevron className="size-4.5 shrink-0 text-body" aria-hidden="true" />
           <Initials name={candidate.full_name} />
-          <span className="truncate text-[15px] font-semibold text-navy">{candidate.full_name}</span>
+          <span className="truncate text-[15px] font-semibold text-navy">
+            {candidate.full_name}
+          </span>
         </button>
         <FinalScore scores={candidate.scores} />
         <div className="hidden lg:block">
@@ -417,6 +473,13 @@ function RankedRow({ candidate, isOpen, onToggle, isLocked, onChanged, onShowEvi
         </div>
         <div className="hidden lg:block">
           <StatusChip tone={chip.tone}>{chip.label}</StatusChip>
+        </div>
+        <div className="hidden lg:block">
+          <FeedbackCell
+            candidate={candidate}
+            activity={feedbackActivity}
+            onOpenEmail={onOpenEmail}
+          />
         </div>
         <RowActions chip={chip}>
           {hasInterview ? (
@@ -453,6 +516,8 @@ export default function FinalRanking({
   isLocked,
   onChanged,
   onShowEvidence,
+  feedbackActivity,
+  onOpenEmail,
 }) {
   const [openId, setOpenId] = useState(null)
   const rankedCount = byFinalRank(candidates).length
@@ -494,6 +559,7 @@ export default function FinalRanking({
         <span className={LABEL}>Final score</span>
         <span className={`${LABEL} hidden lg:block`}>Requirements</span>
         <span className={`${LABEL} hidden lg:block`}>Status</span>
+        <span className={`${LABEL} hidden lg:block`}>Feedback email</span>
         <span className={`${LABEL} hidden text-right lg:block`}>Actions</span>
       </div>
       <ul>
@@ -506,6 +572,8 @@ export default function FinalRanking({
             isLocked={isLocked}
             onChanged={onChanged}
             onShowEvidence={onShowEvidence}
+            feedbackActivity={feedbackActivity}
+            onOpenEmail={onOpenEmail}
           />
         ))}
         {isEmpty && <NoMatches onShowAll={onShowAll} />}
@@ -524,11 +592,16 @@ export default function FinalRanking({
                 key={candidate.id}
                 candidate={candidate}
                 grid={ROW}
-                details={
-                  canOpenUnranked(candidate) ? <UnrankedDetails candidate={candidate} /> : null
-                }
+                details={<UnrankedDetails candidate={candidate} />}
                 isOpen={openId === candidate.id}
                 onToggle={() => setOpenId(openId === candidate.id ? null : candidate.id)}
+                extra={
+                  <FeedbackCell
+                    candidate={candidate}
+                    activity={feedbackActivity}
+                    onOpenEmail={onOpenEmail}
+                  />
+                }
                 actions={
                   <>
                     <ViewCvLink candidateId={candidate.id} />

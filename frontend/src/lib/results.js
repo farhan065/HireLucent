@@ -37,8 +37,3 @@ export function filterCandidates(candidates, group, query) {
       (!text || candidate.full_name.toLowerCase().includes(text)),
   )
 }
-
-// Whether a row under "Not ranked" has anything to open: a CV that was read.
-export function canOpenUnranked(candidate) {
-  return Boolean(candidate.cv_facts) && candidate.status !== 'screening_failed'
-}

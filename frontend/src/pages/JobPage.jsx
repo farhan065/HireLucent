@@ -14,6 +14,7 @@ import JobTabs from '../components/jobs/JobTabs.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
 import { useEvaluation } from '../hooks/useEvaluation.js'
+import { useFeedback } from '../hooks/useFeedback.js'
 import { useInterviews } from '../hooks/useInterviews.js'
 import { useJob } from '../hooks/useJob.js'
 import { useJobActivity } from '../hooks/useJobActivity.js'
@@ -57,11 +58,15 @@ export default function JobPage() {
   // Interview evaluations. When one ends, the interviews load again, so their
   // rows show View assessment.
   const evaluation = useEvaluation(job?.status === 'published' ? jobId : null, handleFinished)
+  // Feedback emails (F11). When writing or sending ends, the lists load again.
+  const feedback = useFeedback(job?.status === 'published' ? jobId : null, handleFinished)
 
-  // After a shortlist change or a deletion, the same as after a run.
+  // After a shortlist change, a decision, an email review or a deletion,
+  // the same as after a run.
   function handleChanged() {
     handleFinished()
     run.reload()
+    feedback.reload()
   }
 
   if (error) {
@@ -125,6 +130,8 @@ export default function JobPage() {
             today={countToday(interviews.interviews, interviews.now)}
             inWaitingRoom={countWaiting(interviews.interviews)}
             toReview={draftsToReview(interviews.interviews)}
+            screeningEmails={feedback.activity?.screening_to_send ?? 0}
+            interviewEmails={feedback.activity?.interview_to_send ?? 0}
             interviewsDone={allInterviewsDone(interviews.interviews)}
             assessmentsDone={allAssessed(interviews.interviews)}
             current={current}
@@ -139,6 +146,7 @@ export default function JobPage() {
               listVersion,
               interviews,
               evaluation,
+              feedback,
               onChanged: handleChanged,
             }}
           />
