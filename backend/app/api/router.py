@@ -9,6 +9,7 @@ from app.api.routes import (
     candidates,
     chat,
     chat_ws,
+    feedback,
     graphs,
     health,
     intake,
@@ -34,6 +35,8 @@ api_router.include_router(interviews.router)
 api_router.include_router(interviews.session_router)
 api_router.include_router(assessments.job_router)
 api_router.include_router(assessments.session_router)
+api_router.include_router(feedback.job_router)
+api_router.include_router(feedback.candidate_router)
 api_router.include_router(join.router)
 api_router.include_router(chat.router)
 api_router.include_router(chat_ws.router)
