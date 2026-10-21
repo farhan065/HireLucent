@@ -25,7 +25,7 @@ The name reflects the platform's purpose of bringing clarity to candidate evalua
 | **F5** Interview Q&A analysis | Planned (Module 6) |
 | **F6** Consolidated candidate assessment, comparison and export | Planned (Module 6) |
 | **F7** (stretch) Candidate identification: interview PIN, face check when the candidate joins, and a profile panel in the interview room. See [Candidate identification and biometric data](#candidate-identification-and-biometric-data) | Done |
-| **F11** Innovation feature: Candidate Feedback Composer | Planned (Module 7) |
+| **F11** Innovation feature: **Candidate Feedback Composer**: every rejected or selected candidate gets a fair, evidence-based email, checked for fairness and approved by the interviewer before it is sent. See [Innovation Feature](#innovation-feature-candidate-feedback-composer-f11) | Done |
 
 **What works today (pre-interview stage):**
 
@@ -44,7 +44,7 @@ The diagrams are in [`docs/`](docs):
 
 - [High-level architecture](docs/High_Level_Architecture_30221_Farhan.drawio.pdf)
 - [Detailed architecture](docs/Detailed_Architecture_30221_Farhan.drawio.pdf)
-- LangGraph workflows: [1 Recruiter Agent](docs/LangGraph_1_Recruiter_Agent_Farahn_30221.drawio.pdf), [2 CV Screening](docs/LangGraph_2_CV_Screening_Farhan_30221.drawio.pdf), [3 Q&A Analysis](docs/LangGraph_3_QA_Analysis_30221_Farhan.pdf), [4 Final Assessment](docs/LangGraph_4_Final_Assessment_Farhan_30221.drawio.pdf)
+- LangGraph workflows: [1 Recruiter Agent](docs/LangGraph_1_Recruiter_Agent_Farahn_30221.drawio.pdf), [2 CV Screening](docs/LangGraph_2_CV_Screening_Farhan_30221.drawio.pdf), [3 Q&A Analysis](docs/LangGraph_3_QA_Analysis_30221_Farhan.pdf), [4 Final Assessment](docs/LangGraph_4_Final_Assessment_Farhan_30221.drawio.pdf), [5 Candidate Feedback](docs/LangGraph_5_Candidate_Feedback_30221_Farhan.pdf) (innovation feature)
 
 The two architecture diagrams still show the original plan for job posting (LinkedIn/BdJobs) and email intake; they are updated before the final submission. LangGraph 2 shows the screening graph as built.
 
@@ -63,6 +63,7 @@ The two architecture diagrams still show the original plan for job posting (Link
 ### LangGraph workflows built so far
 
 - **Recruiter Agent** (`backend/app/graphs/recruiter/`): `load_context → agent → (call_tools | human_approval) → … → respond`. Read-only tools (Knowledge Base search) run directly; saving a job and publishing a post always pause for the interviewer's approval.
+- **Candidate Feedback** (`backend/app/graphs/feedback/`, innovation feature F11): `load_evidence → (draft_feedback → check_fairness → review_email | use_template) → save_draft → human_review → send_email → record_sent`, with rewrites while a check fails (up to 3 tries), and edit, request changes, discard and Try again from the review. See [Innovation Feature](#innovation-feature-candidate-feedback-composer-f11).
 - **CV Screening** (`backend/app/graphs/screening/`): `load_inputs →` one branch per CV: `extract_text → (run_ocr) → parse_cv → check_must_haves → (exclude_candidate | match_requirements → compute_ats_score → score_candidate → save_result)`, then `rank_candidates`. A CV that fails is recorded with its reason and never stops the batch. A run that is stopped or restarted continues from each CV's saved step.
 
 ### How a candidate is scored
@@ -173,6 +174,7 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
    - open a candidate to see the evidence, scores, justifications and CV facts
    - shortlist candidates one by one, by top N or by minimum score
 8. **Change the rules (if needed):** in the job brief, **Edit** the requirements and weights. If CVs were screened, confirm the reset, then press **Screen CVs** again. CVs are not read again.
+9. **Feedback emails (innovation feature):** on the Screening tab, **Write emails** for the candidates not shortlisted, review them and send. After the interviews, decide **Hire** or **Reject** on the Assessments tab or the assessment's **Decision** tab, review the emails and send. See [Innovation Feature](#innovation-feature-candidate-feedback-composer-f11).
 
 ## External services and data
 
@@ -182,6 +184,7 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
 | Ollama (local container) | Embeddings | Nothing leaves the machine |
 | Google Blogger API | Publishing approved job posts | The job title, description, job code and application form link |
 | Google Forms and Drive APIs | Checking the application form and collecting CVs | Nothing is sent. Form responses and uploaded CVs are read |
+| Gmail API (through the Google MCP server) | Sending feedback emails the interviewer approved (F11) | The candidate's email address, the subject and the approved text |
 
 Prompts and model answers are never written to the logs.
 
@@ -223,6 +226,44 @@ Face data is the most sensitive data HireLucent handles (BID N17), so the check 
 **Third parties.** None: both face models (OpenCV Zoo YuNet, MIT licence, and SFace, Apache 2.0) run on the local CPU in the backend container, and the browser model (MediaPipe BlazeFace, Apache 2.0) runs in the candidate's browser. No face ever goes to an external service. Google Drive only holds the photo the candidate uploaded to the form, like the CV.
 
 **Logs** hold interview ids, the result label and the match score only.
+
+## Innovation Feature: Candidate Feedback Composer (F11)
+
+> **This is HireLucent's innovation feature (BID §6).** The reasoning behind it is in [`docs/innovation_rationale.md`](docs/innovation_rationale.md), the design in [`docs/feedback_composer_design.md`](docs/feedback_composer_design.md) and the workflow in [LangGraph 5](docs/LangGraph_5_Candidate_Feedback_30221_Farhan.pdf).
+
+**The problem.** Most applicants are rejected at screening and never hear why; interviewed candidates often get a generic message. Writing an honest, respectful answer for every candidate takes time, and a rushed one can say something unfair or untrue.
+
+**What it does.** After the decision, HireLucent writes each candidate's email from their own saved evidence, checks it for fairness and waits for the interviewer:
+
+| Who | Decision | Email | First draft by |
+|---|---|---|---|
+| Not shortlisted after screening (scored, or excluded for a missed must-have) | Rejected (automatic: everyone not shortlisted) | Strengths from the CV, led by the candidate's main area (CV summary, or their job titles), then the mandatory or preferred requirements not found in the CV | AI |
+| CV could not be read | Rejected | A polite request to apply again with a readable CV | Fixed message |
+| Interviewed, report approved | **Reject** | Strengths and growth areas from the approved report | AI |
+| Interviewed, report approved | **Hire** | Selected for the role; the team will be in touch (no offer details) | Fixed message |
+
+When there is nothing to praise, the email leaves the strengths out instead of inventing one. The greeting uses the name the candidate goes by ("Md. Tashsin Ahmed" and "TASHSIN AHMED" are both greeted as *Tashsin*).
+
+The reason sentence follows the role's level: *"deliver in these areas from the very first day"* for experienced roles (3+ years), gentler wording for junior roles and internships.
+
+**Fairness.** The wording is free: the AI writes in its own words, warm and encouraging, and may name the candidate's strengths or sum them up. There are no limits on how many points it uses and no exact-word matching. What it may not do is say anything unsafe or anything the candidate's results do not support. Every draft passes two checks before it is shown as ready:
+1. **Safety rules (code):** no scores, ranks or percentages; no other candidates; no personal topics (age, gender, religion, health, family and similar); no personal data (email addresses, phone numbers, links); no promises; no offer details; no word-for-word quotes; no HTML or placeholders; and no named skill or tool that is in neither the candidate's results nor the job's requirements (for example *Kubernetes* when nothing about it was judged). A word that is part of the job's own requirements is allowed.
+2. **AI review (meaning):** is it respectful and kind; does it say anything about the candidate that their points do not support (an invented skill, quality or achievement); is anything unfair by meaning (hints about personal traits, comparisons, promises). If the review cannot run, the draft shows **not checked**.
+A draft that fails is rewritten (up to 3 tries). Anything still found stays on the draft as a **warning** that names the exact words and highlights them; the interviewer edits it, asks for changes, or sends it anyway after a confirm (the warning is kept with the email). The interviewer's own edits get the same checks, with warnings only; they are never rewritten.
+
+**Human in the loop.** Nothing is sent without the interviewer. For each draft: **Approve and send**, **Edit** (checked again), **Request changes** with a note (the AI rewrites it), or **Discard**. **Send all passed** sends only drafts with no warnings, after a confirm. Sending goes through the Google MCP server's `send_email`, called only by the backend. If Google cannot be reached, the draft is kept as *Not sent* with **Try again**.
+
+**Where it is in the app.**
+- **Screening tab:** the final ranking shows each candidate's stage (Rejected, Shortlisted, Interview scheduled, Interviewed, Hired, Rejected after interview) and email; an email chip opens the **Feedback emails** sub-tab (next to Final ranking and Requirement match), which lists everyone rejected at screening with why, **Write emails**, **Send all passed** and a review panel. A decision made on the Assessments tab shows here too. Shortlisting stays possible until the email is sent; then it is locked.
+- **Assessments tab:** **Decide by rule** (hire the top N, or everyone from a minimum overall score, and reject the rest), **Hire | Reject** on each row (only once the report is approved), the email status, and the same email buttons. The list fits a laptop screen without sideways scrolling; opening a row shows a short summary (score, two strengths and one weakness, what to check) with a link to the full report.
+- **Assessment page → Decision tab** (after approval): the decision and the candidate's email, written straight away after the decision.
+- The **Screening** and **Assessments** job tabs show *N emails to send* until everything is sent.
+
+**Privacy.** The AI gets only job-related points with ids and the role level. It never gets the candidate's name (it writes `[first name]`, and the name is taken out of the CV summary), email address, scores, other candidates, transcript quotes, the identity check or the interviewer's note to themselves. The sent text, who approved it and when are stored with the candidate and deleted with the candidate or the job. Logs hold ids, kinds and warning codes only.
+
+**API** (interviewer only): `PUT /candidates/{id}/decision`, `POST /jobs/{id}/decisions`, `GET /jobs/{id}/feedback`, `POST /jobs/{id}/feedback` (write), `POST /jobs/{id}/feedback/send`, `GET /candidates/{id}/feedback`, `POST /candidates/{id}/feedback/review`. Migration `0016` adds the `candidate_feedback` table.
+
+**Future work.** Starting the emails from the AI Agent chat (an approval card in the conversation and a read-only email status tool for the agent).
 
 ## Google setup (publishing and CV collection)
 
