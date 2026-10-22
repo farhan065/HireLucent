@@ -23,10 +23,16 @@ DRAFT_FIELDS = (
 )
 
 
+def _cv_facts(candidate: Candidate | None) -> dict | None:
+    if candidate is None or not candidate.cv_parsed:
+        return None
+    return {key: value for key, value in candidate.cv_parsed.items() if key != "contact"}
+
+
 def load_results(session_id: int) -> dict | None:
     """The interview's Q&A analysis, the candidate's CV screening score, the
-    job title and the candidate's turns (to check quotes), or None when the
-    interview has not been analysed."""
+    job title, the candidate's turns (to check quotes) and the CV facts (for
+    the claim check), or None when the interview has not been analysed."""
     with SessionLocal() as db:
         assessment = db.scalar(select(Assessment).where(Assessment.session_id == session_id))
         if assessment is None:
@@ -44,6 +50,9 @@ def load_results(session_id: int) -> dict | None:
             "pairs": assessment.qa_evaluations,
             "coverage": assessment.coverage_map,
             "cv_score": scores["final_score"] if scores else None,
+            # The CV facts for the claim check; contact details are kept
+            # apart and never leave the backend.
+            "cv": _cv_facts(candidate),
             "turns": [
                 {"id": turn.id, "start_ms": turn.start_ms, "text": turn.text} for turn in turns
             ],
@@ -61,6 +70,16 @@ def save_draft(session_id: int, values: dict) -> None:
         assessment.approved_by = None
         assessment.approved_at = None
         db.commit()
+
+
+def save_claim_checks(session_id: int, checks: dict) -> None:
+    """Keep the CV claim check (F8) with the assessment. The report, its
+    status and approval are not touched."""
+    with SessionLocal() as db:
+        assessment = db.scalar(select(Assessment).where(Assessment.session_id == session_id))
+        if assessment is not None:
+            assessment.claim_checks = checks
+            db.commit()
 
 
 def approve(session_id: int, reviewer_id: int) -> None:

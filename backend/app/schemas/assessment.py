@@ -182,6 +182,66 @@ class ReviewRequest(BaseModel):
         return self
 
 
+class ClaimReview(BaseModel):
+    """How the interviewer handled a contradiction or unverified claim."""
+
+    status: Literal["checked", "dismissed"]
+    note: str | None = None
+    by_id: int | None = Field(default=None, description="The interviewer who marked it.")
+    by_name: str | None = None
+    at: datetime
+
+
+ClaimResult = Literal["consistent", "contradiction", "unverified", "not_discussed", "not_checked"]
+
+
+class CvClaim(BaseModel):
+    """One claim from the CV, compared with the interview (F8). A prompt for
+    the interviewer to check before deciding, never a finding about the
+    candidate."""
+
+    id: str = Field(description="C1, C2, … in the CV's order.")
+    section: Literal[
+        "total_experience", "work_experience", "project", "certification", "education", "skill"
+    ]
+    title: str
+    cv_text: str = Field(description="The claim as the CV words it.")
+    detail: str = Field(default="", description="Where in the CV, for example the job and dates.")
+    result: ClaimResult = Field(
+        description="consistent: the interview supports it. contradiction: something said "
+        "clearly conflicts with it. unverified: it came up, but nothing backs it up. "
+        "not_discussed: it never came up. not_checked: no result could be proven."
+    )
+    question_id: str | None = Field(default=None, description="The question relied on.")
+    question: str | None = None
+    turn_id: int | None = None
+    start_ms: int | None = Field(
+        default=None, description="Milliseconds from the start of the interview."
+    )
+    quote: str | None = Field(default=None, description="The candidate's words, checked.")
+    reason: str | None = Field(default=None, description="A short, neutral reason.")
+    review: ClaimReview | None = Field(
+        default=None, description="contradiction and unverified: checked or dismissed."
+    )
+
+
+class ClaimChecks(BaseModel):
+    """The interview's CV claim check (F8)."""
+
+    status: Literal["checked", "not_checked"] = Field(
+        description="not_checked: the AI was not available; check the claims again."
+    )
+    checked_at: datetime
+    claims: list[CvClaim]
+
+
+class ClaimReviewRequest(BaseModel):
+    """The interviewer marks a contradiction or unverified claim."""
+
+    action: Literal["checked", "dismissed", "reopen"]
+    note: str | None = Field(default=None, max_length=500, description="Optional.")
+
+
 class AssessmentOut(BaseModel):
     """An interview's assessment as far as it has been made."""
 
@@ -221,6 +281,11 @@ class AssessmentOut(BaseModel):
     areas_to_verify: list[Claim] | None = None
     approved_at: datetime | None = None
     approved_by_name: str | None = None
+    claim_checks: ClaimChecks | None = Field(
+        default=None,
+        description="CV claims compared with the interview (F8); empty for an interview "
+        "evaluated before F8. They never change a score, the report or the decision.",
+    )
     decision: Literal["hire", "reject"] | None = Field(
         default=None, description="The interviewer's decision (F11), after approval."
     )
@@ -266,6 +331,9 @@ class RankedAssessment(BaseModel):
     gaps: list[Claim] | None
     areas_to_verify: list[Claim] | None
     approved_at: datetime | None
+    open_contradictions: int = Field(
+        default=0, description="CV claim contradictions not marked checked or dismissed yet."
+    )
     decision: Literal["hire", "reject"] | None = Field(
         default=None, description="The interviewer's decision, after the report is approved."
     )
