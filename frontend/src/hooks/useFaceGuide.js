@@ -53,12 +53,16 @@ function toFaces(detections, video) {
 // Watches the camera picture about eight times a second and says which tip
 // to show. status: "loading", "ready" or "unavailable" (no live tips; the
 // photo is still checked on the server). greenSince: when the border last
-// turned green, or null.
+// turned green, or null. faceRef: the face last found, for cutting out the
+// photo.
 export function useFaceGuide(videoRef, isOn) {
   const [status, setStatus] = useState('loading')
   const [tip, setTip] = useState('starting')
   const [greenSince, setGreenSince] = useState(null)
   const canvasRef = useRef(null)
+  // The one face last found, with when it was found, for cutting out the
+  // photo. Kept in a ref: it changes eight times a second and shows nothing.
+  const faceRef = useRef(null)
 
   useEffect(() => {
     if (!isOn) return undefined
@@ -94,6 +98,7 @@ export function useFaceGuide(videoRef, isOn) {
         const faces = toFaces(detections, video)
         const light = faces.length === 1 ? faceLight(video, faces[0], canvasRef.current) : null
         const next = guideTip(faces, light)
+        faceRef.current = faces.length === 1 ? { ...faces[0], foundAt: Date.now() } : null
         setTip(next)
         setGreenSince((since) => (next === 'good' ? (since ?? Date.now()) : null))
       }, CHECK_MS)
@@ -104,8 +109,9 @@ export function useFaceGuide(videoRef, isOn) {
       isCurrent = false
       clearInterval(timer)
       detector?.close()
+      faceRef.current = null
     }
   }, [videoRef, isOn])
 
-  return { status, tip: status === 'ready' ? tip : 'starting', greenSince }
+  return { status, tip: status === 'ready' ? tip : 'starting', greenSince, faceRef }
 }

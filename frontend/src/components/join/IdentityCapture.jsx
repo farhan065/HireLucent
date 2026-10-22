@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFaceGuide } from '../../hooks/useFaceGuide.js'
-import { GREEN_SECONDS, OVAL, TIPS } from '../../lib/faceGuide.js'
+import { faceCrop, GREEN_SECONDS, OVAL, TIPS } from '../../lib/faceGuide.js'
 import { sendIdentityPhoto, skipIdentityPhoto } from '../../lib/join.js'
 import Button from '../Button.jsx'
 import CandidateLayout from './CandidateLayout.jsx'
@@ -164,12 +164,24 @@ function HowItWorks() {
   )
 }
 
-// One JPEG of the camera picture as it is now.
-function takePhoto(video) {
+// A face found longer ago than this is not used for cutting out the photo.
+const FACE_MAX_AGE_MS = 1000
+
+// One JPEG of the camera picture as it is now. With a face from the guide,
+// only the area around that face is kept, so nobody else in the room is
+// sent; without one (no live tips), the whole picture is sent and the
+// server ignores small faces far behind.
+function takePhoto(video, face) {
+  const isRecent = face && Date.now() - face.foundAt <= FACE_MAX_AGE_MS
+  const area = isRecent
+    ? faceCrop(face, video.videoWidth, video.videoHeight)
+    : { x: 0, y: 0, width: video.videoWidth, height: video.videoHeight }
   const canvas = document.createElement('canvas')
-  canvas.width = video.videoWidth
-  canvas.height = video.videoHeight
-  canvas.getContext('2d').drawImage(video, 0, 0)
+  canvas.width = area.width
+  canvas.height = area.height
+  canvas
+    .getContext('2d')
+    .drawImage(video, area.x, area.y, area.width, area.height, 0, 0, area.width, area.height)
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92))
 }
 
@@ -180,12 +192,16 @@ export default function IdentityCapture({ link, preview, pass, onDone, onEnded }
   const videoRef = useRef(null)
   const hasCamera = Boolean(preview.stream?.getVideoTracks().length) && preview.cameraOn
   const guide = useFaceGuide(videoRef, hasCamera)
+  const { faceRef } = guide
   const [now, setNow] = useState(() => Date.now())
   // "ready", "sending", "retry" (with triesLeft) or "gave_up".
   const [phase, setPhase] = useState('ready')
   const [triesLeft, setTriesLeft] = useState(null)
   const [error, setError] = useState('')
   const [isSkipping, setIsSkipping] = useState(false)
+  // When the last unusable photo came back. The green countdown starts again
+  // from then, so a retry is never taken straight away.
+  const [retryAt, setRetryAt] = useState(0)
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = preview.stream
@@ -199,7 +215,8 @@ export default function IdentityCapture({ link, preview, pass, onDone, onEnded }
   const isGuided = guide.status === 'ready'
   const isWaiting = phase === 'ready' || phase === 'retry'
   const isGreen = isGuided && guide.tip === 'good'
-  const greenFor = isGreen && guide.greenSince ? (now - guide.greenSince) / 1000 : 0
+  const greenSince = isGreen && guide.greenSince ? Math.max(guide.greenSince, retryAt) : null
+  const greenFor = greenSince ? Math.max(0, now - greenSince) / 1000 : 0
   const countdown = isGreen ? Math.max(1, Math.ceil(GREEN_SECONDS - greenFor)) : null
   const canTake = hasCamera && phase !== 'sending' && phase !== 'gave_up' && (isGreen || !isGuided)
 
@@ -209,12 +226,13 @@ export default function IdentityCapture({ link, preview, pass, onDone, onEnded }
     setPhase('sending')
     setError('')
     try {
-      const photo = await takePhoto(video)
+      const photo = await takePhoto(video, faceRef.current)
       const answer = await sendIdentityPhoto(pass, photo)
       if (answer.state === 'done') onDone('taken')
       else if (answer.state === 'skipped') setPhase('gave_up')
       else {
         setTriesLeft(answer.tries_left)
+        setRetryAt(Date.now())
         setPhase('retry')
       }
     } catch (sendError) {
@@ -225,10 +243,9 @@ export default function IdentityCapture({ link, preview, pass, onDone, onEnded }
       setError(sendError.message)
       setPhase('ready')
     }
-  }, [pass, onDone, onEnded])
+  }, [pass, faceRef, onDone, onEnded])
 
   // Take the photo by itself after five seconds of green.
-  const greenSince = isGreen ? guide.greenSince : null
   useEffect(() => {
     if (!isWaiting || !greenSince) return undefined
     const wait = Math.max(0, GREEN_SECONDS * 1000 - (Date.now() - greenSince))
