@@ -13,6 +13,7 @@ from app.schemas.assessment import (
     AddQuestionsRequest,
     ApproveAllResult,
     AssessmentOut,
+    ClaimReviewRequest,
     EvaluationActivity,
     QuestionSuggestion,
     RankedAssessment,
@@ -266,3 +267,61 @@ def review_report(
     return evaluation_service.review_assessment(
         db, graph, session_id, payload, principal.subject_id
     )
+
+
+@session_router.post(
+    "/{session_id}/assessment/claims",
+    response_model=TaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Check the interview's CV claims",
+    responses={
+        404: {"model": ErrorResponse, "description": "Interview not found or not evaluated"},
+        409: {
+            "model": ErrorResponse,
+            "description": "No report yet, the claims are already checked, "
+            "or an evaluation is running",
+        },
+    },
+)
+def check_cv_claims(
+    session_id: int,
+    background_tasks: BackgroundTasks,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+    graph: CompiledStateGraph = Depends(get_final_assessment_graph),
+) -> Task:
+    """Starts in the background and returns a task, like an evaluation (its
+    result is marked claims_only). Compares the CV's claims with the
+    interview for an interview evaluated before CV claim checks existed, or
+    whose claims could not be checked because the AI was not available. The
+    report, its approval and the decision are not touched."""
+    return evaluation_service.start_claim_check(
+        db, background_tasks, graph, session_id, principal.subject_id
+    )
+
+
+@session_router.post(
+    "/{session_id}/assessment/claims/{claim_id}/review",
+    response_model=AssessmentOut,
+    summary="Mark a CV claim as checked or dismissed",
+    responses={
+        404: {"model": ErrorResponse, "description": "Interview or claim not found"},
+        409: {
+            "model": ErrorResponse,
+            "description": "The claims are not checked, or the claim is not a "
+            "contradiction or unverified",
+        },
+    },
+)
+def review_cv_claim(
+    session_id: int,
+    claim_id: str,
+    payload: ClaimReviewRequest,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+) -> Assessment:
+    """checked or dismissed, with an optional note, records who did it and
+    when; reopen takes the mark away. Only a contradiction or an unverified
+    claim can be marked. Nothing else changes: no score, the report or the
+    decision."""
+    return evaluation_service.review_claim(db, session_id, claim_id, payload, principal.subject_id)
