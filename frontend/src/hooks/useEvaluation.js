@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { evaluateAll, evaluateInterview, readEvaluation, writeReport } from '../lib/assessment.js'
+import {
+  checkClaims,
+  evaluateAll,
+  evaluateInterview,
+  readEvaluation,
+  writeReport,
+} from '../lib/assessment.js'
 
 const POLL_MS = 2000
 
@@ -39,19 +45,23 @@ export function useEvaluation(jobId, onFinished) {
   }, [runningId, onFinished])
 
   // One interview when sessionId is given, otherwise every new one. With
-  // reportOnly, only the report of an evaluated interview is written.
-  async function start(sessionId, { reportOnly = false } = {}) {
+  // reportOnly, only the report of an evaluated interview is written; with
+  // claimsOnly, only its CV claims are checked.
+  async function start(sessionId, { reportOnly = false, claimsOnly = false } = {}) {
     setError('')
     try {
-      const task = await (reportOnly
-        ? writeReport(sessionId)
-        : sessionId
-          ? evaluateInterview(sessionId)
-          : evaluateAll(jobId))
+      const task = await (claimsOnly
+        ? checkClaims(sessionId)
+        : reportOnly
+          ? writeReport(sessionId)
+          : sessionId
+            ? evaluateInterview(sessionId)
+            : evaluateAll(jobId))
       const ids = sessionId ? [sessionId] : []
+      const result = { session_ids: ids, current: sessionId ?? null }
       setActivity((current) => ({
         ...current,
-        running: { ...task, result: { session_ids: ids, current: sessionId ?? null } },
+        running: { ...task, result: claimsOnly ? { ...result, claims_only: true } : result },
       }))
       load()
     } catch (startError) {

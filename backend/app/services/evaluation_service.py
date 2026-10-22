@@ -7,6 +7,13 @@ answers and evaluates each answer, then through the Final Assessment graph,
 which writes the report and pauses it as a draft. The interviewer then
 approves the draft, asks for changes or edits it (review_assessment).
 
+The Final Assessment graph also compares the CV's claims with the interview
+(F8) before it writes the report. An interview evaluated before that, or
+whose claims could not be checked because the AI was down, can have its
+claims checked on their own (start_claim_check), and the interviewer marks
+each contradiction or unverified claim as checked or dismissed
+(review_claim).
+
 Only one evaluation runs at a time, because the AI's per-minute limit is
 shared. An evaluation does not block fetching or screening CVs for the job.
 While it runs, its task keeps which interviews it covers, which one it is on
@@ -14,6 +21,7 @@ and which failed, so the screens can show this after a page reload.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from fastapi import BackgroundTasks
 from langgraph.graph.state import CompiledStateGraph
@@ -26,13 +34,14 @@ from app.core.config import get_settings
 from app.core.errors import AppError, ConflictError, NotFoundError, ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.graphs.base import thread_config
+from app.graphs.final_assessment import claims as cv_claims
 from app.graphs.final_assessment import graph as final_graph
 from app.graphs.final_assessment import scoring
 from app.graphs.qa_analysis import coverage as coverage_rules
 from app.graphs.qa_analysis.graph import answers_to_judge, get_qa_analysis_graph
-from app.models import Assessment, Candidate, InterviewSession, Job, Task, TranscriptTurn
+from app.models import Assessment, Candidate, InterviewSession, Job, Task, TranscriptTurn, User
 from app.models.enums import AssessmentStatus, SessionStatus
-from app.schemas.assessment import ReviewRequest
+from app.schemas.assessment import ClaimReviewRequest, ReviewRequest
 from app.services import knowledge_service, report_pdf, session_service, task_service
 from app.services.task_service import ACTIVE, TaskProgress
 
@@ -53,6 +62,15 @@ NOT_A_DRAFT = "This report is not waiting for review."
 NO_REPORT = "This interview's report has not been written yet."
 HAS_REPORT = "This interview already has a report. Evaluate it again to write a new one."
 UNKNOWN_POINT = "Some of the chosen points are not in the report."
+CLAIMS_CHECKED = "This interview's CV claims are already checked."
+CLAIMS_NOT_CHECKED = (
+    "The AI service was not available to check the CV claims. Try again in a moment."
+)
+UNKNOWN_CLAIM = "This claim is not in the interview's CV claim check."
+CLAIM_NOT_TO_CHECK = "Only a contradiction or an unverified claim can be marked."
+NO_CLAIM_CHECK = "This interview's CV claims have not been checked yet."
+CHECKING_CLAIMS = "checking CV claims"
+WRITING_REPORT = "writing the report"
 REWRITE_FAILED = (
     "The AI service was not available, so the report was not rewritten. "
     "The draft is unchanged; try again in a moment."
@@ -228,12 +246,14 @@ def evaluate_one(
         if analysis.get("failure"):
             return analysis
 
-        message = f"{prefix} · writing the report"
-        if total == 1:
-            progress.update(answers, answers, message)
-        else:
-            progress.update(done, total, message)
-        return write_report(graphs.final_assessment, session_id)
+        def show(step: str) -> None:
+            if total == 1:
+                progress.update(answers, answers, f"{prefix} · {step}")
+            else:
+                progress.update(done, total, f"{prefix} · {step}")
+
+        show(CHECKING_CLAIMS)
+        return write_report(graphs.final_assessment, session_id, show)
 
 
 def start_report(
@@ -265,9 +285,13 @@ def run_report(graph: CompiledStateGraph, session_id: int, progress: TaskProgres
     """Write one report, keeping the same task details as an evaluation, so
     the screens show its progress and any failure the same way."""
     progress.note({"session_ids": [session_id], "current": session_id, "failures": []})
-    progress.update(0, 1, "Interview 1 of 1 · writing the report")
+
+    def show(step: str) -> None:
+        progress.update(0, 1, f"Interview 1 of 1 · {step}")
+
+    show(CHECKING_CLAIMS)
     with ai_client.background_calls():
-        result = write_report(graph, session_id)
+        result = write_report(graph, session_id, show)
     failures = []
     if result.get("failure"):
         failures = [{"session_id": session_id, "reason": result["failure"]}]
@@ -285,14 +309,119 @@ def run_report(graph: CompiledStateGraph, session_id: int, progress: TaskProgres
     }
 
 
-def write_report(graph: CompiledStateGraph, session_id: int) -> dict:
+def write_report(graph: CompiledStateGraph, session_id: int, show=None) -> dict:
     """Run the Final Assessment graph until the report waits for review. An
-    earlier report of the interview is started afresh."""
+    earlier report of the interview is started afresh. show, if given, is
+    told when the claim check is done and the report is being written."""
     config = thread_config(final_graph.thread_id(session_id))
     if graph.checkpointer is not None:
         graph.checkpointer.delete_thread(config["configurable"]["thread_id"])
-    graph.invoke({"session_id": session_id}, config)
+    for update in graph.stream({"session_id": session_id}, config, stream_mode="updates"):
+        if "save_claims" in update and show is not None:
+            show(WRITING_REPORT)
     return graph.get_state(config).values
+
+
+def start_claim_check(
+    db: Session,
+    background_tasks: BackgroundTasks,
+    graph: CompiledStateGraph,
+    session_id: int,
+    user_id: int,
+) -> Task:
+    """Check the CV claims of an interview that has a report but no usable
+    claim check: evaluated before F8, or the AI was down. Only the claim
+    nodes run; the report, its approval and the decision are not touched."""
+    session = session_service.get_session(db, session_id)
+    assessment = get_assessment(db, session_id)
+    if assessment.status == AssessmentStatus.ANALYSED:
+        raise ConflictError(NO_REPORT)
+    if (assessment.claim_checks or {}).get("status") == cv_claims.CHECKED:
+        raise ConflictError(CLAIMS_CHECKED)
+    ensure_no_evaluation(db)
+    return task_service.start_task(
+        db,
+        background_tasks,
+        TASK_KIND,
+        user_id,
+        lambda progress: run_claim_check(graph, session_id, progress),
+        job_id=session.job_id,
+    )
+
+
+def run_claim_check(graph: CompiledStateGraph, session_id: int, progress: TaskProgress) -> dict:
+    """Check one interview's CV claims, keeping the same task details as an
+    evaluation (marked claims_only), so the screens show its progress."""
+    note = {"session_ids": [session_id], "current": session_id, "claims_only": True}
+    progress.note({**note, "failures": []})
+    progress.update(0, 1, f"Interview 1 of 1 · {CHECKING_CLAIMS}")
+    config = thread_config(final_graph.claims_thread_id(session_id))
+    if graph.checkpointer is not None:
+        graph.checkpointer.delete_thread(config["configurable"]["thread_id"])
+    with ai_client.background_calls():
+        graph.invoke({"session_id": session_id, "claims_only": True}, config)
+    values = graph.get_state(config).values
+    reason = values.get("failure") or (CLAIMS_NOT_CHECKED if values.get("claims_failed") else None)
+    failures = [{"session_id": session_id, "reason": reason}] if reason else []
+    progress.note({**note, "current": None, "failures": failures})
+    if reason:
+        raise EvaluationFailed(reason)
+    progress.update(1, 1, "CV claims checked")
+    return {
+        "total": 1,
+        "evaluated": 1,
+        "failed": 0,
+        "session_ids": [session_id],
+        "failures": [],
+        "claims_only": True,
+    }
+
+
+def review_claim(
+    db: Session, session_id: int, claim_id: str, review: ClaimReviewRequest, user_id: int
+) -> Assessment:
+    """Mark a contradiction or an unverified claim as checked or dismissed,
+    with an optional note, or open it again. Records who did it and when.
+    Nothing else changes: no score, the report or the decision."""
+    assessment = get_assessment(db, session_id)
+    checks = assessment.claim_checks
+    if not checks or checks.get("status") != cv_claims.CHECKED:
+        raise ConflictError(NO_CLAIM_CHECK)
+    claim = next((item for item in checks["claims"] if item["id"] == claim_id), None)
+    if claim is None:
+        raise NotFoundError(UNKNOWN_CLAIM)
+    if claim["result"] not in cv_claims.TO_CHECK:
+        raise ConflictError(CLAIM_NOT_TO_CHECK)
+
+    marked = None
+    if review.action != "reopen":
+        user = db.get(User, user_id)
+        marked = {
+            "status": review.action,
+            "note": (review.note or "").strip() or None,
+            "by_id": user_id,
+            "by_name": user.full_name if user else None,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+    # A new dict, so the change to the JSON column is saved.
+    assessment.claim_checks = {
+        **checks,
+        "claims": [
+            {**item, "review": marked} if item["id"] == claim_id else item
+            for item in checks["claims"]
+        ],
+    }
+    db.commit()
+    log_event(
+        logger,
+        "cv_claim_reviewed",
+        session_id=session_id,
+        claim_id=claim_id,
+        action=review.action,
+        has_note=bool(marked and marked["note"]),
+    )
+    db.refresh(assessment)
+    return assessment
 
 
 def evaluation_activity(db: Session, job_id: int) -> dict:
@@ -354,6 +483,9 @@ def _ranked_row(session: InterviewSession) -> dict:
         "gaps": report.gaps if report else None,
         "areas_to_verify": report.areas_to_verify if report else None,
         "approved_at": report.approved_at if report else None,
+        "open_contradictions": cv_claims.open_contradictions(
+            assessment.claim_checks if assessment else None
+        ),
         "decision": getattr(candidate, "decision", None),
         "feedback_status": getattr(candidate, "feedback_status", None),
         "feedback_warnings": getattr(candidate, "feedback_warnings", 0),

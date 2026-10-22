@@ -1206,9 +1206,9 @@ class FakeReportGraph:
         self.failures = failures or {}
         self.seen: list[int] = []
 
-    def invoke(self, state: dict, config: dict) -> dict:
+    def stream(self, state: dict, config: dict, stream_mode: str):
         self.seen.append(state["session_id"])
-        return {}
+        yield {"save_claims": {}}
 
     def get_state(self, config: dict):
         failure = self.failures.get(self.seen[-1])
@@ -1251,6 +1251,7 @@ def test_progress_follows_the_answers_of_a_single_interview() -> None:
     evaluation_service.run_evaluation(_graphs({}), [1], progress)
 
     assert (3, 3, "Interview 1 of 1 · 3 of 3 answers evaluated") in progress.updates
+    assert (3, 3, "Interview 1 of 1 · checking CV claims") in progress.updates
     assert (3, 3, "Interview 1 of 1 · writing the report") in progress.updates
 
 

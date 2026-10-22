@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, Mail, Sparkles } from 'lucide-react'
+import { CircleAlert, CircleCheck, Mail, Sparkles, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
@@ -144,6 +144,11 @@ export default function AssessmentsTab() {
   }, [job.id, listVersion, current, feedbackCurrent])
 
   const summary = rankingSummary(rows ?? [])
+  // Drafts with a CV claim contradiction not looked at yet (F8): a warning
+  // in Approve all drafts, never a block.
+  const withContradictions = (rows ?? []).filter(
+    (row) => row.status === 'draft' && row.open_contradictions > 0,
+  )
 
   if (error) {
     return (
@@ -408,6 +413,16 @@ export default function AssessmentsTab() {
             Each report becomes final and its candidate is marked assessed, the same as approving
             them one by one. Open a report first if you want to check or change it.
           </p>
+          {withContradictions.length > 0 && (
+            <p className="flex gap-2.5 rounded-2xl border border-[#F3D9A8] bg-[#FFFBF3] px-3.5 py-3 text-[13.5px] leading-normal text-[#6B3A00]">
+              <TriangleAlert className="mt-0.5 size-4.5 shrink-0" aria-hidden="true" />
+              <span>
+                <strong>A CV claim contradiction is not looked at yet</strong> for{' '}
+                {withContradictions.map((row) => row.candidate_name).join(', ')}. You can still
+                approve; it is on each assessment's CV claims tab.
+              </span>
+            </p>
+          )}
         </ConfirmDialog>
       )}
     </div>

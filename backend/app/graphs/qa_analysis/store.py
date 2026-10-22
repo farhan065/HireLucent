@@ -20,6 +20,7 @@ LATER_FIELDS = (
     "gaps",
     "areas_to_verify",
     "report",
+    "claim_checks",
     "approved_by",
     "approved_at",
 )

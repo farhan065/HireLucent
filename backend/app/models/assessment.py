@@ -44,6 +44,11 @@ class Assessment(TimestampMixin, Base):
     gaps: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     areas_to_verify: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     report: Mapped[str | None] = mapped_column(Text)
+    # CV claims compared with the interview (F8): {status, checked_at,
+    # claims}. Empty for an interview evaluated before F8. Interviewer-only
+    # prompts to check before deciding; they never change a score or the
+    # report.
+    claim_checks: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     # Human review of the report.
     approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))

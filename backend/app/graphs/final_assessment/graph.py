@@ -4,8 +4,17 @@ Turns one interview's Q&A analysis into a consolidated report, which the
 interviewer reviews before it counts:
 
     start -> load_results -> (analysis found)   -> compute_scores
+                          -> (claims only)      -> extract_claims
                           -> (analysis missing) -> handle_error -> end
-    compute_scores -> synthesize_report
+    compute_scores -> extract_claims
+    extract_claims -> (claims to judge) -> judge_claims
+                   -> (none)            -> save_claims
+    judge_claims -> (answer received)  -> check_claims
+                 -> (AI not available) -> save_claims (claims not checked)
+    check_claims -> (untraced claims, attempts left) -> judge_claims
+                 -> (all checked, or no attempts left) -> save_claims
+    save_claims -> (claims only) -> end
+                -> (full run)    -> synthesize_report
     synthesize_report -> (answer received)       -> check_traceability
                       -> (AI not available, first draft) -> handle_error -> end
                       -> (AI not available, rewriting)   -> human_review
@@ -18,6 +27,16 @@ interviewer reviews before it counts:
 
 compute_scores (rule-based) works out the CV, interview and overall scores,
 the suitability label, the evidence gaps and the areas to verify.
+
+The CV claim check (F8) compares every claim in the CV with what the
+candidate said: extract_claims takes the claims from the CV (code),
+judge_claims asks the AI for each one's result and check_claims proves each
+quote is in the transcript (see claims.py). Its results are saved apart from
+the report and never change a score or the report. If the AI is not
+available the claims are saved as not checked and the report is still
+written. Check CV claims (an interview evaluated before F8) and Check again
+run only these nodes, on their own thread, so a report, its approval and the
+decision stay as they are.
 synthesize_report asks the AI for the summary, strengths and weaknesses, and
 check_traceability checks that each strength and weakness points to a real
 quote or CV result (see report.py). Claims still untraced after the last
@@ -38,8 +57,9 @@ from langgraph.types import interrupt
 
 from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
-from app.graphs.base import BaseState, can_retry
+from app.graphs.base import MAX_ATTEMPTS, BaseState, can_retry
 from app.graphs.checkpointer import get_checkpointer
+from app.graphs.final_assessment import claims as cv_claims
 from app.graphs.final_assessment import findings, report, scoring, store
 
 logger = get_logger(__name__)
@@ -58,6 +78,8 @@ EDIT = "edit"
 
 class FinalState(BaseState, total=False):
     session_id: int
+    # True for Check CV claims / Check again: only the claim nodes run.
+    claims_only: bool
     candidate_id: int
     job_title: str
     # From the Q&A analysis: the evaluated pairs and the requirement coverage.
@@ -65,6 +87,18 @@ class FinalState(BaseState, total=False):
     coverage: list[dict]
     # The candidate's turns, to check the quotes the AI gives.
     turns: list[dict]
+    # The CV facts (no contact details), for the claim check.
+    cv: dict | None
+    # The claim check (F8): the claims, the results that passed the check
+    # by claim id, the claims still to judge with their problems, the AI's
+    # latest answers, its own attempt count and whether the AI was down.
+    claims: list[dict]
+    claim_results: dict[str, dict]
+    claims_pending: list[str]
+    claim_problems: dict[str, list[str]]
+    claim_proposals: list[dict]
+    claim_attempts: int
+    claims_failed: bool
     cv_score: float | None
     interview_score: float | None
     overall_score: float | None
@@ -111,8 +145,12 @@ def load_results(state: FinalState) -> dict:
     return {**results, "attempts": 0}
 
 
-def route_after_load(state: FinalState) -> Literal["compute_scores", "handle_error"]:
-    return "handle_error" if state.get("failure") else "compute_scores"
+def route_after_load(
+    state: FinalState,
+) -> Literal["compute_scores", "extract_claims", "handle_error"]:
+    if state.get("failure"):
+        return "handle_error"
+    return "extract_claims" if state.get("claims_only") else "compute_scores"
 
 
 def compute_scores(state: FinalState) -> dict:
@@ -125,6 +163,126 @@ def compute_scores(state: FinalState) -> dict:
         "gaps": findings.evidence_gaps(state["coverage"]),
         "areas_to_verify": findings.areas_to_verify(state["pairs"], state["coverage"]),
     }
+
+
+def extract_claims(state: FinalState) -> dict:
+    """The claims in the CV, taken by code. When the candidate answered
+    nothing, every claim is not discussed, with no AI call."""
+    claims = cv_claims.extract_claims(state.get("cv"))
+    results: dict[str, dict] = {}
+    pending = [claim["id"] for claim in claims]
+    if claims and not cv_claims.answered_pairs(state["pairs"]):
+        results = {claim["id"]: cv_claims.not_discussed(claim) for claim in claims}
+        pending = []
+    return {
+        "claims": claims,
+        "claim_results": results,
+        "claims_pending": pending,
+        "claim_problems": {},
+        "claim_attempts": 0,
+        "claims_failed": False,
+    }
+
+
+def route_after_extract(state: FinalState) -> Literal["judge_claims", "save_claims"]:
+    return "judge_claims" if state["claims_pending"] else "save_claims"
+
+
+def judge_claims(state: FinalState) -> dict:
+    """Ask the AI for the result of each claim still to judge, a batch at a
+    time, with the problems of its previous answer for those claims."""
+    attempts = state.get("claim_attempts", 0) + 1
+    by_id = {claim["id"]: claim for claim in state["claims"]}
+    pending = [by_id[claim_id] for claim_id in state["claims_pending"]]
+    problems = state.get("claim_problems", {})
+    proposals = []
+    try:
+        for start in range(0, len(pending), cv_claims.BATCH_SIZE):
+            batch = pending[start : start + cv_claims.BATCH_SIZE]
+            labels = [label for claim in batch for label in problems.get(claim["id"], [])]
+            answer = cv_claims.ask_ai(
+                state["job_title"], batch, state["pairs"], _turns(state), problems=labels
+            )
+            proposals.append(answer.model_dump())
+    except ServiceUnavailableError:
+        return {"claims_failed": True, "claim_attempts": attempts}
+    return {"claim_proposals": proposals, "claim_attempts": attempts}
+
+
+def route_after_judge(state: FinalState) -> Literal["check_claims", "save_claims"]:
+    return "save_claims" if state.get("claims_failed") else "check_claims"
+
+
+def check_claims(state: FinalState) -> dict:
+    """Check each result: the quote must be in the candidate's answer to the
+    question named, and the reason must be neutral. Failing claims are asked
+    for again while attempts are left, then kept as not checked."""
+    by_id = {claim["id"]: claim for claim in state["claims"]}
+    pending = [by_id[claim_id] for claim_id in state["claims_pending"]]
+    answer = cv_claims.ClaimsAnswer(
+        results=[
+            item
+            for proposal in state.get("claim_proposals", [])
+            for item in cv_claims.ClaimsAnswer.model_validate(proposal).results
+        ]
+    )
+    accepted, problems = cv_claims.check_answer(answer, pending, state["pairs"], _turns(state))
+    results = {**state.get("claim_results", {}), **accepted}
+    labels = sorted({label for found in problems.values() for label in found})
+    if problems and state["claim_attempts"] < MAX_ATTEMPTS:
+        log_event(
+            logger,
+            "cv_claims_invalid",
+            level=logging.WARNING,
+            session_id=state["session_id"],
+            attempt=state["claim_attempts"],
+            claims=len(problems),
+            problems=labels,
+        )
+        return {
+            "claim_results": results,
+            "claims_pending": list(problems),
+            "claim_problems": problems,
+        }
+    if problems:
+        log_event(
+            logger,
+            "cv_claims_not_traced",
+            level=logging.WARNING,
+            session_id=state["session_id"],
+            claims=len(problems),
+            problems=labels,
+        )
+    for claim_id in problems:
+        results[claim_id] = cv_claims.not_checked(by_id[claim_id])
+    return {"claim_results": results, "claims_pending": [], "claim_problems": {}}
+
+
+def route_after_claims_check(state: FinalState) -> Literal["judge_claims", "save_claims"]:
+    return "judge_claims" if state["claims_pending"] else "save_claims"
+
+
+def save_claims(state: FinalState) -> dict:
+    """Keep the claim check with the assessment, apart from the report."""
+    checks = cv_claims.claim_checks(
+        state.get("claims", []),
+        state.get("claim_results", {}),
+        failed=state.get("claims_failed", False),
+    )
+    store.save_claim_checks(state["session_id"], checks)
+    log_event(
+        logger,
+        "cv_claims_checked",
+        session_id=state["session_id"],
+        status=checks["status"],
+        attempts=state.get("claim_attempts", 0),
+        results=cv_claims.counts(checks),
+    )
+    return {}
+
+
+def route_after_save_claims(state: FinalState) -> Literal["synthesize_report", "__end__"]:
+    return END if state.get("claims_only") else "synthesize_report"
 
 
 def synthesize_report(state: FinalState) -> dict:
@@ -299,6 +457,10 @@ def build_final_assessment_graph(checkpointer: BaseCheckpointSaver) -> CompiledS
     graph = StateGraph(FinalState)
     graph.add_node("load_results", load_results)
     graph.add_node("compute_scores", compute_scores)
+    graph.add_node("extract_claims", extract_claims)
+    graph.add_node("judge_claims", judge_claims)
+    graph.add_node("check_claims", check_claims)
+    graph.add_node("save_claims", save_claims)
     graph.add_node("synthesize_report", synthesize_report)
     graph.add_node("check_traceability", check_traceability)
     graph.add_node("save_draft", save_draft)
@@ -310,7 +472,11 @@ def build_final_assessment_graph(checkpointer: BaseCheckpointSaver) -> CompiledS
 
     graph.add_edge(START, "load_results")
     graph.add_conditional_edges("load_results", route_after_load)
-    graph.add_edge("compute_scores", "synthesize_report")
+    graph.add_edge("compute_scores", "extract_claims")
+    graph.add_conditional_edges("extract_claims", route_after_extract)
+    graph.add_conditional_edges("judge_claims", route_after_judge)
+    graph.add_conditional_edges("check_claims", route_after_claims_check)
+    graph.add_conditional_edges("save_claims", route_after_save_claims)
     graph.add_conditional_edges("synthesize_report", route_after_synthesize)
     graph.add_conditional_edges("check_traceability", route_after_check)
     graph.add_edge("save_draft", "human_review")
@@ -332,6 +498,13 @@ def thread_id(session_id: int) -> str:
     """One thread per interview, so a review can find the paused report.
     Evaluating the interview again starts the thread afresh."""
     return f"final-assessment-{session_id}"
+
+
+def claims_thread_id(session_id: int) -> str:
+    """The thread of a run of the claim check alone (Check CV claims, Check
+    again), kept apart from the report's thread, which may be waiting for
+    review."""
+    return f"cv-claims-{session_id}"
 
 
 def is_waiting_for_review(graph: CompiledStateGraph, config: dict) -> bool:

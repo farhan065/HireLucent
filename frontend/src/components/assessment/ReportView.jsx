@@ -1,10 +1,19 @@
-import { CircleAlert, CircleCheck, Download, LoaderCircle, PenLine, Printer } from 'lucide-react'
+import {
+  CircleAlert,
+  CircleCheck,
+  Download,
+  LoaderCircle,
+  PenLine,
+  Printer,
+  TriangleAlert,
+} from 'lucide-react'
 import { useState } from 'react'
 import {
   MAX_NOTE_CHARS,
   MAX_SUMMARY_CHARS,
   SUITABILITY,
   oneDecimal,
+  openClaims,
   printFile,
   readReportPdf,
   reviewReport,
@@ -255,7 +264,13 @@ function EditForm({ assessment, isSaving, onCancel, onSave }) {
 // The report of one interview: summary, strengths and weaknesses with their
 // sources, evidence gaps and areas to verify. A draft can be approved,
 // edited or rewritten by the AI following a note.
-export default function ReportView({ assessment, candidateName, fileName, onChanged }) {
+export default function ReportView({
+  assessment,
+  candidateName,
+  fileName,
+  onChanged,
+  onOpenClaims,
+}) {
   const [mode, setMode] = useState('view')
   const [dialog, setDialog] = useState(null)
   const [note, setNote] = useState('')
@@ -263,6 +278,8 @@ export default function ReportView({ assessment, candidateName, fileName, onChan
   const [error, setError] = useState('')
   const isDraft = assessment.status === 'draft'
   const sessionId = assessment.session_id
+  // CV claim contradictions not looked at yet (F8): a warning, never a block.
+  const openContradictions = openClaims(assessment.claim_checks, 'contradiction').length
 
   async function send(body, kind) {
     setBusy(kind)
@@ -479,6 +496,29 @@ export default function ReportView({ assessment, candidateName, fileName, onChan
             The report becomes final and {candidateName} is marked assessed. To change it later,
             evaluate the interview again.
           </p>
+          {openContradictions > 0 && (
+            <p className="flex gap-2.5 rounded-2xl border border-[#F3D9A8] bg-[#FFFBF3] px-3.5 py-3 text-[13.5px] leading-normal text-[#6B3A00]">
+              <TriangleAlert className="mt-0.5 size-4.5 shrink-0" aria-hidden="true" />
+              <span>
+                <strong>
+                  {openContradictions}{' '}
+                  {openContradictions === 1 ? 'contradiction' : 'contradictions'} in the CV claims{' '}
+                  {openContradictions === 1 ? 'is' : 'are'} not looked at yet.
+                </strong>{' '}
+                You can still approve.{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDialog(null)
+                    onOpenClaims?.()
+                  }}
+                  className="font-semibold text-brand underline hover:text-brand-dark"
+                >
+                  Open CV claims
+                </button>
+              </span>
+            </p>
+          )}
         </ConfirmDialog>
       )}
 

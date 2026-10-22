@@ -419,6 +419,7 @@ class FakeStore:
             "turns": TURNS,
         }
         self.drafts: list[dict] = []
+        self.claim_checks: list[dict] = []
         self.approved: list[tuple[int, int]] = []
         self.assessed: list[int] = []
 
@@ -426,6 +427,9 @@ class FakeStore:
         monkeypatch.setattr(final.store, "load_results", lambda sid: self.results)
         monkeypatch.setattr(
             final.store, "save_draft", lambda sid, values: self.drafts.append(dict(values))
+        )
+        monkeypatch.setattr(
+            final.store, "save_claim_checks", lambda sid, checks: self.claim_checks.append(checks)
         )
         monkeypatch.setattr(
             final.store, "approve", lambda sid, uid: self.approved.append((sid, uid))
@@ -859,8 +863,9 @@ def test_a_report_is_written_for_evaluated_answers(monkeypatch: pytest.MonkeyPat
     progress.note = lambda details: progress.notes.append(details)
     written: list[int] = []
 
-    def write(graph, sid):
+    def write(graph, sid, show=None):
         written.append(sid)
+        show("writing the report")
         return {}
 
     monkeypatch.setattr(evaluation_service, "write_report", write)
@@ -880,7 +885,7 @@ def test_a_report_that_cannot_be_written_fails_with_the_reason(
     monkeypatch.setattr(
         evaluation_service,
         "write_report",
-        lambda graph, sid: {"failure": final.AI_UNAVAILABLE},
+        lambda graph, sid, show=None: {"failure": final.AI_UNAVAILABLE},
     )
 
     with pytest.raises(evaluation_service.EvaluationFailed) as error:
