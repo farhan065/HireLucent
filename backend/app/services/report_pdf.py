@@ -5,7 +5,9 @@ Page 1 is the report as the Report tab shows it: the scores with the
 suitability label, the summary, strengths, weaknesses, evidence gaps and
 areas to verify, each point with its sources. The appendix that follows
 lists the requirement coverage and every question with its score, so the
-file makes sense without HireLucent.
+file makes sense without HireLucent, then the CV claims to check before
+deciding (F8): each contradiction and unverified claim with the CV wording,
+the question and the candidate's words, and how the interviewer handled it.
 
 The pages are written from simple HTML with PyMuPDF (already used to read
 CVs), so the text in the file is real text that can be searched and copied.
@@ -19,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pymupdf
 
+from app.graphs.final_assessment import claims as cv_claims
 from app.graphs.final_assessment import scoring
 
 PAGE = pymupdf.paper_rect("a4")
@@ -62,6 +65,14 @@ ACCURACY = {
     "not_checked": "Not checked",
 }
 PRIORITIES = {"must_have": "Must-have", "preferred": "Preferred"}
+CLAIM_RESULTS = {
+    cv_claims.CONTRADICTION: ("Contradiction", ("#FFF1E6", "#A34A00")),
+    cv_claims.UNVERIFIED: ("Unverified", ("#F3EEFF", "#6941C6")),
+    cv_claims.NOT_DISCUSSED: ("Not discussed", GREY),
+    cv_claims.CONSISTENT: ("Consistent", GREEN),
+    cv_claims.NOT_CHECKED: ("Not checked", GREY),
+}
+REVIEWS = {"checked": ("Checked", GREEN), "dismissed": ("Dismissed", GREY)}
 
 CSS = f"""
 body {{ font-family: sans-serif; font-size: 9.5pt; color: {BODY}; }}
@@ -260,6 +271,75 @@ articulation. Small talk is not scored. Full answers and reasons are in HireLuce
 <tr><th>#</th><th>Question</th><th>Kind</th><th>Score</th><th>Accuracy</th></tr>
 {"".join(question_rows) or no_rows}
 </table>
+{claims_html(context)}"""
+
+
+def _claim_count(count: int, result: str) -> str:
+    label, colors = CLAIM_RESULTS[result]
+    return _chip(f"{count} {label.lower()}", colors)
+
+
+def _claim_status(review: dict | None) -> str:
+    """How the interviewer handled the claim."""
+    if not review:
+        return "Not looked at yet"
+    name, colors = REVIEWS[review["status"]]
+    by = f"by {review['by_name']}" if review.get("by_name") else ""
+    who = ", ".join(part for part in (by, review.get("on")) if part)
+    note = f"<br/>“{escape(review['note'])}”" if review.get("note") else ""
+    return f'{_chip(name, colors)}<br/><span class="small">{escape(who)}{note}</span>'
+
+
+def _claim_row(claim: dict) -> str:
+    label, colors = CLAIM_RESULTS[claim["result"]]
+    detail = ""
+    if claim["detail"]:
+        detail = f'<br/><span class="small">{escape(claim["detail"])}</span>'
+    asked = ""
+    if claim.get("question"):
+        asked = f'<span class="small"><b>Asked:</b> “{escape(claim["question"])}”</span><br/>'
+    said = f"“{escape(claim['quote'])}”" if claim.get("quote") else ""
+    reason = ""
+    if claim.get("reason"):
+        reason = f'<br/><span class="small">{escape(claim["reason"])}</span>'
+    return (
+        "<tr>"
+        f"<td><b>{escape(claim['id'])}</b><br/>{_chip(label, colors)}</td>"
+        f"<td>“{escape(claim['cv_text'])}”{detail}</td>"
+        f"<td>{asked}{said}{_time(claim.get('start_ms'))}{reason}</td>"
+        f"<td>{_claim_status(claim.get('review'))}</td>"
+        "</tr>"
+    )
+
+
+def claims_html(context: dict) -> str:
+    """Section C: the CV claims to check before deciding. Contradictions and
+    unverified claims are listed; the other results are only counted."""
+    checks = context.get("claim_checks")
+    heading = "<h2>C · CV claims to check</h2>"
+    if not checks or checks["status"] != cv_claims.CHECKED:
+        return f'{heading}<p class="small">This interview\'s CV claims have not been checked.</p>'
+    claims = checks["claims"]
+    totals = cv_claims.counts(checks)
+    counts = " &#160; ".join(
+        _claim_count(totals[result], result) for result in CLAIM_RESULTS if totals.get(result)
+    )
+    shown = [claim for claim in claims if claim["result"] in cv_claims.TO_CHECK]
+    if shown:
+        rows = "".join(_claim_row(claim) for claim in shown)
+        table = f"""<table style="width: 100%">
+<tr><th>Claim</th><th>In the CV</th><th>In the interview</th><th>Status</th></tr>
+{rows}
+</table>
+<p class="small">Not discussed and consistent claims are listed in HireLucent.</p>"""
+    else:
+        table = '<p class="small">No contradiction or unverified claim was found.</p>'
+    return f"""{heading}
+<p class="small">Claims from the CV compared with what was said in the interview. These are
+points to check before deciding, not findings about the candidate; they do not change the
+scores, the report or the decision.</p>
+<p>{counts} &#160; <span class="small">{len(claims)} claims checked</span></p>
+{table}
 """
 
 
@@ -330,8 +410,24 @@ def report_context(assessment, session, job, time_zone: str | None) -> dict:
         "areas_to_verify": assessment.areas_to_verify,
         "coverage": assessment.coverage_map,
         "pairs": assessment.qa_evaluations,
+        "claim_checks": _claim_checks(assessment.claim_checks, zone),
         "generated_on": f"{_day(now, zone)}, {_clock(now, zone)}",
     }
+
+
+def _claim_checks(checks: dict | None, zone: ZoneInfo) -> dict | None:
+    """The claim check with the day each mark was made, in the interviewer's
+    time zone."""
+    if not checks:
+        return None
+    claims = []
+    for claim in checks.get("claims", []):
+        review = claim.get("review")
+        if review:
+            on = datetime.fromisoformat(review["at"])
+            review = {**review, "on": _day(on, zone)}
+        claims.append({**claim, "review": review})
+    return {**checks, "claims": claims}
 
 
 def file_name(job_code: str, start: datetime) -> str:

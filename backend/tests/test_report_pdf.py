@@ -110,6 +110,58 @@ def test_dates_are_in_the_interviewers_time_zone() -> None:
     assert dhaka["answers_evaluated"] == 4
 
 
+def _claim_checks() -> dict:
+    from tests.test_cv_claims import _checked
+
+    checks = _checked()
+    checks["claims"][1]["review"] = {
+        "status": "checked",
+        "note": "Not a must-have.",
+        "by_name": "Demo Interviewer",
+        "at": "2026-10-22T05:20:00+00:00",
+        "on": "Thu 22 Oct 2026",
+    }
+    return checks
+
+
+def test_the_cv_claims_to_check_close_the_appendix() -> None:
+    pages = _text(report_pdf.build_pdf(_context(claim_checks=_claim_checks())))
+
+    rest = " ".join(" ".join(pages[1:]).split())
+    assert "C · CV claims to check" in rest and "not findings about the candidate" in rest
+    assert "1 contradiction" in rest and "5 not discussed" in rest
+    assert "Wrote automated tests for every endpoint" in rest
+    assert "How do you approach testing?" in rest and "not written tests" in rest
+    assert "Checked" in rest and "Demo Interviewer, Thu 22 Oct 2026" in rest
+    assert "Not a must-have." in rest
+    # Consistent and not discussed claims are counted, not listed.
+    assert "runs a function before the endpoint" not in rest
+
+
+def test_claims_not_checked_say_so() -> None:
+    html = report_pdf.appendix_html(_context(claim_checks=None))
+
+    assert "C · CV claims to check" in html and "have not been checked" in html
+
+
+def test_without_contradiction_or_unverified_claim_none_is_listed() -> None:
+    checks = {"status": "checked", "checked_at": "x", "claims": []}
+
+    html = report_pdf.appendix_html(_context(claim_checks=checks))
+
+    assert "No contradiction or unverified claim was found." in html
+
+
+def test_a_claim_mark_shows_on_the_interviewers_day() -> None:
+    checks = _claim_checks()
+    checks["claims"][1]["review"]["at"] = "2026-10-22T20:30:00+00:00"
+
+    shown = report_pdf._claim_checks(checks, report_pdf._zone("Asia/Dhaka"))
+
+    assert shown["claims"][1]["review"]["on"] == "Fri 23 Oct 2026"
+    assert report_pdf._claim_checks(None, report_pdf._zone(None)) is None
+
+
 def test_the_file_name_holds_no_personal_data() -> None:
     assert report_pdf.file_name("HL BE/01", START) == "assessment_HL-BE-01_2026-10-13.pdf"
 
