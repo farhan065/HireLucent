@@ -13,6 +13,21 @@ export function writeReport(sessionId) {
   return apiRequest(`/interviews/${sessionId}/report`, { method: 'POST' })
 }
 
+// Compares the CV's claims with the interview, without touching the report
+// (an interview evaluated before CV claim checks, or Check again).
+export function checkClaims(sessionId) {
+  return apiRequest(`/interviews/${sessionId}/assessment/claims`, { method: 'POST' })
+}
+
+// Marks a contradiction or unverified claim: action is 'checked',
+// 'dismissed' or 'reopen'. Returns the assessment.
+export function reviewClaim(sessionId, claimId, action, note = '') {
+  return apiRequest(`/interviews/${sessionId}/assessment/claims/${claimId}/review`, {
+    method: 'POST',
+    body: { action, note: note.trim() || null },
+  })
+}
+
 // Evaluates every completed interview of the job not evaluated yet.
 export function evaluateAll(jobId) {
   return apiRequest(`/jobs/${jobId}/evaluate`, { method: 'POST' })
@@ -54,12 +69,17 @@ export function evaluationOf(activity, sessionId) {
   if (running) {
     const ids = running.result?.session_ids ?? []
     const current = running.result?.current ?? ids[0]
+    // Only the CV claims are being checked: the rest of the page stays.
+    if (current === sessionId && running.result?.claims_only) return { state: 'checking_claims' }
     if (current === sessionId) {
       return { state: 'running', message: answersPart(running.message), percent: running.percent }
     }
     if (ids.includes(sessionId)) return { state: 'queued' }
   }
   const failure = activity?.last?.result?.failures?.find((item) => item.session_id === sessionId)
+  if (failure && activity.last.result.claims_only) {
+    return { state: 'claims_failed', reason: failure.reason }
+  }
   if (failure) return { state: 'failed', reason: failure.reason }
   // A run of this one interview that failed outright keeps only its message.
   const last = activity?.last
@@ -139,6 +159,38 @@ export const CV_RESULTS = {
   met: { label: 'CV: met', className: 'bg-success-soft text-success' },
   partially_met: { label: 'CV: partly met', className: 'bg-warning-soft text-warning' },
   unmet: { label: 'CV: not met', className: 'bg-danger-soft text-danger' },
+}
+
+// A CV claim's result (F8), as a chip.
+export const CLAIM_RESULTS = {
+  contradiction: { label: 'Contradiction', className: 'bg-amber-soft text-amber' },
+  unverified: { label: 'Unverified', className: 'bg-violet-soft text-violet' },
+  not_discussed: { label: 'Not discussed', className: 'bg-[#EEF1F6] text-[#44526B]' },
+  consistent: { label: 'Consistent', className: 'bg-success-soft text-success' },
+  not_checked: { label: 'Not checked', className: 'bg-[#EEF1F6] text-[#44526B]' },
+}
+
+// Where in the CV a claim comes from.
+export const CLAIM_SECTIONS = {
+  total_experience: 'Total experience',
+  work_experience: 'Work experience',
+  project: 'Project',
+  certification: 'Certification',
+  education: 'Education',
+  skill: 'Skill',
+}
+
+// The order claims are listed in: what to check first.
+export const CLAIM_ORDER = ['contradiction', 'unverified', 'consistent', 'not_discussed']
+
+// Contradictions and unverified claims the interviewer has not marked yet.
+export function openClaims(checks, result = null) {
+  return (checks?.status === 'checked' ? checks.claims : []).filter(
+    (claim) =>
+      ['contradiction', 'unverified'].includes(claim.result) &&
+      !claim.review &&
+      (result === null || claim.result === result),
+  )
 }
 
 // --- Summaries ---

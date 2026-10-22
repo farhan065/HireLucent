@@ -5,6 +5,7 @@ import Button from '../components/Button.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
+import ClaimsTab from '../components/assessment/ClaimsTab.jsx'
 import CoverageTable from '../components/assessment/CoverageTable.jsx'
 import {
   EvaluatingCard,
@@ -24,6 +25,7 @@ import {
   evaluationOf,
   kindCounts,
   needsAttention,
+  openClaims,
   SUITABILITY,
   hasReport,
   oneDecimal,
@@ -36,7 +38,7 @@ import {
 import { readInterview, readTranscript } from '../lib/room.js'
 import { whenLabel } from '../lib/transcript.js'
 
-const TABS = ['report', 'qa', 'coverage', 'decision']
+const TABS = ['report', 'qa', 'coverage', 'claims', 'decision']
 // The Report tab's badge for each assessment status.
 const REPORT_BADGES = {
   draft: { label: 'Draft', className: 'bg-amber-soft text-amber' },
@@ -451,19 +453,28 @@ export default function AssessmentPage() {
   const transcriptTo = `/app/interviews/${id}/transcript`
   const isCompleted = interview.status === 'completed'
   const isRunning = state.state === 'running'
+  const isCheckingClaims = state.state === 'checking_claims'
   const isQueued = state.state === 'queued'
   const coverage = assessment?.coverage_map ?? []
   const notExplored = coverage.filter((entry) => entry.status === 'not_explored').length
   const isReport = hasReport(assessment)
   // The page opens on the report once there is one, else on the answers.
-  const currentTab =
-    tab === 'decision' && assessment?.status !== 'approved'
-      ? 'report'
-      : (tab ?? (isReport ? 'report' : 'qa'))
+  const isHiddenTab =
+    (tab === 'decision' && assessment?.status !== 'approved') || (tab === 'claims' && !isReport)
+  const currentTab = isHiddenTab ? 'report' : (tab ?? (isReport ? 'report' : 'qa'))
   const answersEvaluated = assessment ? qaSummary(assessment.qa_evaluations).evaluated : 0
   const isApproved = assessment?.status === 'approved'
   const decisionBadge =
     DECISION_BADGES[assessment?.feedback_status ?? (assessment?.decision ? 'decided' : '')]
+  // The CV claims tab's badge: contradictions and unverified claims not
+  // marked yet, or that the claims are not checked.
+  const toCheck = openClaims(assessment?.claim_checks).length
+  const claimsBadge =
+    assessment?.claim_checks?.status !== 'checked'
+      ? ['Not checked', 'bg-[#EEF1F6] text-[#44526B]']
+      : toCheck
+        ? [`${toCheck} to check`, 'bg-amber-soft text-amber']
+        : [null, '']
 
   let body
   if (isRunning) {
@@ -549,7 +560,7 @@ export default function AssessmentPage() {
             <FileText className="size-4.5" aria-hidden="true" />
             View transcript
           </Button>
-          {assessment && !isRunning && !isQueued && (
+          {assessment && !isRunning && !isQueued && !isCheckingClaims && (
             <Button
               variant="soft"
               disabled={evaluation.isRunning}
@@ -631,6 +642,8 @@ export default function AssessmentPage() {
                 notExplored ? `${notExplored} not explored` : null,
                 'bg-warning-soft text-warning',
               ],
+              // The CV claims compared with the interview (F8), once there is a report.
+              ...(isReport ? [['claims', 'CV claims', ...claimsBadge]] : []),
               // The decision and the feedback email (F11), once the report is approved.
               ...(isApproved
                 ? [['decision', 'Decision', decisionBadge?.label ?? null, decisionBadge?.className]]
@@ -665,6 +678,7 @@ export default function AssessmentPage() {
                 candidateName={interview.candidate_name}
                 fileName={reportFileName(info)}
                 onChanged={(updated) => setAssessment(updated)}
+                onOpenClaims={() => showTab('claims')}
               />
             ) : (
               <NoReport
@@ -672,6 +686,14 @@ export default function AssessmentPage() {
                 onWriteReport={() => evaluation.start(id, { reportOnly: true })}
               />
             )
+          ) : currentTab === 'claims' && isReport ? (
+            <ClaimsTab
+              assessment={assessment}
+              state={state}
+              isBusy={evaluation.isRunning}
+              onCheck={() => evaluation.start(id, { claimsOnly: true })}
+              onChanged={(updated) => setAssessment(updated)}
+            />
           ) : currentTab === 'decision' && isApproved ? (
             <DecisionTab
               jobId={info.job_id}

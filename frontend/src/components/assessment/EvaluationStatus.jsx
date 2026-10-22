@@ -7,15 +7,19 @@ const STAGES = [
   'Questions and answers found',
   'Judging answers and checking references',
   "Mapping the job's requirements",
+  'Checking CV claims',
   'Writing the report',
 ]
+const CHECKING_CLAIMS = 'checking CV claims'
 const WRITING = 'writing the report'
 
 // Which stage the progress message is at: 0 while the questions are being
-// found, 1 while answers are judged, 3 while the report is written.
+// found, 1 while answers are judged, 3 while the CV claims are checked and
+// 4 while the report is written.
 function stageOf(message) {
   if (!message || message === 'starting') return 0
-  return message === WRITING ? 3 : 1
+  if (message === CHECKING_CLAIMS) return 3
+  return message === WRITING ? 4 : 1
 }
 
 // While this interview is being evaluated.
@@ -28,7 +32,10 @@ export function EvaluatingCard({ message, percent }) {
     >
       <div className="flex items-center gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-tint text-brand">
-          <LoaderCircle className="size-5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          <LoaderCircle
+            className="size-5 animate-spin motion-reduce:animate-none"
+            aria-hidden="true"
+          />
         </span>
         <div>
           <h2 className="text-[17px] font-extrabold text-navy">Evaluating the interview</h2>
@@ -36,8 +43,10 @@ export function EvaluatingCard({ message, percent }) {
             {stage === 0
               ? 'Finding the questions and answers'
               : stage === 3
-                ? 'Writing the report'
-                : message}
+                ? 'Checking CV claims'
+                : stage === 4
+                  ? 'Writing the report'
+                  : message}
           </p>
         </div>
       </div>
@@ -48,15 +57,17 @@ export function EvaluatingCard({ message, percent }) {
         />
       </span>
       <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-[13.5px]">
-        {STAGES.map((stage, index) => {
+        {STAGES.map((name, index) => {
           const isDone = index < stage
           const isNow = index === stage
           return (
             <li
-              key={stage}
-              className={isDone ? 'font-semibold text-success' : isNow ? 'font-semibold text-navy' : ''}
+              key={name}
+              className={
+                isDone ? 'font-semibold text-success' : isNow ? 'font-semibold text-navy' : ''
+              }
             >
-              {stage}
+              {name}
             </li>
           )
         })}
