@@ -32,6 +32,10 @@ DETECTION_SCORE = 0.8
 MIN_FACE_PX = 60
 MIN_SHARPNESS = 5.0
 MIN_BRIGHTNESS = 40.0
+# Another face counts as a second person only if it is at least this share
+# of the largest face's width. Smaller faces are people far behind (an
+# office, a café) and are ignored, like the browser's short-range guide does.
+SECOND_FACE_SHARE = 0.5
 # A stored photo is made at most this big and saved as JPEG, which also
 # drops the file's hidden details (camera, place, time).
 STORED_SIDE = 800
@@ -120,9 +124,19 @@ def quality_problem(image: np.ndarray, face: np.ndarray) -> str | None:
     return None
 
 
+def main_face(faces: np.ndarray) -> tuple[np.ndarray, int]:
+    """The largest face, and how many other faces are big enough to be a
+    second person in front of the camera."""
+    widths = faces[:, 2]
+    largest = int(np.argmax(widths))
+    others = int(np.sum(widths >= widths[largest] * SECOND_FACE_SHARE)) - 1
+    return faces[largest], others
+
+
 def check_photo(content: bytes, models_folder: str | None = None) -> FaceCheck:
-    """Check a photo and make its face code. Exactly one face must be found,
-    and it must be big, sharp and light enough."""
+    """Check a photo and make its face code. Exactly one person must be in
+    front of the camera (small faces far behind are ignored), and the face
+    must be big, sharp and light enough."""
     image = read_image(content)
     if image is None:
         return FaceCheck(problem=NOT_AN_IMAGE)
@@ -134,12 +148,13 @@ def check_photo(content: bytes, models_folder: str | None = None) -> FaceCheck:
         faces = faces if faces is not None else np.empty((0, 15))
         if len(faces) == 0:
             return FaceCheck(problem=NO_FACE, image=image)
-        if len(faces) > 1:
+        face, others = main_face(faces)
+        if others:
             return FaceCheck(problem=SEVERAL_FACES, image=image)
-        problem = quality_problem(image, faces[0])
+        problem = quality_problem(image, face)
         if problem:
             return FaceCheck(problem=problem, image=image)
-        aligned = recogniser.alignCrop(image, faces[0])
+        aligned = recogniser.alignCrop(image, face)
         feature = recogniser.feature(aligned).astype(np.float32).reshape(-1)
     return FaceCheck(code=feature.tobytes(), image=image)
 

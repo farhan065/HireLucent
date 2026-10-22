@@ -2,7 +2,7 @@
 
 > **Status labels:** **BUILT** = implemented, tested and pushed · **FINAL** = agreed, do not change unless the owner asks · **PROPOSED** = suggested design, confirm before major work · **PENDING** = owner decides later · **Not specified** = no information yet.
 > Anything not marked **BUILT** is not in the code yet. For BUILT parts, the names in this file are the names used in the code. If the code and this file ever differ, **the code wins**; tell the owner which lines of this file to correct.
-> **Last updated:** 20 Oct 2026, **Module 8 Stretch 1 (F7, Candidate Identification) complete** on `module/8-stretch-1-candidate-identification` (last F7 code commit `d11e356`; PR into `dev` next). Next: **Module 7 Innovation (Candidate Feedback Composer)** in a new chat, then the remaining stretch features F8–F10, each in its own chat and branch. F7 details in §5.6.
+> **Last updated:** 22 Oct 2026, **Module 7 (F11, Candidate Feedback Composer) complete** on `module/7-innovation` (last F11 commit `4d9838d`, then the F7 fix `567d058`; PR into `dev` next). Module 8 Stretch 1 (F7) is merged into `dev` (PR #6). Next: the remaining stretch features F8–F10, each in its own chat and branch. F11 details in §5.7, F7 in §5.6.
 
 ---
 
@@ -17,7 +17,7 @@ JD creation → job posting → CV collection → screening and ranking → sche
 - Python 3.10+ (container uses 3.11), **FastAPI + Pydantic** (OpenAPI docs), **LangGraph** (real multi-node stateful graphs with retries and checkpointing), **Docker Compose** (single-command startup `docker compose up -d --build`, named volumes, `.env.example`, clean-machine reproducible), GitHub (incremental commits).
 - **Repo branching (FINAL):** `main` + `dev` + one branch per module (`module/2-foundation-setup`, `module/3-pre-interview-core`, `module/4-video-interview`, `module/5-transcription`, `module/6-assessment`, …). A module branch is merged into `dev` by pull request when the module is complete; the next module branch is created from `dev`. `main` is merged **once**, after `dev` is fully complete.
 - Local execution only. Only two roles: **Interviewer** (full access) and **Candidate** (interview only, no account).
-- **Database migrations:** Alembic (FINAL), migrations `0001`–`0015` so far (`0014` adds `assessments.question_suggestions`; `0015` adds the F7 face, PIN and identity columns; the next one is `0016`).
+- **Database migrations:** Alembic (FINAL), migrations `0001`–`0016` so far (`0014` adds `assessments.question_suggestions`; `0015` adds the F7 face, PIN and identity columns; `0016` adds the F11 `candidate_feedback` table and clears old `hold` decisions; the next one is `0017`).
 - **Code style (FINAL):** simple and easy to explain, never at the cost of requirements, quality or industry standards. Small, frequent commits in the format `<type>(<scope>): <Summary>`.
 
 ### 1.2 Scope
@@ -29,8 +29,8 @@ JD creation → job posting → CV collection → screening and ranking → sche
   - **F5** Q&A analysis: segmentation, per-answer evaluation with evidence, reference-checked accuracy, requirement coverage. **BUILT** (Module 6).
   - **F6** consolidated assessment: scores and label, traceable report with human review, ranked list, PDF export, side-by-side comparison. **BUILT** (Module 6).
 - **Client changes (override the BID):** the chatbot posts JDs to a portal with an API → **Blogger careers page** (BUILT); CVs arrive via **Google Form only for now** (BUILT; Gmail intake only if necessary, FINAL); future-dated interview scheduling is required (BUILT).
-- **Stretch (only after all core features work):** F7–F10, one branch per stretch feature (`module/8-stretch-<n>-<feature>`). **F7 BUILT** (Module 8 Stretch 1, 20 Oct, §5.6). Clarification #21 says face or voice recognition is "not required in this phase"; the owner went beyond it with face verification and **the trainer approved it** (20 Oct). Order from here (owner's decision): Module 7 innovation next, then F8–F10.
-- **Innovation (exactly one):** Candidate Feedback Composer (initial choice, §4.8).
+- **Stretch (only after all core features work):** F7–F10, one branch per stretch feature (`module/8-stretch-<n>-<feature>`). **F7 BUILT** (Module 8 Stretch 1, 20 Oct, §5.6). Clarification #21 says face or voice recognition is "not required in this phase"; the owner went beyond it with face verification and **the trainer approved it** (20 Oct). Module 7 innovation is done (22 Oct); F8–F10 next.
+- **Innovation (exactly one):** **F11 Candidate Feedback Composer, BUILT** (Module 7, 22 Oct, §4.7 and §5.7).
 - **Out of scope:** cloud deployment/CI-CD, SSO, ATS/HRIS, offers/onboarding, multi-tenancy, mobile, model training.
 
 ### 1.3 Key constraints
@@ -64,6 +64,7 @@ JD creation → job posting → CV collection → screening and ranking → sche
 
 **Step 6: Screen CVs** (Screening tab, `POST /jobs/{id}/screen`) → CV Screening graph (§4.1). Results: requirement matches with evidence, match ranking, dimension scores, ATS score, final score (0.8 × criteria + 0.2 × ATS), final ranking, summary, exclusion reasons, CV facts. Two sub-tabs (Requirement match / Final ranking), Show dropdown, search, expandable rows.
 - **Human step (FINAL): no automatic shortlist.** Shortlist one by one, by top N or by minimum score; clear the shortlist. **The shortlist is the selection for interview (FINAL):** shortlisted candidates are scheduled directly; status `selected` stays unused.
+- **Rejected at screening (F11, FINAL):** everyone not shortlisted (`screened`, `excluded`, `screening_failed`) counts as rejected and gets a feedback email (§4.7). They can still be shortlisted until that email is sent; then shortlisting is locked for them, and shortlisting removes an email not sent yet. The Final ranking shows a **Status** column (Rejected, Shortlisted, Interview scheduled, Interviewed, Hired, Rejected after interview) and a **Feedback email** column; a third sub-tab **Feedback emails** lists everyone rejected at screening. Unranked rows show only the arrow and the name; the reason is in the opened box.
 - Candidate delete at any stage removes the candidate, CV file and vectors. Screening reset when requirements change (not allowed once interviews exist).
 
 **Step 7: Schedule the interview (BUILT, Module 4)**
@@ -103,7 +104,7 @@ JD creation → job posting → CV collection → screening and ranking → sche
 
 **Step 10: Interview ends.** `POST /interviews/{id}/end` → room closed → worker saves the last words → status `completed`, `ended_at` set → candidate link and passes stop working.
 
-### Stage 4: Assess and decide (BUILT, Module 6: F5, F6; decision PENDING)
+### Stage 4: Assess and decide (BUILT, Module 6: F5, F6; decision and feedback emails: Module 7, F11)
 
 **Step 11: Evaluate the interview (BUILT).** On the job's **Interviews** tab, completed rows show **Evaluate** and the tab shows **Evaluate all (N new)**. One evaluation runs at a time as a background task with progress ("Finding the questions and answers → Judging answers and checking references → Writing the report"); one interview failing does not stop the others. `EvaluationService` runs **LangGraph 3 (Q&A Analysis)**, then **LangGraph 4 (Final Assessment)** (§4.1). An interview analysed before reports existed shows **Write report** (LangGraph 4 only). Once an interview has a report, the screens no longer offer Evaluate (the API still allows re-evaluation; a Re-evaluate option was offered and is PENDING).
 
@@ -111,7 +112,9 @@ JD creation → job posting → CV collection → screening and ranking → sche
 
 **Step 13: Ranked list, report export and comparison (BUILT).** Job tab **Assessments**: count boxes (Strong fit, Possible fit, Not a fit, Waiting for your review), filters, ranked rows (overall score desc, then interview score, then name; drafts marked) with an arrow to show the score parts and coverage; unranked rows (no overall score) below, latest first, with the reason. **Print** and **Download PDF** on the Report tab. Tick up to **3** ranked candidates → **Compare** page `/app/jobs/:jobId/compare?ids=…` (scores and requirements side by side, best value highlighted, no highlight when all are equal). Job tabs Interviews and Assessments get a green tick when their step is finished (§3.5).
 
-**Step 14: Decision:** Hire / Hold / Reject (`PATCH /candidates/{id}`, columns exist, endpoint not built; timing PENDING). Candidate Feedback Composer starts here.
+**Step 14: Decision (BUILT, F11).** **Hire or Reject only (FINAL; Hold removed).** Allowed only once the report is approved: per row on the Assessments tab, on the assessment page's **Decision** tab, or by **Decide by rule** (hire the top N or everyone from a minimum overall score, the rest of the ranked candidates rejected). A decision can change (or be taken back) until its email is sent; a change removes an email not sent yet. The Assessments list has 8 columns (Compare, Rank, Candidate, Overall with CV · Interview, Report, Decision, Feedback email, Action), no sideways scroll at laptop width, and an opened row shows three summary cards (Score; In short: 2 strengths and 1 weakness; To check, with **Open the full report →**).
+
+**Step 15: Feedback emails (BUILT, F11).** **Write emails** writes each candidate's email with LangGraph 5 (§4.1) as a draft; nothing is sent until the interviewer approves it in the review panel (**Approve and send**, **Edit**, **Request changes** with a note, **Discard**, **Send anyway** after a confirm when warnings remain). **Send all passed** sends only drafts with no warnings. Sending goes through mcp-google `send_email`; a failed send shows **Not sent** with **Try again**. Buttons only (chatbot sending is future work). The Screening and Assessments job tabs show "N emails to send".
 
 ---
 
@@ -123,9 +126,9 @@ JD creation → job posting → CV collection → screening and ranking → sche
 |---|---|---|
 | Frontend | React 19 + Tailwind CSS v4 + Vite, React Router, lucide-react, react-markdown, `livekit-client`; fonts Plus Jakarta Sans and Figtree; ESLint (react-hooks v7); code formatted Prettier-style (no semicolons, single quotes, width 100) | BUILT |
 | Backend | FastAPI + Pydantic v2, SQLAlchemy 2, Alembic | BUILT |
-| Services | auth, chat (+ conversation store/view), knowledge, job, job_post, job_deletion, intake (google_forms, google_drive, google_client), screening, shortlist, task, blogger, text_extraction, session, scheduling, interview_emails, interview_times, interview_context, join, room, video, question, interview_chat, transcript, evaluation_service, report_pdf, **face_models, face_service, pin_service, identity_service** (F7) | BUILT |
+| Services | auth, chat (+ conversation store/view), knowledge, job, job_post, job_deletion, intake (google_forms, google_drive, google_client), screening, shortlist, task, blogger, text_extraction, session, scheduling, interview_emails, interview_times, interview_context, join, room, video, question, interview_chat, transcript, evaluation_service, report_pdf, **face_models, face_service, pin_service, identity_service** (F7), **feedback_service** (F11) | BUILT |
 | Face matching (F7) | Backend: `opencv-python-headless` 4.14 with OpenCV Zoo **YuNet** (MIT) and **SFace** (Apache 2.0), downloaded at image build with SHA-256 check (`python -m app.services.face_models /app/models`). Browser: `@mediapipe/tasks-vision` 1.0.1 (Apache 2.0) FaceDetector, wasm and model served from `/mediapipe/`. All local, CPU only | BUILT |
-| AI workflows | LangGraph + PostgresSaver | Recruiter Agent, CV Screening, **Q&A Analysis, Final Assessment** BUILT |
+| AI workflows | LangGraph + PostgresSaver | Recruiter Agent, CV Screening, Q&A Analysis, Final Assessment, **Candidate Feedback (LangGraph 5)** BUILT |
 | MCP clients | `app/mcp_clients/registry.py` (`mcp_servers()`: rag offered to the agent; google and blogger backend-only with `allowed_tools`) + `app/mcp_clients/client.py` (`call_tool`, `agent_tool_definitions`, `call_agent_tool`) | BUILT |
 | MCP servers | **mcp-rag** (custom, port 8001: `search_jd_references`, `search_question_bank`, `verify_answer`), **mcp-blogger** (zachsladecode/blogger-mcp-server, pinned, supergateway, port 8002: `create_post`), **mcp-google** (custom, port 8003: `send_email`, `create_calendar_event`, `update_calendar_event`, `cancel_calendar_event`) | BUILT |
 | Relational DB | PostgreSQL 16 | BUILT |
@@ -152,20 +155,21 @@ JD creation → job posting → CV collection → screening and ranking → sche
 | Interview PIN (F7) | Candidate | Typed before joining; only its Argon2 hash stored; 5 wrong tries → 15 min lock |
 
 ### 3.4 Data stores
-**PostgreSQL tables (BUILT):** `users`, `jobs`, `candidates`, `screening_results`, `removed_applications`, `conversations`, `documents`, `tasks`, `interview_sessions` (times, join token hash, calendar event id, status `scheduled`/`in_progress`/`completed`/`cancelled`, joined/started/ended/consent/cancelled times, `candidate_seen_at`, `suggested_questions` JSONB, `created_by`), `transcript_turns` (session_id, speaker `interviewer`/`candidate`, start_ms, end_ms, text); F7 columns: `candidates.photo_path`, `face_code`, `face_status`, `face_problem`, `face_consent_at`; `interview_sessions.pin_hash`, `pin_failed_attempts`, `pin_locked_until`, `identity_check` (JSONB: result, score, other_candidate_id, other_score, reason, checked_at, attempts); `assessments` (one row per interview: status `analysed` → `draft` → `approved`; `qa_evaluations`, `coverage_map`, `question_suggestions` from LangGraph 3; `cv_score`, `interview_score`, `overall_score`, summary, strengths, weaknesses, gaps, `areas_to_verify` from LangGraph 4; `approved_by`, `approved_at`; the label `suitability` is computed from `overall_score`, not stored), LangGraph checkpoint tables.
+**PostgreSQL tables (BUILT):** `users`, `jobs`, `candidates`, `screening_results`, `removed_applications`, `conversations`, `documents`, `tasks`, `interview_sessions` (times, join token hash, calendar event id, status `scheduled`/`in_progress`/`completed`/`cancelled`, joined/started/ended/consent/cancelled times, `candidate_seen_at`, `suggested_questions` JSONB, `created_by`), `transcript_turns` (session_id, speaker `interviewer`/`candidate`, start_ms, end_ms, text); F7 columns: `candidates.photo_path`, `face_code`, `face_status`, `face_problem`, `face_consent_at`; `interview_sessions.pin_hash`, `pin_failed_attempts`, `pin_locked_until`, `identity_check` (JSONB: result, score, other_candidate_id, other_score, reason, checked_at, attempts); `candidate_feedback` (F11: one row per candidate, deleted with the candidate or job: `kind` `screening_reject`/`interview_reject`/`hire`/`cv_unreadable`, `status` `waiting_review`/`sending`/`sent`/`failed`/`discarded`, `written_by` `ai`/`template`, subject, body, `evidence` JSONB (interviewer only), `warnings` JSONB, attempts, `error_message`, `sent_anyway`, `approved_by`, `approved_at`, `sent_at`; the email address is not copied); `candidates.decision` = `hire` / `reject` (set after the interview, or `reject` when a screening rejection email is sent), `decided_by`, `decided_at`; `assessments` (one row per interview: status `analysed` → `draft` → `approved`; `qa_evaluations`, `coverage_map`, `question_suggestions` from LangGraph 3; `cv_score`, `interview_score`, `overall_score`, summary, strengths, weaknesses, gaps, `areas_to_verify` from LangGraph 4; `approved_by`, `approved_at`; the label `suitability` is computed from `overall_score`, not stored), LangGraph checkpoint tables.
 **Candidate statuses:** `applied`, `screening_failed`, `excluded`, `screened`, `shortlisted`, `selected` (unused), `interview_scheduled`, `assessed`.
-**Never stored:** raw audio/video, live messages, join tokens (only hashes), JWTs, LiveKit tokens, the PIN (only its hash), the photo taken when joining, camera frames, the original application photo file (only a re-saved JPEG).
+**Never stored:** the candidate's email address in the feedback row or graph state (read only when sending), raw audio/video, live messages, join tokens (only hashes), JWTs, LiveKit tokens, the PIN (only its hash), the photo taken when joining, camera frames, the original application photo file (only a re-saved JPEG).
 
 ### 3.5 UI design
 > - The owner wants a **very professional, modern and beautiful UI**.
 > - **Before implementing any UI screen or change: share the understanding, show a mockup on the design canvas, wait for approval, then apply it exactly.**
-> - Design canvas: https://claude.ai/artifact/1YsLaBugibMF1nbsWtcWYj (all approved mockups; Module 5 boards: `M5LiveTranscript`, `M5TranscriptStates`, `M5TranscriptViewer`, `M5TranscriptViewerStates`; Module 6 boards: `M6Assessments`, `M6AssessmentsStates`, `M6Report`, `M6ReportStates`, `M6PdfA`, `M6PdfB`, `M6CompareSelect`, `M6Compare`; Module 8 (F7) boards: `M8PinEntry`, `M8PinStates`, `M8PreJoinConsent`, `M8Capture`, `M8CaptureStates`, `M8WaitingAllSet`, `M8InterviewsIdentity`, `M8RoomProfile`, `M8IdentityStates`, `M8SidebarPhoto`, `M8NewPin`).
+> - Design canvas: https://claude.ai/artifact/1YsLaBugibMF1nbsWtcWYj (all approved mockups; Module 5 boards: `M5LiveTranscript`, `M5TranscriptStates`, `M5TranscriptViewer`, `M5TranscriptViewerStates`; Module 6 boards: `M6Assessments`, `M6AssessmentsStates`, `M6Report`, `M6ReportStates`, `M6PdfA`, `M6PdfB`, `M6CompareSelect`, `M6Compare`; Module 8 (F7) boards: `M8PinEntry`, `M8PinStates`, `M8PreJoinConsent`, `M8Capture`, `M8CaptureStates`, `M8WaitingAllSet`, `M8InterviewsIdentity`, `M8RoomProfile`, `M8IdentityStates`, `M8SidebarPhoto`, `M8NewPin`; Module 7 (F11) boards: `M7ScreeningEmails`, `M7AssessmentsDecisions`, `M7ReportDecision` (the Decision tab), `M7EmailReview`, `M7EmailWarning`, `M7Confirms`, `M7EmailStates`, `M7AssessmentsCompact`, `M7ScreeningRankingV2`, `M7ScreeningEmailsTab`).
+> - **No footer note tiles or explanation boxes on any mockup page** (owner); explanations go in the chat.
 
 Theme (FINAL): clean corporate SaaS, white/pale-blue backgrounds, blue primary `#1557E0`, navy headings `#0B1F4B`, body text `#51607A`, rounded cards, subtle shadows; each stage its own colour (no dark navy fills). Tailwind tokens in `frontend/src/index.css` (brand, navy, body, mist, tint, line, success, warning, danger, teal, amber, violet + `-soft`).
 
-**Screens (BUILT):** landing, login, sidebar (Dashboard, Jobs, AI Agent, Knowledge Base; stays in place while the page scrolls on wide screens), Dashboard, Jobs page, job page tabs (Job post, Applications, Screening, Interviews, **Assessments** with a "to review" badge), AI Agent page (cards, job brief), Knowledge Base, interviewer room `/app/interviews/:sessionId/room`, transcript viewer `/app/interviews/:sessionId/transcript`, **assessment page** `/app/interviews/:sessionId/assessment` (Q&A, Coverage, Report tabs), **compare page** `/app/jobs/:jobId/compare?ids=…`, candidate pages `/interview/:token` (**PIN**, pre-join, **photo step**, waiting, room, ended).
+**Screens (BUILT):** landing, login, sidebar (Dashboard, Jobs, AI Agent, Knowledge Base; stays in place while the page scrolls on wide screens), Dashboard, Jobs page, job page tabs (Job post, Applications, Screening with sub-tabs Final ranking / Requirement match / **Feedback emails**, Interviews, **Assessments** with a "to review" badge; Screening and Assessments also show "N emails to send"), AI Agent page (cards, job brief), Knowledge Base, interviewer room `/app/interviews/:sessionId/room`, transcript viewer `/app/interviews/:sessionId/transcript`, **assessment page** `/app/interviews/:sessionId/assessment` (Q&A, Coverage, Report and, once approved, **Decision** tabs), **email review panel** (wide side panel with ‹ › between candidates), **compare page** `/app/jobs/:jobId/compare?ids=…`, candidate pages `/interview/:token` (**PIN**, pre-join, **photo step**, waiting, room, ended).
 **Job tab ticks (BUILT):** each tab turns green when its step is finished; Interviews when at least one interview is completed and none is scheduled or in progress; Assessments when every completed interview has an approved report. The open tab is always blue.
-**Next screens:** Module 7 (mockups first). Board titles on the canvas: "Module 8 · F7 Candidate identification (for approval)", all approved 20 Oct.
+**Next screens:** F8–F10 (mockups first). Board titles on the canvas: "Module 8 · F7 Candidate identification (for approval)" (approved 20 Oct) and "Module 7 · F11 Candidate Feedback Composer (for approval)" (approved 20–21 Oct).
 
 ---
 
@@ -184,6 +188,13 @@ Theme (FINAL): clean corporate SaaS, white/pale-blue backgrounds, blue primary `
 - **Findings (each fact once):** evidence gaps = requirements never explored, must-haves first, with the CV result on the same line; areas to verify = one line per asked question, for its main reason (not answered → poor answer behind a mixed requirement → accuracy not checked); "No job-related questions" when there were none. Claim ids S1/W1/G1/V1.
 - Diagrams updated to the built graphs: `docs/LangGraph_3_QA_Analysis_30221_Farhan.pdf`, `docs/LangGraph_4_Final_Assessment_Farhan_30221.drawio.pdf` (draw.io sources kept by the owner).
 
+**LangGraph 5: Candidate Feedback** (BUILT, F11, `app/graphs/feedback/`): `load_evidence` → (`draft_feedback` for rejections | `use_template` for Hire and CV not readable | `handle_error`) → `check_fairness` (code) → `review_email` (AI) → `save_draft` → `human_review` (`interrupt`) → approve / send anyway → `send_email` (mcp-google) → `record_sent`, or failed → `mark_not_sent` → `human_review` (Try again); edit → `check_fairness` (warnings only, never rewritten); request changes → `draft_feedback` with the note (3 fresh attempts); discard → end. A problem from either check is sent back for a rewrite up to 3 times (`MAX_ATTEMPTS`), then kept as a warning naming the exact words. AI down on a first draft → `handle_error`; during a rewrite → `revision_failed`, the old draft stays. Thread `feedback-{candidate_id}`, deleted before each new writing run and with the candidate or job.
+- **Evidence (`store.load_evidence`):** screening: met requirements (scored) or CV skills (excluded) as strengths, plus the **CV profile** (id `CV`: the CV summary with the name removed by `_without_name`, else the job titles in the CV); growth = preferred requirements not met / partly met, or every exclusion reason (`R…`, `EXP`, other wording `MH…`); interview: the approved report's strengths and weaknesses. No limit on the number of points (each cut to 300 characters, contacts masked).
+- **Writing (`writing.py`, FINAL):** free, natural wording; the order is a guide only (greeting `[first name]` → thanks → strengths → apology and reason → level sentence → warm closing). Strengths are a **short summary (1–2 sentences)** led by the candidate's main area, even when it is not the role's focus; left out when there are none. Reason: must-haves "we could not find in your CV"; preferred "extra experience the role also looks for"; interview growth areas; none → "many strong applications". Level sentence by `templates.role_level` (senior from 3 years: "from the very first day"; junior; entry for intern/trainee/apprentice/graduate). Hire and CV-not-readable are fixed messages (Hire names the role; no offer details).
+- **Checks (FINAL):** code (`fairness.py`): scores, other candidates, personal topics, promises, offer details, identity check, personal data (emails, phones of 9+ digits, links), quotes of 4+ words, HTML or placeholders, and named skills or tools found in neither the candidate's points nor the job's requirements; words from the job's own requirements are allowed. AI review (`review_email`): respectful, unsupported claims, unfair meaning; when it cannot run the draft gets `not_checked`.
+- Greeting name: `templates.first_name` skips prefixes (Md., Mst., Dr., Engr., …) and fixes all-capital names.
+- Diagram: `docs/LangGraph_5_Candidate_Feedback_30221_Farhan.pdf` (draw.io source kept by the owner).
+
 ### 4.2 RAG design (BUILT parts)
 Collections: `jd_references`, `cv_embeddings`, `question_bank` (with roles), `rag_documents`. Collections are fixed in code, never chosen by the LLM. `QUESTION_BANK_MAX_DISTANCE`, `JD_REFERENCE_MAX_DISTANCE` and `REFERENCE_MAX_DISTANCE` (all 0.6). Only Knowledge Base documents of type `reference` are used to check answer accuracy (clarification #10).
 
@@ -195,11 +206,11 @@ Collections: `jd_references`, `cv_embeddings`, `question_bank` (with roles), `ra
 | `SaveJob`, `PublishJob` (→ Blogger `create_post`) | Backend | Yes | BUILT |
 | `GetCandidates` | Backend, read-only | No | BUILT |
 | `ScheduleInterviews`, `RescheduleInterview`, `CancelInterview` (→ mcp-google calendar tools) | Backend | Yes | BUILT |
-| `send_email` (mcp-google) | Backend-only | Yes | Kept for later (innovation) |
+| `send_email` (mcp-google), called by LangGraph 5 | Backend-only | Yes | BUILT (F11) |
 External MCP tools are called only by the backend after approval and are never listed to the LLM.
 
 ### 4.4 Google integration
-OAuth consent in Testing mode: **the sign-in expires about every 7 days** → run `python -m scripts.google_auth` in `backend/` on the host, then `docker compose restart mcp-blogger mcp-google`. **Renewed 20 Oct 2026; next renewal due around 27 Oct 2026 (the submission day: renew before the demo).** Scopes: blogger, forms (read), drive (read), gmail.send, calendar.events. Files in `secrets/` (never on GitHub; copied between PCs by USB). Check scripts: `form_check`, `blogger_check`, `mcp_check`, `google_check`.
+OAuth consent in Testing mode: **the sign-in expires about every 7 days** → run `python -m scripts.google_auth` in `backend/` on the host, then `docker compose restart mcp-blogger mcp-google`. **Renewed 20 Oct 2026; expired again on the office PC on 22 Oct. Renew before the demo on 27 Oct 2026.** Scopes: blogger, forms (read), drive (read), gmail.send, calendar.events. Files in `secrets/` (never on GitHub; copied between PCs by USB). Check scripts: `form_check`, `blogger_check`, `mcp_check`, `google_check`.
 
 ### 4.5 API endpoints (BUILT; interviewer role unless marked)
 - Public: `GET /health`, `POST /auth/login`. `GET /auth/me`, `GET /ai/status`.
@@ -211,17 +222,28 @@ OAuth consent in Testing mode: **the sign-in expires about every 7 days** → ru
 - Candidate: `POST /join/info`, `/join/pin`, `/join/enter` (no pass); with the pass: `POST /join/identity`, `/join/identity/skip`, `GET /join/status`, `POST /join/leave`, `/join/room`.
 - Tasks: `GET /tasks/{id}`. **To remove later:** demo endpoints `/graphs/demo…`, `POST /tasks/demo`.
 - Assessments (Module 6): `POST /interviews/{id}/evaluate`, `POST /jobs/{id}/evaluate`, `GET /jobs/{id}/evaluation`, `POST /interviews/{id}/report`, `GET /interviews/{id}/assessment`, `POST /interviews/{id}/assessment/questions`, `POST /interviews/{id}/assessment/review` (approve / request_changes / edit), `GET /interviews/{id}/assessment/report.pdf?tz=` (file `assessment_<job code>_<date>.pdf`), `GET /jobs/{id}/assessments` (ranked list with coverage, also used by the comparison), `POST /jobs/{id}/assessments/approve` (approve all drafts). All interviewer-only (candidates get 403).
-- **Later:** decision (Hire/Hold/Reject), Re-evaluate in the UI (PENDING).
+- Decisions and feedback emails (F11, interviewer only): `PUT /candidates/{id}/decision` (hire, reject or null), `POST /jobs/{id}/decisions` (by rule: `top` or `min_score`), `GET /jobs/{id}/feedback` (running/last task, emails to send per stage), `POST /jobs/{id}/feedback` (write, background), `POST /jobs/{id}/feedback/send` (send all passed of a stage, background), `GET /candidates/{id}/feedback`, `POST /candidates/{id}/feedback/review` (approve, send_anyway, edit, request_changes, discard). `CandidateSummary`, `RankedAssessment` and `AssessmentOut` add `decision`, `feedback_status` (and `feedback_warnings`).
+- **Later:** Re-evaluate in the UI (PENDING).
 
 ### 4.6 Error handling and logging
-JSON logs (IDs and numbers only: no names, emails, CV text, transcript text, tokens, keys or prompts). Worker events (all with `provider`): `transcription_worker_started` (provider, key set), `interview_audio_joined`, `stt_connected`, `transcript_turn_saved` (speaker, times, word count), `stt_stream_finished` (turns, dropped chunks, skipped messages, delay figures), `stt_refused` (HTTP status), `stt_disconnected` (error type, close code), `stt_error_message`, `stt_message_skipped`, `stt_not_configured`. Evaluation events (ids, counts and labels only): `qa_segmentation_empty`, `qa_references_found`, `qa_references_unavailable`, `qa_evaluation_invalid` (attempt, problem labels such as `quote_not_found`, `accuracy_missing`), `qa_evaluation_kept`, `assessment_report_untraced`, `assessment_claims_dropped`, `assessment_reviewed`, `assessments_approved`, `report_written`, `report_pdf_built`, `evaluation_finished`. F7 events (ids, labels and scores only): `face_enrolled`, `face_photo_unusable` (problem code), `face_check_failed`, `interview_pin_wrong`, `interview_pin_locked`, `interview_pin_renewed`, `identity_photo_unusable`, `identity_checked` (result, score). PENDING: simplify the logging code after all other tasks.
+JSON logs (IDs and numbers only: no names, emails, CV text, transcript text, tokens, keys or prompts). Worker events (all with `provider`): `transcription_worker_started` (provider, key set), `interview_audio_joined`, `stt_connected`, `transcript_turn_saved` (speaker, times, word count), `stt_stream_finished` (turns, dropped chunks, skipped messages, delay figures), `stt_refused` (HTTP status), `stt_disconnected` (error type, close code), `stt_error_message`, `stt_message_skipped`, `stt_not_configured`. Evaluation events (ids, counts and labels only): `qa_segmentation_empty`, `qa_references_found`, `qa_references_unavailable`, `qa_evaluation_invalid` (attempt, problem labels such as `quote_not_found`, `accuracy_missing`), `qa_evaluation_kept`, `assessment_report_untraced`, `assessment_claims_dropped`, `assessment_reviewed`, `assessments_approved`, `report_written`, `report_pdf_built`, `evaluation_finished`. F7 events (ids, labels and scores only): `face_enrolled`, `face_photo_unusable` (problem code), `face_check_failed`, `interview_pin_wrong`, `interview_pin_locked`, `interview_pin_renewed`, `identity_photo_unusable`, `identity_checked` (result, score). F11 events (ids, kinds, counts and warning codes only, never email text): `decision_set`, `decisions_applied`, `feedback_fairness_failed`, `feedback_review_failed`, `feedback_drafted`, `feedback_reviewed`, `feedback_send_failed`, `feedback_sent`, `feedback_not_written`, `feedback_writing_finished`, `feedback_sending_finished`. PENDING: simplify the logging code after all other tasks.
 
-### 4.7 Innovation feature: Candidate Feedback Composer (initial choice, Module 7)
-After Hold/Reject: draft respectful feedback from saved job-related evidence only, fairness check, HITL edit/approve, send via `send_email`. Graph, endpoint, UI and the 300–500 word rationale (owner's own reasoning) not yet specified.
+### 4.7 Innovation feature: Candidate Feedback Composer (F11, BUILT, Module 7)
+After the decision, a personal, fair feedback email for every candidate, written from their own saved job-related evidence, checked by code and by an AI review, and sent through Gmail only after the interviewer approves it.
+
+| Who | Decision | Email kind | First draft |
+|---|---|---|---|
+| Not shortlisted after screening (`screened`, `excluded`) | Rejected automatically | `screening_reject` | AI |
+| CV could not be read (`screening_failed`) | Rejected automatically | `cv_unreadable` | Fixed message |
+| Interviewed, report approved, **Reject** | Interviewer | `interview_reject` | AI |
+| Interviewed, report approved, **Hire** | Interviewer | `hire` | Fixed message |
+
+- **Privacy (FINAL):** the AI never gets the candidate's name (writes `[first name]`; the name is also removed from the CV summary), email address, scores, other candidates, transcript quotes, the identity check or the interviewer's note. The address is read only when sending. Sent text, approver and time are kept with the candidate and deleted with the candidate or job.
+- Docs: README section "Innovation Feature: Candidate Feedback Composer (F11)", `docs/feedback_composer_design.md`, `docs/innovation_rationale.md` (draft written by Claude at the owner's request; the owner reviews it), LangGraph 5 diagram. Owner's backend explainer: `HireLucent_F11_Backend_Story_30221_Farhan.pdf` (not in the repo).
 
 ---
 
-## 5. Development status (20 Oct 2026)
+## 5. Development status (22 Oct 2026)
 
 ### 5.1 Redmine tree and status
 - **Module 2** Foundation: BUILT, merged into `dev`.
@@ -232,8 +254,13 @@ After Hold/Reject: draft respectful feedback from saved job-related evidence onl
 - **Module 6** (F5 + F6), branch `module/6-assessment`: BUILT, merged into `dev` (PR #5, `59b344d`). Story and feature ids: (fill in from the Redmine tree).
   - Q&A segmentation #650073 (+ #650074 multi-part and small talk) · Response evaluation #650075 · reference-based accuracy #650076 · justification with evidence #650077 · requirement coverage #650078 · Q&A screens #650079 · consolidated assessment #650080 (scores and label) and #650081 (strengths, weaknesses, gaps, areas, traceability) · report view #650082 · export and print #650083 · candidate comparison #650084 (also ranked list and Assessments tab).
   - pgAdmin (extra tool): `Refs #646551`. Fixes from the full test: `Refs #650075, #650076, #650080, #650081, #650084`.
-- **Module 8 Stretch 1** (F7), branch `module/8-stretch-1-candidate-identification`, Redmine task **#650400**: BUILT, full test passed by the owner (20 Oct); commits `d7d679a`, `7d8b58e`, `fa6f5f5`, `9929dbe`, `5c2cf47`, `b701750`, `9bab217`, `d11e356` + this docs commit (`Closes #650400`); next: PR into `dev`. Task and feature descriptions and the daily note given.
-- **Module 7** (F11 Innovation): next, in a new chat; Redmine ids to be given there.
+- **Module 8 Stretch 1** (F7), branch `module/8-stretch-1-candidate-identification`, Redmine task **#650400**: BUILT, full test passed by the owner (20 Oct); commits `d7d679a`, `7d8b58e`, `fa6f5f5`, `9929dbe`, `5c2cf47`, `b701750`, `9bab217`, `d11e356` + docs commit (`Closes #650400`); **merged into `dev` (PR #6, `2bcc1e2`)**. Follow-up fix on `module/7-innovation`: `567d058` "Send only the face area of the photo" (`Refs #650400`).
+- **Module 7** (F11 Innovation), branch `module/7-innovation`, Story **#650131**: BUILT, tested by the owner (22 Oct); next: PR into `dev`. Redmine task, feature and module descriptions and the daily notes (20/10 and 21/10) given.
+  - Feature 28 Concept & Rationale #650133: tasks #650166 (finalise concept; assigned to Jishnu Sardar), #650169 (rationale).
+  - Feature 29 Feature Design #650135: tasks #650161 (data flow, workflow, API, integration), #650164 (screens, mockups on the design canvas).
+  - Feature 30 Feature Implementation #650138: tasks #650154 (backend and AI workflow), #650157 (screens).
+  - Feature 31 Platform Integration #650140: task #650152.
+  - Feature 32 Testing & Documentation #650142: tasks #650146 (testing), #650148 (README).
 
 ### 5.2 Module 6 step log
 | Step | Content | Commits | Status |
@@ -273,6 +300,13 @@ Branch `module/8-stretch-1-candidate-identification` (from `dev`), Redmine task 
 - **Settings:** `FACE_MODELS_DIR` (default `models`), `MAX_PHOTO_MB` (default 5; the owner's PCs use 10 to match the form).
 - **Tests:** 647 backend tests at `d11e356` (45 new); the migration was run up and down on PostgreSQL.
 
+### 5.7 Module 7: F11 Candidate Feedback Composer (BUILT, 22 Oct)
+Branch `module/7-innovation` (from `dev`). Delivered as zips `hirelucent_step_7.3` and `_v2`, then one full zip `hirelucent_module_7_f11`, committed by the owner in 11 commits `028a2c8` … `4d9838d`.
+- **Decisions (FINAL, 20–21 Oct):** both stages (screening rejections and after the interview) · after the interview **Hire or Reject only, no Hold** · decisions only after the report is approved, by row or by rule · everyone not shortlisted is rejected at screening, shortlist and decision locked once the email is sent · emails are different for every candidate: AI for rejections, fixed messages for Hire and CV not readable, every email editable · warm, inspirational tone, reason worded for the role level · **buttons only** (chatbot sending is future work) · Send anyway after a confirm (option A); Send all passed skips drafts with warnings · decision on a new **Decision** tab so the Report tab stays unchanged · **v2 (21 Oct):** no limits on points and no exact-word checks (free wording); safety checks only in code plus one AI review of tone, unsupported claims and unfair meaning; warnings name and highlight the exact words; the interviewer's edits are checked but never rewritten · strengths: CV profile first, short summary, left out when empty; greeting by the name the candidate goes by.
+- **Built:** see Step 6, Step 14, Step 15, §3.1, §3.4, §3.5, §4.1 (LangGraph 5), §4.3, §4.5, §4.6, §4.7.
+- **Files:** backend `app/models/feedback.py`, `app/schemas/feedback.py`, `app/graphs/feedback/` (`templates.py`, `store.py`, `writing.py`, `fairness.py`, `graph.py`), `app/services/feedback_service.py`, `app/api/routes/feedback.py`, `alembic/versions/0016_add_candidate_feedback.py`, `tests/test_feedback.py`; changes in enums, candidate, assessment, schemas candidate/assessment, task_service (`FEEDBACK_WRITING`, `FEEDBACK_SENDING`, `NOT_CV_WORK`), intake, screening, evaluation, shortlist, job_deletion, routes/jobs, router. Frontend `lib/feedback.js`, `hooks/useFeedback.js`, `components/feedback/` (EmailChip, EmailButtons, FeedbackEmail, FeedbackPanel, DecisionButtons, DecisionRuleBar, DecisionTab, ScreeningFeedback); changes in SidePanel (`isWide`), FinalRanking, MatchRanking, candidates, CvFacts, JobTabs, JobPage, ScreeningTab, AssessmentsTab, AssessmentPage, RankedList, `lib/results.js`.
+- **Tests:** 737 backend tests at `567d058` (1 skipped in the container); frontend lint and build clean; screens checked at 1280 px and wide widths.
+
 ### 5.4 Deferred items (owner: "later")
 1. Remove the demo code (`routes/graphs.py`, demo part of `routes/tasks.py`, `graphs/demo.py`).
 2. Phone sidebar fix (mockup needed).
@@ -283,14 +317,16 @@ Branch `module/8-stretch-1-candidate-identification` (from `dev`), Redmine task 
 7. Tests on one PC need headphones and one window unmuted at a time (shared mic/speaker echo).
 8. Minimum experience in half years (e.g. 1.5): not supported (whole years); owner said no change for now.
 9. **Same-Wi-Fi / phone-hotspot demo mode ("Way 2"):** done manually, no code: Cloudflare quick tunnels for the website (3000) and LiveKit signalling (7880); `node_ip` in `livekit/livekit.yaml` set to the PC's LAN IP (never committed; `git restore` to switch back); `FRONTEND_BASE_URL` and `LIVEKIT_URL` updated per run; firewall TCP 7881 / UDP 7882. The one-PC (incognito) setup stays the default. Different networks need Tailscale or LiveKit Cloud (not adopted).
-10. Transcription "later" ideas (not required): store per-turn confidence (next free migration `0015`), keyterm spelling table (FastAPI, Kubernetes…), endpointing / turn length as settings.
+10. Transcription "later" ideas (not required): store per-turn confidence (next free migration `0017`), keyterm spelling table (FastAPI, Kubernetes…), endpointing / turn length as settings.
 11. Google STT as a third provider (PENDING).
 12. **Question inferred from the candidate's answer** when the interviewer's question is lost from the transcript (owner: "keep reminding, I will tell you later"). Today such an answer is skipped.
 13. **Re-evaluate** option for interviews that already have a report (offered; the API allows it, the UI does not). Workaround: `POST /interviews/{id}/evaluate` from `/docs`.
-14. Hire / Hold / Reject decision: endpoint and timing PENDING.
+14. **Candidates who never attend their interview (F11):** no report can be approved, so they cannot be decided and get no email. Option: a "Did not attend" decision with its own email (PENDING, owner decides).
 15. **Liveness check (F7)**: blink, or "turn your head left / right", against a printed photo held up to the camera. Owner: later.
 16. **Face status on the Applications or Screening tab** (e.g. "photo not usable (too blurry)") before scheduling. Owner: "I will tell you later".
 17. Building on an 8 GB PC: build images one at a time (`docker compose down` → `build backend` → `build frontend` → `up -d`); a full `up -d --build` crashed WSL once (Docker has ~3.4 GB).
+18. **Starting feedback emails from the AI Agent chat (F11 future work):** an approval card in the conversation and a read-only email status tool.
+19. **Office network blocks Docker Hub** (`auth.docker.io`): use the registry mirror `"registry-mirrors": ["https://mirror.gcr.io"]` in Docker Desktop → Docker Engine, or download images over a phone hotspot once.
 
 ### 5.5 Known limitations (for the README)
 - Gemini 3.5 Flash-Lite ignores temperature; repeated scoring can differ by up to ~2 final-score points.
@@ -309,6 +345,7 @@ Branch `module/8-stretch-1-candidate-identification` (from `dev`), Redmine task 
 - Very long interviews (over about 2 hours of text) are cut for segmentation.
 - The AI may classify a question's kind imperfectly (for example technical vs behavioural); the Q&A tab shows it.
 - Areas to verify and evidence gaps are saved with the report; reports written before a rule change keep their old lists until written again.
+- **F11:** the AI follows the writing guidance (short strengths, free wording) almost always but not every time; the interviewer reviews every draft before sending. Candidates who never attend their interview get no email (deferred item 14). If the AI review cannot run, the draft is marked "not checked".
 - **F7:** no liveness check yet (a clear printed photo could pass; the interviewer still sees the video and the label is advice only); twins and close look-alikes can match; an old or poor application photo lowers the score (the photo's age cannot be checked; the form asks for under 3 months); interviews scheduled before F7 have no PIN and no check; the browser face model is downloaded at the frontend build (without it the photo step has no live tips and only the server check runs).
 
 ---
@@ -326,7 +363,7 @@ Branch `module/8-stretch-1-candidate-identification` (from `dev`), Redmine task 
   cp -r ~/Downloads/hirelucent_step_X/. .
   docker compose up -d --build
   ```
-- **Tests:** `cd backend && source .venv/Scripts/activate && python -m pytest -q && cd ..` (647 tests at `d11e356`; on the Windows venv a few are skipped (Tesseract, `livekit`); the first run on Windows takes 1–2 minutes, do not interrupt it). Frontend: `npm run lint`, `npm run build`. Use forward slashes in Git Bash paths.
+- **Tests:** `cd backend && source .venv/Scripts/activate && python -m pytest -q && cd ..` (737 tests at `567d058`; on the Windows venv a few are skipped (Tesseract, `livekit`); the first run on Windows takes 1–2 minutes, do not interrupt it). Frontend: `npm run lint`, `npm run build`. Use forward slashes in Git Bash paths.
 - **pgAdmin (optional):** `docker compose --profile tools up -d pgadmin` → http://localhost:5050 (or http://127.0.0.1:5050); needs `PGADMIN_EMAIL` / `PGADMIN_PASSWORD` in that PC's `.env`. It is not started by `docker compose up -d` (tools profile); `COMPOSE_PROFILES=tools` in a PC's own `.env` starts it automatically there. After a Docker/WSL crash, recreate it (`--force-recreate pgadmin`) or restart Docker Desktop if the page is empty.
 - **Commits:** `<type>(<scope>): <Summary>` (≤50 chars, imperative), body bullets "- " wrapped at 72, footer `Refs #id` or `Closes #id`; multiline `git commit -m … -m …`, then `git push origin <branch>`. **Claude never commits or pushes; the owner does.**
 - **Redmine:** Textile. Daily notes `h1. *Date: dd/mm/yy*` + past-tense bullets, only work actually done; descriptions = one paragraph + `*Outcomes:*` bullets.

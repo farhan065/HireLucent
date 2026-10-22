@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.graphs.checkpointer import get_checkpointer
+from app.graphs.feedback import graph as feedback_graph
 from app.graphs.screening import store as screening_store
 from app.models import Candidate, Conversation, InterviewSession, RemovedApplication, Task
 from app.rag import store as rag_store
@@ -59,6 +60,9 @@ def delete_job(db: Session, job_id: int) -> None:
         select(InterviewSession.id).where(InterviewSession.job_id == job_id)
     )
     threads += [interview_chat_service.thread_id(session_id) for session_id in interviews]
+    # Feedback emails (F11): their drafts are kept in the graph's state too.
+    candidates = db.scalars(select(Candidate.id).where(Candidate.job_id == job_id))
+    threads += [feedback_graph.thread_id(candidate_id) for candidate_id in candidates]
 
     _delete_cv_vectors({"job_id": job_id})
     db.execute(delete(Conversation).where(Conversation.job_id == job_id))
@@ -108,6 +112,8 @@ def delete_candidate(db: Session, candidate_id: int) -> None:
     cv_path.unlink(missing_ok=True)
     if photo_path:
         photo_path.unlink(missing_ok=True)
+    # The feedback email goes with the candidate (cascade); so does its draft.
+    _delete_threads([feedback_graph.thread_id(candidate_id)])
 
     screening_store.rerank(job_id)
     log_event(logger, "candidate_deleted", candidate_id=candidate_id, job_id=job_id)

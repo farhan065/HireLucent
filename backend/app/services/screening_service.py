@@ -28,7 +28,7 @@ def start_screening(
 ) -> Task:
     """Start screening a job's waiting CVs and return the task."""
     job_service.get_job(db, job_id)
-    task_service.ensure_idle(db, job_id, exclude=(task_service.EVALUATION,))
+    task_service.ensure_idle(db, job_id, exclude=task_service.NOT_CV_WORK)
     if not store.count_to_screen(job_id):
         raise ConflictError(NOTHING_TO_SCREEN)
     return task_service.start_task(

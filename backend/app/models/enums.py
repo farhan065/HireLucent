@@ -54,9 +54,30 @@ class IdentityResult(StrEnum):
 
 
 class Decision(StrEnum):
+    """The interviewer's decision after the interview. There is no Hold:
+    a candidate not decided yet simply has no decision."""
+
     HIRE = "hire"
-    HOLD = "hold"
     REJECT = "reject"
+
+
+class FeedbackKind(StrEnum):
+    """Which email a candidate gets (the innovation feature, F11)."""
+
+    SCREENING_REJECT = "screening_reject"
+    INTERVIEW_REJECT = "interview_reject"
+    HIRE = "hire"
+    CV_UNREADABLE = "cv_unreadable"
+
+
+class FeedbackStatus(StrEnum):
+    """Where a candidate's email stands. No row means not written yet."""
+
+    WAITING_REVIEW = "waiting_review"
+    SENDING = "sending"
+    SENT = "sent"
+    FAILED = "failed"
+    DISCARDED = "discarded"
 
 
 class SessionStatus(StrEnum):

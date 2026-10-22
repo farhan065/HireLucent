@@ -51,7 +51,7 @@ def start_intake(
 ) -> Task:
     """Start fetching a job's CVs in the background and return the task."""
     job = _published_job(db, job_id)
-    task_service.ensure_idle(db, job_id, exclude=(task_service.EVALUATION,))
+    task_service.ensure_idle(db, job_id, exclude=task_service.NOT_CV_WORK)
     form_id = job.form_id
     return task_service.start_task(
         db,
@@ -291,7 +291,7 @@ def list_candidates(db: Session, job_id: int) -> list[Candidate]:
         db.scalars(
             select(Candidate)
             .where(Candidate.job_id == job_id)
-            .options(selectinload(Candidate.screening_result))
+            .options(selectinload(Candidate.screening_result), selectinload(Candidate.feedback))
             .order_by(Candidate.created_at.desc(), Candidate.id.desc())
         )
     )

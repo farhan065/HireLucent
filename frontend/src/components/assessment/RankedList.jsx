@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, LoaderCircle } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, LoaderCircle, X } from 'lucide-react'
 import { Link } from 'react-router'
 import {
   MAX_COMPARED,
@@ -9,21 +9,28 @@ import {
   unrankedReason,
 } from '../../lib/assessment.js'
 import { shortDay } from '../../lib/interviews.js'
+import { emailAction, emailState } from '../../lib/feedback.js'
 import Button from '../Button.jsx'
-import SourceChip from './SourceChip.jsx'
+import DecisionButtons from '../feedback/DecisionButtons.jsx'
+import EmailChip from '../feedback/EmailChip.jsx'
 
+// Eight columns that fit a standard laptop screen with no sideways scroll:
+// compare, rank, candidate, overall (with CV · interview), report,
+// decision, feedback email, action.
 const GRID =
-  'grid grid-cols-[24px_56px_minmax(0,1.4fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.15fr)_170px] items-center gap-4 px-6'
+  'grid grid-cols-[22px_40px_minmax(110px,1.3fr)_minmax(120px,1.3fr)_minmax(88px,0.8fr)_148px_minmax(110px,1fr)_132px] items-center gap-3.5 px-5.5'
 const LABEL = 'text-xs font-bold uppercase tracking-wider'
 const RANK_STYLES = [
   'bg-[#FFF4D6] text-[#8A5A00]',
   'bg-[#EEF1F6] text-[#44526B]',
   'bg-[#FBEBDD] text-[#8A4B00]',
 ]
-// How many strengths and weaknesses the opened row shows.
+// How many strengths and weaknesses the opened row's summary shows; the
+// rest are on the Report tab.
 const SHOWN_STRENGTHS = 2
 const SHOWN_WEAKNESSES = 1
-const SHOWN_FINDINGS = 2
+// The report status, short enough for its column.
+const SHORT_STATUS = { analysed: 'Analysed', draft: 'Draft', approved: 'Approved' }
 
 function reportTo(row) {
   return `/app/interviews/${row.session_id}/assessment`
@@ -61,15 +68,17 @@ function StatusCell({ row }) {
   const status = REPORT_STATUS[row.status]
   if (!status) {
     return (
-      <span className="self-start rounded-full bg-[#EEF1F6] px-3 py-1 text-[13px] font-semibold text-[#44526B]">
+      <span className="self-start whitespace-nowrap rounded-full bg-[#EEF1F6] px-3 py-1 text-[13px] font-semibold text-[#44526B]">
         Not evaluated
       </span>
     )
   }
   return (
     <div className="flex flex-col items-start gap-1">
-      <span className={`rounded-full px-3 py-1 text-[13px] font-semibold ${status.className}`}>
-        {row.status === 'draft' ? 'Draft' : status.label}
+      <span
+        className={`whitespace-nowrap rounded-full px-3 py-1 text-[13px] font-semibold ${status.className}`}
+      >
+        {SHORT_STATUS[row.status] ?? status.label}
       </span>
       {row.status === 'draft' && <span className="text-[12.5px]">needs your review</span>}
       {row.status === 'approved' && row.approved_at && (
@@ -79,114 +88,169 @@ function StatusCell({ row }) {
   )
 }
 
-function Claims({ title, tone, claims, limit, sessionId }) {
-  if (!claims?.length) return null
+// The feedback email of a decided candidate (F11).
+function EmailCell({ row, feedback }) {
+  if (!row.decision) {
+    return <span className="text-[13px]">{row.status === 'approved' ? 'Decide first' : '–'}</span>
+  }
+  const state = emailState(row, row.candidate_id, feedback.activity)
+  const note =
+    state === 'none' && row.decision === 'hire'
+      ? 'Selection message'
+      : state === 'none'
+        ? 'AI writes it from the report'
+        : undefined
+  return <EmailChip state={state} warnings={row.feedback_warnings} note={note} />
+}
+
+// The row's action: review a draft report, the email's action once
+// decided (the email opens on the assessment page's Decision tab), or open
+// the report.
+function ActionCell({ row, feedback }) {
+  if (row.status === 'draft') {
+    return (
+      <Button to={reportTo(row)} className="min-h-10 whitespace-nowrap px-4 text-sm">
+        Review report
+      </Button>
+    )
+  }
+  const state = row.decision ? emailState(row, row.candidate_id, feedback.activity) : null
+  const action = state ? emailAction(state) : null
+  if (action) {
+    return (
+      <Button
+        variant={action.primary ? 'primary' : 'outline'}
+        className="min-h-10 whitespace-nowrap px-4 text-sm"
+        disabled={action.write && feedback.isRunning}
+        to={action.write ? undefined : `${reportTo(row)}?tab=decision`}
+        onClick={action.write ? () => feedback.write([row.candidate_id]) : undefined}
+      >
+        {action.label === 'Review' ? 'Review email' : action.label}
+      </Button>
+    )
+  }
+  if (!row.status) return null
   return (
-    <div className="flex flex-col gap-2">
-      <span className={`${LABEL} ${tone}`}>{title}</span>
-      {claims.slice(0, limit).map((claim) => (
-        <div key={claim.id} className="flex flex-col gap-1.5 text-sm text-navy">
-          <span>{claim.text}</span>
-          <span className="flex flex-wrap gap-1.5">
-            {claim.sources.map((source, index) => (
-              <SourceChip key={index} sessionId={sessionId} source={source} />
-            ))}
-          </span>
-        </div>
-      ))}
+    <Button
+      to={reportTo(row)}
+      variant="outline"
+      className="min-h-10 whitespace-nowrap px-4 text-sm"
+    >
+      Open report
+    </Button>
+  )
+}
+
+function SummaryCard({ title, children }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5 rounded-2xl border border-[#E8EEF8] bg-white px-4.5 py-4">
+      <span className={`${LABEL} text-[#6B7890]`}>{title}</span>
+      {children}
     </div>
   )
 }
 
-// The opened row: the sum behind the overall score, the report's top
-// strengths and weaknesses with their sources, and the gaps to check.
+function Point({ text, isStrength }) {
+  const Icon = isStrength ? Check : X
+  return (
+    <span className="flex items-start gap-2.5 text-sm leading-snug text-navy">
+      <span
+        className={`mt-px flex size-5.5 shrink-0 items-center justify-center rounded-full ${
+          isStrength ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'
+        }`}
+      >
+        <Icon className="size-3.5" strokeWidth={3} aria-hidden="true" />
+      </span>
+      <span className="line-clamp-2" title={text}>
+        {text}
+      </span>
+    </span>
+  )
+}
+
+// The opened row: a short summary only (the full report, with its quotes
+// and sources, is on the Report tab). The score sum, the top strengths and
+// weakness in a line each, and what is left to check.
 function Details({ row }) {
   const parts = scoreParts(row)
   const label = SUITABILITY[row.suitability]
+  const coverage = row.coverage
+  const notExplored = (row.coverage_map ?? [])
+    .filter((entry) => entry.status === 'not_explored')
+    .map((entry) => entry.requirement_id)
+  const areas = row.areas_to_verify?.length ?? 0
+  const strengths = (row.strengths ?? []).slice(0, SHOWN_STRENGTHS)
+  const weaknesses = (row.weaknesses ?? []).slice(0, SHOWN_WEAKNESSES)
   return (
-    <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_minmax(0,1fr)] gap-5 border-b border-[#EEF2F9] pt-1.5 pr-6 pb-6 pl-34">
-      <div className="flex flex-col gap-2.5 self-start rounded-2xl border border-[#EEF2F9] bg-[#F8FAFE] p-4">
-        <span className={`${LABEL} text-[#6B7890]`}>How the score is made</span>
-        <div className="flex justify-between gap-3 text-sm">
-          <span>
-            CV score <span className="text-[12.5px]">(screening)</span>
-          </span>
+    <div className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1.5fr)_minmax(0,1.05fr)] gap-3.5 border-b border-[#EEF2F9] bg-[#FBFCFF] pt-1 pr-5.5 pb-5.5 pl-24">
+      <SummaryCard title="Score">
+        <span className="flex justify-between gap-2.5 text-sm">
+          <span>CV × 40%</span>
           <span className="whitespace-nowrap tabular-nums text-navy">
-            {oneDecimal(row.cv_score)} × 40% = <strong>{parts.cv}</strong>
+            {oneDecimal(row.cv_score)} → <strong>{parts.cv}</strong>
           </span>
-        </div>
-        <div className="flex justify-between gap-3 text-sm">
-          <span>
-            Interview score{' '}
-            <span className="text-[12.5px]">
-              ({row.answers_evaluated} {row.answers_evaluated === 1 ? 'answer' : 'answers'})
-            </span>
-          </span>
+        </span>
+        <span className="flex justify-between gap-2.5 text-sm">
+          <span>Interview × 60%</span>
           <span className="whitespace-nowrap tabular-nums text-navy">
-            {oneDecimal(row.interview_score)} × 60% = <strong>{parts.interview}</strong>
+            {oneDecimal(row.interview_score)} → <strong>{parts.interview}</strong>
           </span>
-        </div>
-        <div className="flex justify-between gap-3 border-t border-line pt-2 text-[14.5px] font-bold text-navy">
+        </span>
+        <span className="flex justify-between gap-2.5 border-t border-[#E8EEF8] pt-2 text-[14.5px] font-bold text-navy">
           <span>Overall</span>
           <span className="whitespace-nowrap tabular-nums">
             {oneDecimal(row.overall_score)} · {label?.label}
           </span>
-        </div>
-        <span className="text-[12.5px] leading-snug">
-          Interview score = average of the evaluated answers. Small talk is not counted.
         </span>
-      </div>
+      </SummaryCard>
 
-      <div className="flex min-w-0 flex-col gap-3.5">
-        <Claims
-          title="Top strengths"
-          tone="text-success"
-          claims={row.strengths}
-          limit={SHOWN_STRENGTHS}
-          sessionId={row.session_id}
-        />
-        <Claims
-          title={row.weaknesses?.length > 1 ? 'Top weakness' : 'Weakness'}
-          tone="text-danger"
-          claims={row.weaknesses}
-          limit={SHOWN_WEAKNESSES}
-          sessionId={row.session_id}
-        />
-        {!row.strengths?.length && !row.weaknesses?.length && (
-          <p className="text-sm">The report lists no strengths or weaknesses.</p>
+      <SummaryCard title="In short">
+        {strengths.map((claim) => (
+          <Point key={claim.id} text={claim.text} isStrength />
+        ))}
+        {weaknesses.map((claim) => (
+          <Point key={claim.id} text={claim.text} isStrength={false} />
+        ))}
+        {!strengths.length && !weaknesses.length && (
+          <span className="text-sm">The report lists no strengths or weaknesses.</span>
         )}
-      </div>
+      </SummaryCard>
 
-      <div className="flex flex-col gap-2.5 self-start">
-        {row.gaps?.length > 0 && (
-          <div className="rounded-2xl border border-[#F3D9A8] bg-[#FFFBF3] px-4 py-3.5 text-[13.5px] leading-snug text-[#6B3A00]">
-            <strong>
-              {row.gaps.length} evidence {row.gaps.length === 1 ? 'gap' : 'gaps'}
-            </strong>
-            {row.gaps.slice(0, SHOWN_FINDINGS).map((gap) => (
-              <span key={gap.id} className="mt-1 block">
-                {gap.text}
+      <SummaryCard title="To check">
+        <span className="text-sm text-navy">
+          {coverage && coverage.total > 0 ? (
+            <>
+              <strong>
+                {coverage.covered} of {coverage.total}
+              </strong>{' '}
+              requirements covered
+            </>
+          ) : (
+            'No requirements'
+          )}
+        </span>
+        {notExplored.length > 0 && (
+          <span className="flex flex-wrap items-center gap-1.5 text-[13px]">
+            <span>Not explored:</span>
+            {notExplored.map((id) => (
+              <span
+                key={id}
+                className="rounded-lg bg-amber-soft px-2 py-0.5 font-semibold text-amber"
+              >
+                {id}
               </span>
             ))}
-          </div>
+          </span>
         )}
-        {row.areas_to_verify?.length > 0 && (
-          <div className="rounded-2xl border border-[#EEF2F9] bg-[#F8FAFE] px-4 py-3.5 text-[13.5px] leading-snug">
-            <strong className="text-navy">
-              {row.areas_to_verify.length} {row.areas_to_verify.length === 1 ? 'area' : 'areas'} to
-              verify
-            </strong>
-            {row.areas_to_verify.slice(0, SHOWN_FINDINGS).map((area) => (
-              <span key={area.id} className="mt-1 block">
-                {area.text}
-              </span>
-            ))}
-          </div>
+        {areas > 0 && (
+          <span className="text-sm text-navy">
+            <strong>{areas}</strong> {areas === 1 ? 'area' : 'areas'} to verify
+          </span>
         )}
         <Link to={reportTo(row)} className="text-sm font-semibold text-brand hover:text-brand-dark">
           Open the full report →
         </Link>
-      </div>
+      </SummaryCard>
     </div>
   )
 }
@@ -209,14 +273,9 @@ function PickBox({ row, isPicked, canPick, onPick }) {
   )
 }
 
-function RankedRow({ row, isOpen, onToggle, isPicked, canPick, onPick }) {
+function RankedRow({ row, isOpen, onToggle, isPicked, canPick, onPick, feedback }) {
   const label = SUITABILITY[row.suitability]
   const isDraft = row.status === 'draft'
-  const coverage = row.coverage
-  const missing = [
-    coverage?.weak ? `${coverage.weak} weak` : null,
-    coverage?.not_explored ? `${coverage.not_explored} not explored` : null,
-  ].filter(Boolean)
   return (
     <>
       <div
@@ -233,8 +292,8 @@ function RankedRow({ row, isOpen, onToggle, isPicked, canPick, onPick }) {
           {row.rank}
         </span>
         <PersonToggle row={row} isOpen={isOpen} onToggle={onToggle} />
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2.5">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-display text-xl font-extrabold tabular-nums text-navy">
               {oneDecimal(row.overall_score)}
             </span>
@@ -246,42 +305,26 @@ function RankedRow({ row, isOpen, onToggle, isPicked, canPick, onPick }) {
               </span>
             )}
           </div>
-          <span aria-hidden="true" className="h-1.5 w-36 overflow-hidden rounded-full bg-[#E4EAF4]">
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-full max-w-36 overflow-hidden rounded-full bg-[#E4EAF4]"
+          >
             <span
               className={`block h-full rounded-full ${label?.bar ?? 'bg-brand'}`}
               style={{ width: `${row.overall_score}%` }}
             />
           </span>
-        </div>
-        <div className="flex flex-col gap-0.5 text-sm text-navy">
-          <span>
-            CV <strong className="tabular-nums">{oneDecimal(row.cv_score)}</strong>
+          <span className="text-[13px]">
+            CV <strong className="tabular-nums text-navy">{oneDecimal(row.cv_score)}</strong> ·
+            Interview{' '}
+            <strong className="tabular-nums text-navy">{oneDecimal(row.interview_score)}</strong>
           </span>
-          <span>
-            Interview <strong className="tabular-nums">{oneDecimal(row.interview_score)}</strong>
-          </span>
-        </div>
-        <div className="flex flex-col gap-0.5 text-[13.5px]">
-          {coverage && coverage.total > 0 ? (
-            <>
-              <span className="font-semibold text-navy">
-                {coverage.covered} of {coverage.total} covered
-              </span>
-              {missing.length > 0 && <span>{missing.join(' · ')}</span>}
-            </>
-          ) : (
-            <span>No requirements</span>
-          )}
         </div>
         <StatusCell row={row} />
+        <DecisionButtons row={row} name={row.candidate_name} onChanged={feedback.onChanged} />
+        <EmailCell row={row} feedback={feedback} />
         <div className="flex justify-end">
-          <Button
-            to={reportTo(row)}
-            variant={isDraft ? 'primary' : 'outline'}
-            className="min-h-10 whitespace-nowrap px-4 text-sm"
-          >
-            {isDraft ? 'Review report' : 'Open report'}
-          </Button>
+          <ActionCell row={row} feedback={feedback} />
         </div>
       </div>
       {isOpen && <Details row={row} />}
@@ -289,7 +332,7 @@ function RankedRow({ row, isOpen, onToggle, isPicked, canPick, onPick }) {
   )
 }
 
-function UnrankedRow({ row, evaluation, isEvaluating, onEvaluate, onWriteReport }) {
+function UnrankedRow({ row, evaluation, isEvaluating, onEvaluate, onWriteReport, feedback }) {
   let middle = <span className="text-[13.5px] leading-snug">{unrankedReason(row)}</span>
   let action = null
   if (evaluation.state === 'running') {
@@ -302,7 +345,7 @@ function UnrankedRow({ row, evaluation, isEvaluating, onEvaluate, onWriteReport 
           />
           Evaluating · {evaluation.message === 'starting' ? 'starting' : evaluation.message}
         </span>
-        <span aria-hidden="true" className="h-1.5 w-64 overflow-hidden rounded-full bg-[#E4EAF4]">
+        <span aria-hidden="true" className="h-1.5 w-full overflow-hidden rounded-full bg-[#E4EAF4]">
           <span
             className="block h-full rounded-full bg-brand transition-[width]"
             style={{ width: `${Math.max(evaluation.percent ?? 0, 4)}%` }}
@@ -336,23 +379,22 @@ function UnrankedRow({ row, evaluation, isEvaluating, onEvaluate, onWriteReport 
       </Button>
     )
   } else if (row.status && !isBusy) {
-    action = (
-      <Button
-        to={reportTo(row)}
-        variant="outline"
-        className="min-h-10 whitespace-nowrap px-4 text-sm"
-      >
-        Open report
-      </Button>
-    )
+    action = <ActionCell row={row} feedback={feedback} />
   }
+  const isApproved = row.status === 'approved'
   return (
     <div className={`${GRID} border-b border-[#EEF2F9] py-4.5 last:border-b-0`}>
       <span aria-hidden="true" />
       <span className="text-center font-bold text-[#9AA6BA]">–</span>
       <Person row={row} />
-      <div className="col-span-3">{middle}</div>
+      <div className="min-w-0">{middle}</div>
       <StatusCell row={row} />
+      {isApproved ? (
+        <DecisionButtons row={row} name={row.candidate_name} onChanged={feedback.onChanged} />
+      ) : (
+        <span aria-hidden="true" />
+      )}
+      {isApproved ? <EmailCell row={row} feedback={feedback} /> : <span aria-hidden="true" />}
       <div className="flex justify-end">{action}</div>
     </div>
   )
@@ -371,13 +413,14 @@ export default function RankedList({
   onWriteReport,
   picked,
   onPick,
+  feedback,
 }) {
   return (
     <section
       aria-label="Ranked candidates"
       className="overflow-x-auto rounded-[22px] border border-line bg-white shadow-card"
     >
-      <div className="min-w-[1040px]">
+      <div className="min-w-[920px]">
         <div
           className={`${GRID} border-b border-line bg-mist py-3.5 text-xs font-semibold uppercase tracking-wider text-[#6B7890]`}
         >
@@ -387,9 +430,9 @@ export default function RankedList({
           <span>Rank</span>
           <span>Candidate</span>
           <span>Overall</span>
-          <span>CV · Interview</span>
-          <span>Requirements</span>
           <span>Report</span>
+          <span>Decision</span>
+          <span>Feedback email</span>
           <span className="text-right">Action</span>
         </div>
         {ranked.map((row) => (
@@ -401,11 +444,12 @@ export default function RankedList({
             isPicked={picked.includes(row.session_id)}
             canPick={picked.length < MAX_COMPARED}
             onPick={onPick}
+            feedback={feedback}
           />
         ))}
         {unranked.length > 0 && (
           <>
-            <div className="border-b border-[#EEF2F9] bg-[#F8FAFE] px-6 py-3 text-xs font-semibold uppercase tracking-wider text-[#6B7890]">
+            <div className="border-b border-[#EEF2F9] bg-[#F8FAFE] px-5.5 py-3 text-xs font-semibold uppercase tracking-wider text-[#6B7890]">
               Not ranked yet
             </div>
             {unranked.map((row) => (
@@ -416,6 +460,7 @@ export default function RankedList({
                 isEvaluating={isEvaluating}
                 onEvaluate={onEvaluate}
                 onWriteReport={onWriteReport}
+                feedback={feedback}
               />
             ))}
           </>

@@ -65,6 +65,15 @@ class Assessment(TimestampMixin, Base):
         return scoring.suitability(self.overall_score)
 
     @property
+    def decision(self) -> str | None:
+        """The interviewer's decision about the candidate (F11)."""
+        return self.candidate.decision if self.candidate else None
+
+    @property
+    def feedback_status(self) -> str | None:
+        return self.candidate.feedback_status if self.candidate else None
+
+    @property
     def screening_score(self) -> float | None:
         """The candidate's final score from CV screening."""
         scores = self.candidate.scores if self.candidate else None

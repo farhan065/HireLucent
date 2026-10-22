@@ -3,6 +3,10 @@
 Screening never shortlists anyone. The interviewer adds candidates one by
 one or by a rule (top N, or a minimum final score), and can remove them at
 any time. Shortlisting changes only the status, never a score or a rank.
+
+Everyone not shortlisted counts as rejected at screening (F11). Once their
+rejection email is sent they have been told, so they can no longer be
+shortlisted; an email not sent yet is removed when they are shortlisted.
 """
 
 from sqlalchemy import select
@@ -12,11 +16,14 @@ from app.core.errors import ConflictError, NotFoundError
 from app.core.logging import get_logger, log_event
 from app.models import Candidate, ScreeningResult
 from app.models.enums import CandidateStatus
-from app.services import job_service
+from app.services import feedback_service, job_service
 
 logger = get_logger(__name__)
 
 NOT_SCORED = "Only candidates with a final score can be shortlisted."
+EMAIL_SENT = (
+    "This candidate's rejection email is already sent, so they cannot be shortlisted."
+)
 HAS_INTERVIEW = (
     "This candidate has an interview. Cancel it on the Interviews tab to change "
     "the shortlist."
@@ -33,6 +40,10 @@ def set_shortlisted(db: Session, candidate_id: int, shortlisted: bool) -> Candid
         raise ConflictError(HAS_INTERVIEW)
     if candidate.status not in SCORED:
         raise ConflictError(NOT_SCORED)
+    if shortlisted and candidate.feedback_sent:
+        raise ConflictError(EMAIL_SENT)
+    if shortlisted:
+        feedback_service.drop_unsent_email(db, candidate)
     candidate.status = CandidateStatus.SHORTLISTED if shortlisted else CandidateStatus.SCREENED
     db.commit()
     log_event(logger, "shortlist_changed", candidate_id=candidate_id, shortlisted=shortlisted)
@@ -57,6 +68,10 @@ def shortlist_by_rule(
     if top is not None:
         query = query.limit(top)
     for candidate in db.scalars(query):
+        # Someone already told they were not shortlisted is passed over.
+        if candidate.feedback_sent:
+            continue
+        feedback_service.drop_unsent_email(db, candidate)
         candidate.status = CandidateStatus.SHORTLISTED
     db.commit()
     count = _count(db, job_id)

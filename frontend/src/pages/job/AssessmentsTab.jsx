@@ -1,10 +1,12 @@
-import { CircleAlert, CircleCheck, Sparkles } from 'lucide-react'
+import { CircleAlert, CircleCheck, Mail, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router'
 import Button from '../../components/Button.jsx'
 import ConfirmDialog from '../../components/ConfirmDialog.jsx'
 import RankedList from '../../components/assessment/RankedList.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
+import DecisionRuleBar from '../../components/feedback/DecisionRuleBar.jsx'
+import EmailButtons, { EmailCounts } from '../../components/feedback/EmailButtons.jsx'
 import {
   MAX_COMPARED,
   RANK_FILTERS,
@@ -16,6 +18,7 @@ import {
   rankingSummary,
   readRanking,
 } from '../../lib/assessment.js'
+import { countStates, emailState } from '../../lib/feedback.js'
 
 function LoadingRanking() {
   return (
@@ -77,7 +80,7 @@ function Empty({ title, children, action }) {
 // interview); each row opens to show why it has its score. Draft reports are ranked
 // too and marked; interviews without an overall score follow, unranked.
 export default function AssessmentsTab() {
-  const { job, listVersion, evaluation, onChanged } = useOutletContext()
+  const { job, listVersion, evaluation, feedback, onChanged } = useOutletContext()
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('all')
@@ -124,6 +127,8 @@ export default function AssessmentsTab() {
   // Loaded again after each evaluation, and as Evaluate all moves on to the
   // next interview, so finished reports show up during the run.
   const current = evaluation.activity?.running?.result?.current ?? null
+  // The same while feedback emails are written or sent, so each one shows.
+  const feedbackCurrent = feedback.activity?.running?.result?.current ?? null
   useEffect(() => {
     let isCurrent = true
     readRanking(job.id)
@@ -136,7 +141,7 @@ export default function AssessmentsTab() {
     return () => {
       isCurrent = false
     }
-  }, [job.id, listVersion, current])
+  }, [job.id, listVersion, current, feedbackCurrent])
 
   const summary = rankingSummary(rows ?? [])
 
@@ -181,6 +186,30 @@ export default function AssessmentsTab() {
   const shownRanked = ranked.filter((row) => matchesRankFilter(row, filter))
   const shownUnranked = filter === 'all' ? unranked : []
   const counts = { all: rows.length, ...summary }
+
+  // Feedback emails (F11) of the candidates decided after the interview.
+  const decided = rows.filter((row) => row.decision)
+  const emailRows = decided.map((row) => ({
+    row,
+    state: emailState(row, row.candidate_id, feedback.activity),
+  }))
+  const person = ({ row }) => ({
+    id: row.candidate_id,
+    name: row.candidate_name,
+    label: row.decision === 'hire' ? 'Hired' : 'Rejected',
+  })
+  const toWrite = emailRows.filter((item) => ['none', 'discarded'].includes(item.state)).map(person)
+  const ready = emailRows.filter((item) => item.state === 'ready').map(person)
+  const needReview = emailRows
+    .filter((item) => ['review', 'failed'].includes(item.state))
+    .map(person)
+  const approvedRanked = ranked.filter((row) => row.status === 'approved')
+  const feedbackProps = {
+    activity: feedback.activity,
+    isRunning: feedback.isRunning,
+    write: feedback.write,
+    onChanged,
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -274,6 +303,46 @@ export default function AssessmentsTab() {
         </>
       )}
 
+      {approvedRanked.length > 0 && (
+        <DecisionRuleBar
+          key={approvedRanked.length}
+          jobId={job.id}
+          ranked={approvedRanked}
+          skipped={ranked.length - approvedRanked.length}
+          onChanged={onChanged}
+        />
+      )}
+
+      {decided.length > 0 && (
+        <section
+          aria-label="Feedback emails"
+          className="flex flex-wrap items-center justify-between gap-3.5 rounded-[18px] border border-[#E3D8FB] bg-[#FAF7FF] px-5.5 py-3.5"
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="flex size-9.5 items-center justify-center rounded-xl bg-violet-soft text-violet">
+              <Mail className="size-4.5" aria-hidden="true" />
+            </span>
+            <span className="font-display text-[15.5px] font-extrabold text-navy">
+              Feedback emails
+            </span>
+            <EmailCounts counts={countStates(emailRows.map((item) => item.state))} />
+          </div>
+          <EmailButtons
+            toWrite={toWrite}
+            ready={ready}
+            needReview={needReview}
+            isRunning={feedback.isRunning}
+            onWrite={feedback.write}
+            onSendAll={() => feedback.sendAll('interview')}
+          />
+          {feedback.error && (
+            <p role="alert" className="basis-full text-sm font-semibold text-danger">
+              {feedback.error}
+            </p>
+          )}
+        </section>
+      )}
+
       {pickedRanked.length > 0 && (
         <section
           role="status"
@@ -316,8 +385,10 @@ export default function AssessmentsTab() {
           onWriteReport={(sessionId) => evaluation.start(sessionId, { reportOnly: true })}
           picked={pickedRanked}
           onPick={pick}
+          feedback={feedbackProps}
         />
       )}
+
       {ranked.length > 0 && shownRanked.length === 0 && shownUnranked.length === 0 && (
         <p className="text-sm">No candidate matches this filter.</p>
       )}

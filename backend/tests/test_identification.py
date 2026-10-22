@@ -393,6 +393,27 @@ def test_a_file_that_is_not_an_image_is_refused() -> None:
     assert face_service.check_photo(b"not an image").problem == face_service.NOT_AN_IMAGE
 
 
+def _face(x: float, width: float) -> list[float]:
+    """A YuNet row: box, five landmarks and the score."""
+    return [x, 50, width, width * 1.2] + [0] * 10 + [0.95]
+
+
+def test_small_faces_far_behind_are_ignored() -> None:
+    faces = np.array([_face(300, 200), _face(20, 40), _face(600, 60)])
+
+    face, others = face_service.main_face(faces)
+
+    assert face[2] == 200 and others == 0
+
+
+def test_a_second_person_in_front_counts() -> None:
+    faces = np.array([_face(50, 120), _face(300, 200)])
+
+    face, others = face_service.main_face(faces)
+
+    assert face[2] == 200 and others == 1
+
+
 def test_a_stored_photo_is_a_small_jpeg() -> None:
     image = np.full((1600, 1200, 3), 128, dtype=np.uint8)
 

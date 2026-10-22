@@ -221,6 +221,12 @@ class AssessmentOut(BaseModel):
     areas_to_verify: list[Claim] | None = None
     approved_at: datetime | None = None
     approved_by_name: str | None = None
+    decision: Literal["hire", "reject"] | None = Field(
+        default=None, description="The interviewer's decision (F11), after approval."
+    )
+    feedback_status: str | None = Field(
+        default=None, description="The candidate's feedback email; empty while not written."
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -260,6 +266,13 @@ class RankedAssessment(BaseModel):
     gaps: list[Claim] | None
     areas_to_verify: list[Claim] | None
     approved_at: datetime | None
+    decision: Literal["hire", "reject"] | None = Field(
+        default=None, description="The interviewer's decision, after the report is approved."
+    )
+    feedback_status: str | None = Field(
+        default=None, description="The candidate's feedback email; empty while not written."
+    )
+    feedback_warnings: int = 0
 
 
 class ApproveAllResult(BaseModel):

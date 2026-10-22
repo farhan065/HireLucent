@@ -1,7 +1,6 @@
 import { ChevronDown, ChevronRight, CircleCheck, CircleMinus, CircleX } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import StatusChip from '../StatusChip.jsx'
-import { canOpenUnranked } from '../../lib/results.js'
 import { UnrankedDetails } from './CvFacts.jsx'
 import DeleteCandidateButton from './DeleteCandidateButton.jsx'
 import {
@@ -41,7 +40,7 @@ export function MatchCounts({ counts }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {parts.map(([key, label, style]) => (
-        <span key={key} className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${style}`}>
+        <span key={key} className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${style}`}>
           {counts[key]} {label}
         </span>
       ))}
@@ -255,9 +254,7 @@ export default function MatchRanking({
                 key={candidate.id}
                 candidate={candidate}
                 grid={ROW}
-                details={
-                  canOpenUnranked(candidate) ? <UnrankedDetails candidate={candidate} /> : null
-                }
+                details={<UnrankedDetails candidate={candidate} />}
                 isOpen={openId === candidate.id}
                 onToggle={() => setOpenId(openId === candidate.id ? null : candidate.id)}
                 actions={

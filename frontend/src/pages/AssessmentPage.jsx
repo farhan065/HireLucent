@@ -14,6 +14,7 @@ import {
 import QuestionBankCard from '../components/assessment/QuestionBankCard.jsx'
 import QuestionCard from '../components/assessment/QuestionCard.jsx'
 import ReportView from '../components/assessment/ReportView.jsx'
+import DecisionTab from '../components/feedback/DecisionTab.jsx'
 import { useEvaluation } from '../hooks/useEvaluation.js'
 import {
   KIND_FILTERS,
@@ -35,11 +36,20 @@ import {
 import { readInterview, readTranscript } from '../lib/room.js'
 import { whenLabel } from '../lib/transcript.js'
 
-const TABS = ['report', 'qa', 'coverage']
+const TABS = ['report', 'qa', 'coverage', 'decision']
 // The Report tab's badge for each assessment status.
 const REPORT_BADGES = {
   draft: { label: 'Draft', className: 'bg-amber-soft text-amber' },
   approved: { label: 'Approved', className: 'bg-success-soft text-success' },
+}
+// The Decision tab's badge: where the decision and its email stand.
+const DECISION_BADGES = {
+  decided: { label: 'Email not written', className: 'bg-[#EEF1F6] text-[#44526B]' },
+  waiting_review: { label: 'Email ready', className: 'bg-success-soft text-success' },
+  failed: { label: 'Not sent', className: 'bg-danger-soft text-danger' },
+  sending: { label: 'Sending', className: 'bg-tint text-brand-dark' },
+  sent: { label: 'Email sent', className: 'bg-tint text-brand-dark' },
+  discarded: { label: 'Discarded', className: 'bg-[#EEF1F6] text-[#44526B]' },
 }
 // The header chip for each assessment status.
 const STATUS_CHIPS = {
@@ -446,8 +456,14 @@ export default function AssessmentPage() {
   const notExplored = coverage.filter((entry) => entry.status === 'not_explored').length
   const isReport = hasReport(assessment)
   // The page opens on the report once there is one, else on the answers.
-  const currentTab = tab ?? (isReport ? 'report' : 'qa')
+  const currentTab =
+    tab === 'decision' && assessment?.status !== 'approved'
+      ? 'report'
+      : (tab ?? (isReport ? 'report' : 'qa'))
   const answersEvaluated = assessment ? qaSummary(assessment.qa_evaluations).evaluated : 0
+  const isApproved = assessment?.status === 'approved'
+  const decisionBadge =
+    DECISION_BADGES[assessment?.feedback_status ?? (assessment?.decision ? 'decided' : '')]
 
   let body
   if (isRunning) {
@@ -615,6 +631,10 @@ export default function AssessmentPage() {
                 notExplored ? `${notExplored} not explored` : null,
                 'bg-warning-soft text-warning',
               ],
+              // The decision and the feedback email (F11), once the report is approved.
+              ...(isApproved
+                ? [['decision', 'Decision', decisionBadge?.label ?? null, decisionBadge?.className]]
+                : []),
             ].map(([key, label, badge, badgeClass]) => (
               <button
                 key={key}
@@ -652,6 +672,13 @@ export default function AssessmentPage() {
                 onWriteReport={() => evaluation.start(id, { reportOnly: true })}
               />
             )
+          ) : currentTab === 'decision' && isApproved ? (
+            <DecisionTab
+              jobId={info.job_id}
+              assessment={assessment}
+              candidateName={interview.candidate_name}
+              onChanged={loadAssessment}
+            />
           ) : currentTab === 'qa' ? (
             <QaTab
               info={info}

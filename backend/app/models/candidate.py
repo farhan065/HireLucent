@@ -19,6 +19,7 @@ from app.models.enums import CandidateStatus
 
 if TYPE_CHECKING:
     from app.models.assessment import Assessment
+    from app.models.feedback import CandidateFeedback
     from app.models.interview import InterviewSession
     from app.models.job import Job
 
@@ -58,7 +59,9 @@ class Candidate(TimestampMixin, Base):
     face_problem: Mapped[str | None] = mapped_column(String(30))
     face_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # Final human decision (step 13).
+    # Final human decision: hire or reject after the interview, set by the
+    # interviewer (F11). A candidate rejected at screening gets "reject"
+    # when their feedback email is sent.
     decision: Mapped[str | None] = mapped_column(String(30))
     decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -71,9 +74,30 @@ class Candidate(TimestampMixin, Base):
     sessions: Mapped[list["InterviewSession"]] = relationship(  
         back_populates="candidate", cascade="all, delete-orphan", passive_deletes=True
     )
-    assessments: Mapped[list["Assessment"]] = relationship(  
+    assessments: Mapped[list["Assessment"]] = relationship(
         back_populates="candidate", cascade="all, delete-orphan", passive_deletes=True
     )
+    # The feedback email (F11), once one is written.
+    feedback: Mapped["CandidateFeedback | None"] = relationship(
+        back_populates="candidate", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    @property
+    def feedback_status(self) -> str | None:
+        """waiting_review, sending, sent, failed or discarded; empty while
+        no email has been written."""
+        return self.feedback.status if self.feedback else None
+
+    @property
+    def feedback_warnings(self) -> int:
+        """How many fairness warnings the email's draft still has."""
+        return len(self.feedback.warnings or []) if self.feedback else 0
+
+    @property
+    def feedback_sent(self) -> bool:
+        """The candidate has been told; their decision and shortlist are
+        locked."""
+        return self.feedback_status in ("sending", "sent")
 
     @property
     def has_photo(self) -> bool:

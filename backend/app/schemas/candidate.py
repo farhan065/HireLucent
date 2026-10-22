@@ -66,6 +66,18 @@ class CandidateSummary(BaseModel):
     face_problem: str | None = Field(
         default=None, description="Why the application photo could not be used."
     )
+    decision: str | None = Field(
+        default=None, description="hire or reject. Set after the interview, or when a "
+        "screening rejection email is sent.",
+    )
+    feedback_status: str | None = Field(
+        default=None,
+        description="The feedback email: waiting_review, sending, sent, failed or "
+        "discarded. Empty while not written.",
+    )
+    feedback_warnings: int = Field(
+        default=0, description="Fairness warnings still on the email's draft."
+    )
     created_at: datetime
 
 

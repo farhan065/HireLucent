@@ -30,7 +30,7 @@ from app.graphs.final_assessment import graph as final_graph
 from app.graphs.final_assessment import scoring
 from app.graphs.qa_analysis import coverage as coverage_rules
 from app.graphs.qa_analysis.graph import answers_to_judge, get_qa_analysis_graph
-from app.models import Assessment, InterviewSession, Job, Task, TranscriptTurn
+from app.models import Assessment, Candidate, InterviewSession, Job, Task, TranscriptTurn
 from app.models.enums import AssessmentStatus, SessionStatus
 from app.schemas.assessment import ReviewRequest
 from app.services import knowledge_service, report_pdf, session_service, task_service
@@ -354,6 +354,9 @@ def _ranked_row(session: InterviewSession) -> dict:
         "gaps": report.gaps if report else None,
         "areas_to_verify": report.areas_to_verify if report else None,
         "approved_at": report.approved_at if report else None,
+        "decision": getattr(candidate, "decision", None),
+        "feedback_status": getattr(candidate, "feedback_status", None),
+        "feedback_warnings": getattr(candidate, "feedback_warnings", 0),
     }
 
 
@@ -371,7 +374,7 @@ def ranked_assessments(db: Session, job_id: int) -> list[dict]:
             InterviewSession.status == SessionStatus.COMPLETED,
         )
         .options(
-            selectinload(InterviewSession.candidate),
+            selectinload(InterviewSession.candidate).selectinload(Candidate.feedback),
             selectinload(InterviewSession.assessment),
         )
     ).all()

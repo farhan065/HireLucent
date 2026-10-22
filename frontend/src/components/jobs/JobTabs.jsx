@@ -2,6 +2,10 @@ import { Check } from 'lucide-react'
 import { Link } from 'react-router'
 import { jobStage, totalCandidates } from '../../lib/jobs.js'
 
+function emailsLabel(count) {
+  return `${count} ${count === 1 ? 'email' : 'emails'} to send`
+}
+
 function Tab({ number, label, to, isCurrent, isDone, badge }) {
   const isLocked = !to
   const circle = isCurrent
@@ -50,7 +54,8 @@ function Tab({ number, label, to, isCurrent, isDone, badge }) {
 // and above its conversation with the AI Agent. "today" is the number of
 // interviews still to come today, "inWaitingRoom" the candidates waiting now
 // and "toReview" the draft reports waiting for the interviewer's review.
-// "interviewsDone" and "assessmentsDone" tick the last two stages.
+// "screeningEmails" and "interviewEmails" count the feedback emails still to
+// send (F11). "interviewsDone" and "assessmentsDone" tick the last two stages.
 export default function JobTabs({
   job,
   threadId,
@@ -58,6 +63,8 @@ export default function JobTabs({
   today = 0,
   inWaitingRoom = 0,
   toReview = 0,
+  screeningEmails = 0,
+  interviewEmails = 0,
   interviewsDone = false,
   assessmentsDone = false,
   current,
@@ -87,6 +94,11 @@ export default function JobTabs({
       label: 'Screening',
       to: `/app/jobs/${job.id}/screening`,
       isDone: stage === 'cvs_screened' || stage === 'interviews_scheduled',
+      badge: screeningEmails > 0 && (
+        <span className="rounded-full bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber">
+          {emailsLabel(screeningEmails)}
+        </span>
+      ),
     },
     {
       key: 'interviews',
@@ -114,19 +126,21 @@ export default function JobTabs({
       // The ranked candidates, once the job is published.
       to: isPublished ? `/app/jobs/${job.id}/assessments` : undefined,
       isDone: assessmentsDone,
-      badge: toReview > 0 && (
+      badge: (toReview > 0 || interviewEmails > 0) && (
         <span className="rounded-full bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber">
-          {toReview} to review
+          {[
+            toReview > 0 && `${toReview} to review`,
+            interviewEmails > 0 && emailsLabel(interviewEmails),
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </span>
       ),
     },
   ]
 
   return (
-    <nav
-      aria-label="Job stages"
-      className="flex gap-8 overflow-x-auto border-b-2 border-line"
-    >
+    <nav aria-label="Job stages" className="flex gap-8 overflow-x-auto border-b-2 border-line">
       {tabs.map((tab, index) => (
         <Tab
           key={tab.key}

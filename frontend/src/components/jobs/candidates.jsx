@@ -102,7 +102,12 @@ export function RowActions({ chip, children }) {
 }
 
 const UNRANKED = {
-  excluded: { tone: 'warning', label: 'Excluded', color: 'text-warning', tint: 'bg-warning-soft/40' },
+  excluded: {
+    tone: 'warning',
+    label: 'Excluded',
+    color: 'text-warning',
+    tint: 'bg-warning-soft/40',
+  },
   screening_failed: {
     tone: 'danger',
     label: 'Could not be read',
@@ -112,9 +117,19 @@ const UNRANKED = {
 }
 
 // A candidate without a rank in a ranking: excluded, unreadable, or not
-// screened to the end yet. "grid" is the column layout of the ranking.
-// With "details", the row opens like a ranked row to show them.
-export function UnrankedRow({ candidate, grid, actions, details = null, isOpen = false, onToggle }) {
+// screened to the end yet. "grid" is the column layout of the ranking. Like a
+// ranked row it shows only the name; the arrow opens "details", which say
+// why it is not ranked. "extra" is one more column before the actions, when
+// the ranking has one.
+export function UnrankedRow({
+  candidate,
+  grid,
+  actions,
+  details = null,
+  isOpen = false,
+  onToggle,
+  extra = null,
+}) {
   const status = UNRANKED[candidate.status] ?? {
     tone: 'info',
     label: candidate.requirement_matches
@@ -125,26 +140,11 @@ export function UnrankedRow({ candidate, grid, actions, details = null, isOpen =
     color: '',
     tint: '',
   }
-  const notes =
-    candidate.status === 'excluded'
-      ? (candidate.excluded_reason ?? '').split('\n')
-      : candidate.status === 'screening_failed'
-        ? [candidate.screening_error]
-        : [
-            `Not ${candidate.requirement_matches ? 'scored' : 'matched'} yet. Screen the CVs to finish.`,
-          ]
   const Chevron = isOpen ? ChevronDown : ChevronRight
   const who = (
     <>
       <Initials name={candidate.full_name} />
-      <div className="min-w-0">
-        <p className="text-[15px] font-semibold text-navy">{candidate.full_name}</p>
-        {notes.map((note) => (
-          <p key={note} className={`text-[13px] ${status.color}`}>
-            {note}
-          </p>
-        ))}
-      </div>
+      <span className="truncate text-[15px] font-semibold text-navy">{candidate.full_name}</span>
     </>
   )
   return (
@@ -174,6 +174,7 @@ export function UnrankedRow({ candidate, grid, actions, details = null, isOpen =
         <div className="hidden lg:block">
           <StatusChip tone={status.tone}>{status.label}</StatusChip>
         </div>
+        {extra && <div className="hidden lg:block">{extra}</div>}
         <RowActions chip={status}>{actions}</RowActions>
       </div>
       {details && isOpen && (
