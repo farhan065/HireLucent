@@ -1,44 +1,44 @@
 # HireLucent handoff (update this every time you switch accounts)
 
-**Last updated:** 22 Oct 2026, 14:40 (Dhaka) · **by:** the account that built F11 · **PC:** office
+**Last updated:** 23 Oct 2026, 01:45 (Dhaka) · **by:** the account that built F8 · **PC:** DESKTOP-8KPB4FM
 
 ## Git state
-- Branch `module/7-innovation`: Module 7 (F11, Candidate Feedback Composer) complete. F11 commits `028a2c8` … `4d9838d`, then the F7 fix `567d058` ("Send only the face area of the photo", `Refs #650400`), then this docs commit.
-- Module 8 Stretch 1 (F7) is merged into `dev` (PR #6).
-- Next: **pull request `module/7-innovation` → `dev`**, then create the next stretch branch from `dev` (`module/8-stretch-<n>-<feature>`).
+- Branch `module/8-stretch-2-cv-claim-verification`: Module 8 Stretch 2 (F8, CV Claim Verification) complete. Commits `ea82956` (migration and column), `3e06ab0` (LangGraph 4 claim nodes), `96fb556` (endpoints), `b3a66bb` (PDF section C), `5b49dcb` (CV claims tab), `3ad4d71` (README and diagram, `Closes #650678`), then this docs commit.
+- Module 7 (F11) is merged into `dev` (PR #7, `63ac3ec`); F7 is merged (PR #6).
+- Next: **pull request `module/8-stretch-2-cv-claim-verification` → `dev`** (text given in the chat), then create the next stretch branch from `dev`.
 - Uncommitted work: none
-- Tests: 737 backend tests (1 skipped in the container; a few more on the Windows venv: Tesseract, `livekit`); frontend lint and build clean
+- Tests: 778 backend tests (1 skipped); frontend lint and build clean
 
-## Done in the last sessions (20–22 Oct)
-- **F11 Candidate Feedback Composer** (Module 7, Story #650131), tested by the owner:
-  - Screening: everyone not shortlisted is rejected; **Feedback emails** sub-tab; Status and Feedback email columns in the Final ranking; shortlist locked once the rejection email is sent
-  - Assessments: Hire or Reject (no Hold) after the report is approved, per row or **Decide by rule**; 8-column list with summary cards; **Decision** tab on the assessment page
-  - LangGraph 5 writes each email (AI for rejections, fixed messages for Hire and CV not readable), checks it in code and with an AI review, rewrites up to 3 times, keeps warnings naming the exact words, waits for the interviewer, sends through mcp-google `send_email`
-  - Strengths: CV profile first (name removed), short summary, left out when empty; greeting by the name the candidate goes by
-  - Migration `0016` (`candidate_feedback`); 7 new endpoints; README section, design doc, LangGraph 5 diagram, rationale draft
-- Redmine: all Module 7 task descriptions and daily notes (20/10, 21/10), the five feature descriptions and the module description given and posted by the owner
-- Backend explainer PDF for the owner: `HireLucent_F11_Backend_Story_30221_Farhan.pdf` (not in the repo)
-- Office PC moved to `module/7-innovation` (22 Oct)
+## Done in the last session (22–23 Oct)
+- **F8 CV Claim Verification** (Module 8, Feature 41 #650674, task #650678):
+  - Every CV claim (total years, each job, project, certification, education entry, skill) compared with the interview: contradiction, unverified, not discussed or consistent; points to check before deciding, never accusations; never change scores, the report or the decision; never in F11 emails
+  - LangGraph 4: `extract_claims` → `judge_claims` (AI) → `check_claims` (code, up to 3 attempts) → `save_claims`, before the report; claims-only run on thread `cv-claims-{id}` for **Check CV claims** (old interviews) and **Check again** (AI was down)
+  - Migration `0017` (`assessments.claim_checks`); 2 new endpoints; CV claims tab after Requirement coverage; Checked / Dismissed with a note; warning when approving with an open contradiction (also in Approve all drafts); progress step "Checking CV claims"; PDF section C; README section; LangGraph 4 diagram redrawn
+- Mockups on the design canvas: `M8ClaimsTab`, `M8ClaimsStates`, `M8ClaimsPdf` (approved 23 Oct; owner may ask for changes later)
+- Redmine: task #650678 description and daily note (dated 22/10/26, owner to confirm), Feature 41 description given
+- The editable `LangGraph_4_Final_Assessment_Farhan_30221.drawio` was given to the owner (not in the repo)
+- `project_context.md` updated (§5.8 and the sections it lists)
 
 ## In progress
-- Nothing half-built.
+- Nothing half-built. The owner still runs the F8 test checklist (Check CV claims on an old interview, Checked/Dismissed, Evaluate again progress, approval warning, PDF section C, logs).
 
 ## Next step
-1. Open the PR `module/7-innovation` → `dev` and merge it.
-2. **New chat: the remaining stretch features F8–F10**, each on its own branch from `dev`. Ask for the Redmine ids first.
+1. Merge the PR `module/8-stretch-2-cv-claim-verification` → `dev`, then `git checkout dev && git pull origin dev` (close the LangGraph 4 PDF in VS Code first: Windows locks open files and the checkout stops).
+2. **New chat: F9 Comprehensive Candidate Interview Scoring**, branch `module/8-stretch-3-interview-scoring` from `dev`. Claude can write `claude/starting_context_module_8_stretch_3.md` first. Ask for the Redmine ids.
+3. Then F10, Module 9 (integration, testing, README, architecture diagrams), Module 10 (submission), before the demo on 27 Oct.
 
-## Decisions made for F11 (already in project_context.md §5.7)
-- Both stages; Hire or Reject only; decisions only after approval; locked once the email is sent.
-- Free wording, safety checks only (code) plus one AI review of meaning; no point limits.
-- Buttons only; chatbot sending is future work.
-- Send anyway after a confirm; Send all passed skips drafts with warnings.
+## Decisions made for F8 (in project_context.md §5.8)
+- Every claim; inside Evaluate; nodes in LangGraph 4; tab + PDF only; not in areas to verify.
+- Checked / Dismissed with an optional note; approval warns, never blocks.
+- No follow-up line, no count tiles; interview box shows the question asked; not-discussed claims as closed chips.
+- One-time Check CV claims for old interviews; Check again when only the claim step failed.
 
 ## Reminders
 - **Keep reminding (owner's request):** the question inferred from the candidate's answer when the interviewer's question is lost from the transcript (deferred item 12). Not built.
 - **PENDING (owner decides):** candidates who never attend their interview get no feedback email (deferred item 14).
 - The owner reviews `docs/innovation_rationale.md` and tells Claude if anything should change.
-- Re-evaluate in the UI is not built (deferred item 13); workaround `POST /interviews/{id}/evaluate` from http://localhost:8000/docs.
 - **Google sign-in expired on the office PC on 22 Oct.** Renew before the demo on 27 Oct: `python -m scripts.google_auth` in `backend/`, then `docker compose restart backend mcp-google mcp-blogger`. The office PC needs the `secrets/` folder (copy by USB, never by chat or GitHub).
+- **Windows locks open files:** close a PDF or file open in VS Code before `cp -r` from a zip or `git checkout` of another branch ("Device or resource busy" / "Unlink … failed").
 - **Office network blocks Docker Hub:** add `"registry-mirrors": ["https://mirror.gcr.io"]` in Docker Desktop → Settings → Docker Engine, or download the images once over a phone hotspot.
 - **Google Form:** extra questions must not have "name", "email", "photo" or "consent" in their titles, and must not be file uploads (HireLucent finds its questions by these words and takes the first non-photo upload as the CV).
 - **8 GB PC:** build one image at a time: `docker compose down` → `docker compose build backend` → `docker compose build frontend` → `docker compose up -d`. A full `up -d --build` crashed WSL once.
