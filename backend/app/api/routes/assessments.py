@@ -15,6 +15,7 @@ from app.schemas.assessment import (
     AssessmentOut,
     ClaimReviewRequest,
     EvaluationActivity,
+    InterviewConsistency,
     QuestionSuggestion,
     RankedAssessment,
     ReviewRequest,
@@ -145,6 +146,21 @@ def list_ranked_assessments(job_id: int, db: Session = Depends(get_db)) -> list[
     The rest follow unranked: not evaluated yet, only analysed, or without
     an overall score."""
     return evaluation_service.ranked_assessments(db, job_id)
+
+
+@job_router.get(
+    "/interview-consistency",
+    response_model=InterviewConsistency,
+    summary="Compare how the job's interviews were run",
+    responses={404: {"model": ErrorResponse, "description": "Job not found"}},
+)
+def read_interview_consistency(job_id: int, db: Session = Depends(get_db)) -> dict:
+    """Were the job's candidates interviewed in a similar way (F10)? From the
+    evaluated interviews with an interview quality check: the typical
+    interview (middle length, number of questions and candidate share), how
+    many interviews explored each requirement, and every interview with how
+    it differs from the rest. Empty until 2 interviews are checked."""
+    return evaluation_service.interview_consistency(db, job_id)
 
 
 @job_router.post(
@@ -325,3 +341,35 @@ def review_cv_claim(
     claim can be marked. Nothing else changes: no score, the report or the
     decision."""
     return evaluation_service.review_claim(db, session_id, claim_id, payload, principal.subject_id)
+
+
+@session_router.post(
+    "/{session_id}/assessment/quality",
+    response_model=TaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Check how the interview was run",
+    responses={
+        404: {"model": ErrorResponse, "description": "Interview not found or not evaluated"},
+        409: {
+            "model": ErrorResponse,
+            "description": "No report yet, the quality is already checked, "
+            "or an evaluation is running",
+        },
+    },
+)
+def check_interview_quality(
+    session_id: int,
+    background_tasks: BackgroundTasks,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+) -> Task:
+    """Starts in the background and returns a task, like an evaluation (its
+    result is marked quality_only). Checks the interview's questions, the
+    requirements they explored and the speaking time, and writes
+    recommendations for the next interview, for an interview evaluated
+    before interview quality checks existed or whose recommendations could
+    not be written. The report, its approval and the decision are not
+    touched."""
+    return evaluation_service.start_quality_check(
+        db, background_tasks, session_id, principal.subject_id
+    )
