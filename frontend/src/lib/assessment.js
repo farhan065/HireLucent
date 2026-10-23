@@ -19,6 +19,18 @@ export function checkClaims(sessionId) {
   return apiRequest(`/interviews/${sessionId}/assessment/claims`, { method: 'POST' })
 }
 
+// Checks how the interview was run (F10), without touching the report (an
+// interview evaluated before interview quality checks, or Check again).
+export function checkQuality(sessionId) {
+  return apiRequest(`/interviews/${sessionId}/assessment/quality`, { method: 'POST' })
+}
+
+// How similar the job's checked interviews were (F10): see the backend's
+// InterviewConsistency.
+export function readConsistency(jobId) {
+  return apiRequest(`/jobs/${jobId}/interview-consistency`)
+}
+
 // Marks a contradiction or unverified claim: action is 'checked',
 // 'dismissed' or 'reopen'. Returns the assessment.
 export function reviewClaim(sessionId, claimId, action, note = '') {
@@ -71,6 +83,8 @@ export function evaluationOf(activity, sessionId) {
     const current = running.result?.current ?? ids[0]
     // Only the CV claims are being checked: the rest of the page stays.
     if (current === sessionId && running.result?.claims_only) return { state: 'checking_claims' }
+    // Only the interview quality is being checked (F10).
+    if (current === sessionId && running.result?.quality_only) return { state: 'checking_quality' }
     if (current === sessionId) {
       return { state: 'running', message: answersPart(running.message), percent: running.percent }
     }
@@ -79,6 +93,9 @@ export function evaluationOf(activity, sessionId) {
   const failure = activity?.last?.result?.failures?.find((item) => item.session_id === sessionId)
   if (failure && activity.last.result.claims_only) {
     return { state: 'claims_failed', reason: failure.reason }
+  }
+  if (failure && activity.last.result.quality_only) {
+    return { state: 'quality_failed', reason: failure.reason }
   }
   if (failure) return { state: 'failed', reason: failure.reason }
   // A run of this one interview that failed outright keeps only its message.
@@ -517,4 +534,52 @@ export function comparedRequirements(rows) {
     }),
   )
   return [...seen.values()]
+}
+
+// --- Interview quality (F10) ---
+
+export const QUALITY_LABELS = {
+  good: { label: 'Good', className: 'bg-success-soft text-success' },
+  needs_improvement: { label: 'Needs improvement', className: 'bg-amber-soft text-amber' },
+  poor: { label: 'Poor', className: 'bg-danger-soft text-danger' },
+}
+
+// The colour of a quality part's bar: the same bands as the label.
+export function qualityBar(score) {
+  if (score == null) return 'bg-[#9AA6BA]'
+  if (score >= 70) return 'bg-brand'
+  return score >= 50 ? 'bg-[#D97706]' : 'bg-danger'
+}
+
+// The badge of the Interview quality tab: the rounded score, or why there
+// is none.
+export function qualityBadge(quality, isChecking) {
+  if (isChecking) return ['Checking…', 'bg-tint text-brand-dark']
+  if (!quality) return ['Not checked', 'bg-[#EEF1F6] text-[#44526B]']
+  const tone = QUALITY_LABELS[quality.label]?.className ?? 'bg-[#EEF1F6] text-[#44526B]'
+  return [quality.score == null ? '–' : Math.round(quality.score), tone]
+}
+
+// "12:40" from milliseconds since the interview started.
+export function clockTime(ms) {
+  const seconds = Math.max(Math.floor((ms ?? 0) / 1000), 0)
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+// "3:00" for a length in milliseconds.
+export function lengthOf(ms) {
+  const seconds = Math.max(Math.round((ms ?? 0) / 1000), 0)
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+// "9 min 40 s" for a speaking time.
+export function minutesSeconds(ms) {
+  const seconds = Math.max(Math.round((ms ?? 0) / 1000), 0)
+  const minutes = Math.floor(seconds / 60)
+  return minutes ? `${minutes} min ${seconds % 60} s` : `${seconds} s`
+}
+
+// This interview's row of the job's consistency view, or null.
+export function consistencyOf(consistency, sessionId) {
+  return consistency?.interviews?.find((item) => item.session_id === sessionId) ?? null
 }

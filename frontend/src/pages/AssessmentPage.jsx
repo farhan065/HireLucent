@@ -7,6 +7,7 @@ import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
 import ClaimsTab from '../components/assessment/ClaimsTab.jsx'
 import InterviewPerformance from '../components/assessment/InterviewPerformance.jsx'
+import QualityTab from '../components/assessment/QualityTab.jsx'
 import CoverageTable from '../components/assessment/CoverageTable.jsx'
 import {
   EvaluatingCard,
@@ -27,6 +28,7 @@ import {
   kindCounts,
   needsAttention,
   openClaims,
+  qualityBadge,
   SUITABILITY,
   hasReport,
   interviewNote,
@@ -40,7 +42,7 @@ import {
 import { readInterview, readTranscript } from '../lib/room.js'
 import { whenLabel } from '../lib/transcript.js'
 
-const TABS = ['report', 'performance', 'qa', 'coverage', 'claims', 'decision']
+const TABS = ['report', 'performance', 'qa', 'coverage', 'claims', 'quality', 'decision']
 // The Report tab's badge for each assessment status.
 const REPORT_BADGES = {
   draft: { label: 'Draft', className: 'bg-amber-soft text-amber' },
@@ -460,6 +462,7 @@ export default function AssessmentPage() {
   const isCompleted = interview.status === 'completed'
   const isRunning = state.state === 'running'
   const isCheckingClaims = state.state === 'checking_claims'
+  const isCheckingQuality = state.state === 'checking_quality'
   const isQueued = state.state === 'queued'
   const coverage = assessment?.coverage_map ?? []
   const notExplored = coverage.filter((entry) => entry.status === 'not_explored').length
@@ -467,7 +470,7 @@ export default function AssessmentPage() {
   // The page opens on the report once there is one, else on the answers.
   const isHiddenTab =
     (tab === 'decision' && assessment?.status !== 'approved') ||
-    ((tab === 'claims' || tab === 'performance') && !isReport)
+    ((tab === 'claims' || tab === 'performance' || tab === 'quality') && !isReport)
   const currentTab = isHiddenTab ? 'report' : (tab ?? (isReport ? 'report' : 'qa'))
   const answersEvaluated = assessment ? qaSummary(assessment.qa_evaluations).evaluated : 0
   const isApproved = assessment?.status === 'approved'
@@ -480,7 +483,11 @@ export default function AssessmentPage() {
     assessment?.claim_checks?.status !== 'checked'
       ? ['Not checked', 'bg-[#EEF1F6] text-[#44526B]']
       : toCheck
-        ? [`${toCheck} to check`, 'bg-amber-soft text-amber']
+        ? [
+            toCheck,
+            'bg-amber-soft text-amber',
+            `${toCheck} ${toCheck === 1 ? 'claim' : 'claims'} to check`,
+          ]
         : [null, '']
   // The Interview performance tab's badge (F9): the interview score, "–" when
   // there is not enough evidence, or "Not available" before F9.
@@ -575,7 +582,7 @@ export default function AssessmentPage() {
             <FileText className="size-4.5" aria-hidden="true" />
             View transcript
           </Button>
-          {assessment && !isRunning && !isQueued && !isCheckingClaims && (
+          {assessment && !isRunning && !isQueued && !isCheckingClaims && !isCheckingQuality && (
             <Button
               variant="soft"
               disabled={evaluation.isRunning}
@@ -635,7 +642,7 @@ export default function AssessmentPage() {
           <div
             role="tablist"
             aria-label="Assessment"
-            className="flex flex-wrap gap-1 border-b border-line"
+            className="flex flex-nowrap gap-0.5 overflow-x-auto overflow-y-hidden border-b border-line [scrollbar-width:thin]"
           >
             {[
               [
@@ -650,23 +657,35 @@ export default function AssessmentPage() {
               [
                 'coverage',
                 'Requirement coverage',
-                notExplored ? `${notExplored} not explored` : null,
+                notExplored || null,
                 'bg-warning-soft text-warning',
+                `${notExplored} ${notExplored === 1 ? 'requirement' : 'requirements'} not explored`,
               ],
               // The CV claims compared with the interview (F8), once there is a report.
               ...(isReport ? [['claims', 'CV claims', ...claimsBadge]] : []),
+              // How the interview itself was run (F10), once there is a report.
+              ...(isReport
+                ? [
+                    [
+                      'quality',
+                      'Interview quality',
+                      ...qualityBadge(assessment.interview_quality, isCheckingQuality),
+                    ],
+                  ]
+                : []),
               // The decision and the feedback email (F11), once the report is approved.
               ...(isApproved
                 ? [['decision', 'Decision', decisionBadge?.label ?? null, decisionBadge?.className]]
                 : []),
-            ].map(([key, label, badge, badgeClass]) => (
+            ].map(([key, label, badge, badgeClass, badgeTitle]) => (
               <button
                 key={key}
                 type="button"
                 role="tab"
                 aria-selected={currentTab === key}
                 onClick={() => showTab(key)}
-                className={`-mb-px inline-flex min-h-11 items-center gap-2 border-b-2 px-4 text-[15px] font-semibold ${
+                title={badgeTitle}
+                className={`-mb-px inline-flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-sm font-semibold whitespace-nowrap ${
                   currentTab === key
                     ? 'border-brand text-navy'
                     : 'border-transparent text-body hover:text-navy'
@@ -674,7 +693,10 @@ export default function AssessmentPage() {
               >
                 {label}
                 {badge != null && (
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${badgeClass}`}>
+                  <span
+                    aria-label={badgeTitle}
+                    className={`min-w-5 rounded-full px-[7px] py-0.5 text-center text-xs font-bold ${badgeClass}`}
+                  >
                     {badge}
                   </span>
                 )}
@@ -702,7 +724,11 @@ export default function AssessmentPage() {
             <InterviewPerformance
               assessment={assessment}
               onEvaluateAgain={
-                !isRunning && !isQueued && !isCheckingClaims && !evaluation.isRunning
+                !isRunning &&
+                !isQueued &&
+                !isCheckingClaims &&
+                !isCheckingQuality &&
+                !evaluation.isRunning
                   ? () => setIsConfirming(true)
                   : undefined
               }
@@ -714,6 +740,16 @@ export default function AssessmentPage() {
               isBusy={evaluation.isRunning}
               onCheck={() => evaluation.start(id, { claimsOnly: true })}
               onChanged={(updated) => setAssessment(updated)}
+            />
+          ) : currentTab === 'quality' && isReport ? (
+            <QualityTab
+              assessment={assessment}
+              jobId={info.job_id}
+              state={state}
+              isBusy={evaluation.isRunning}
+              onCheck={() => evaluation.start(id, { qualityOnly: true })}
+              onPickQuestion={(pairId) => (pairId ? pickQuestion(pairId) : showTab('qa'))}
+              onOpenCoverage={() => showTab('coverage')}
             />
           ) : currentTab === 'decision' && isApproved ? (
             <DecisionTab
