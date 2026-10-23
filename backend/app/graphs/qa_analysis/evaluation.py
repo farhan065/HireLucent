@@ -6,6 +6,12 @@ accuracy (technical and company questions only), completeness and
 articulation from 0 to 100, says whether the question was answered, writes a
 short justification and quotes the part of the answer it relied on.
 
+Two more criteria feed the interview performance score (F9) and never the
+answer's own score: problem-solving and depth of experience. The AI gives
+each only when the answer shows it, with a quote of its own; an answer that
+does not call for it (a definition, a plain fact) is left out of that
+dimension instead of lowering it.
+
 Technical and company answers come with the approved reference passages
 found for them in the Knowledge Base (see references.py), and the AI says
 which one it checked accuracy against. With no usable reference:
@@ -30,7 +36,8 @@ transcript's own words, never the AI's version of them.
 When an answer still fails the checks after the last attempt, to_evaluations
 keeps what can be trusted instead of failing the interview: the scores
 without a quote, an accuracy judgement without a reference that was never
-given, and "not checked" where accuracy was left out.
+given, "not checked" where accuracy was left out, and no problem-solving or
+depth judgement whose quote is not in the answer.
 """
 
 import re
@@ -64,6 +71,9 @@ AI_JUDGEMENT = "ai_judgement"
 NOT_CHECKED = "not_checked"
 # Kinds whose accuracy is judged, and so checked against references.
 CHECKED_KINDS = ("technical", "company")
+# The criteria that feed only the interview performance dimensions (F9),
+# given only when the answer shows them.
+SHOWN_CRITERIA = ("problem_solving", "depth")
 
 Answered = Literal["answered", "partly_answered", "not_answered"]
 
@@ -84,6 +94,16 @@ null
 - completeness: does the answer cover every part of the question?
 - articulation: is the answer clear, structured and easy to follow?
 - Each of these four: a score from 0 to 100 and a one-sentence reason
+- problem_solving: only when the answer shows how the candidate works \
+through a problem: breaking it down, reasoning about causes, weighing \
+options or trade-offs, checking the result. A definition or a plain fact \
+does not show it: then null
+- depth: only when the answer describes the candidate's own real work: \
+specific examples, what they themselves did, the results. A general \
+description of a topic does not show it: then null
+- problem_solving and depth, when given: a score from 0 to 100, a \
+one-sentence reason and a short quote copied word for word from the answer \
+that shows it. Both are null for a not_answered pair
 - justification: one or two sentences summing up the judgement
 - evidence_turn: the number of the answer turn the judgement relies on most
 - evidence_quote: a short quote, copied word for word from that turn, that \
@@ -103,7 +123,8 @@ For a company pair, never use your own knowledge: you cannot know this \
 company's policies, products or values.
 - Judge only what was said about the job: knowledge, skills, experience and \
 how the answer is explained. Never judge accent, grammar mistakes from \
-speech-to-text, or personal traits.
+speech-to-text, or personal traits. Problem-solving and depth are about the \
+reasoning and the experience shown, never about fluency.
 - The transcript comes from speech-to-text. It can misspell words, \
 especially technical terms (for example "fast API" for FastAPI, "pie torch" \
 for PyTorch, "cooper netties" for Kubernetes), split one answer over several \
@@ -124,6 +145,12 @@ class Criterion(BaseModel):
     reason: str
 
 
+class ShownCriterion(Criterion):
+    """Problem-solving or depth of experience, with the words that show it."""
+
+    quote: str
+
+
 class PairJudgement(BaseModel):
     id: str
     answered: Answered
@@ -131,6 +158,8 @@ class PairJudgement(BaseModel):
     accuracy: Criterion | None = None
     completeness: Criterion
     articulation: Criterion
+    problem_solving: ShownCriterion | None = None
+    depth: ShownCriterion | None = None
     justification: str
     evidence_turn: int
     evidence_quote: str
@@ -329,6 +358,14 @@ def problems(
             pair, judgement.evidence_quote, turns
         ):
             found.append("quote_not_found")
+        for name in SHOWN_CRITERIA:
+            shown = getattr(judgement, name)
+            if (
+                shown is not None
+                and judgement.answered != "not_answered"
+                and not find_quote(pair, shown.quote, turns)
+            ):
+                found.append(f"{name}_quote_not_found")
     return found
 
 
@@ -351,6 +388,25 @@ def _criterion(criterion: Criterion | None) -> dict | None:
     if criterion is None:
         return None
     return {"score": criterion.score, "reason": criterion.reason.strip()[:MAX_REASON_CHARS]}
+
+
+def shown_criterion(
+    shown: ShownCriterion | None, answered: str, pair: dict, turns: dict[int, dict]
+) -> dict | None:
+    """Problem-solving or depth as kept: the score, the reason and the
+    transcript's own words that show it. None when the answer does not show
+    it, when the question was not answered, or when the quote is not in the
+    answer, so it never counts without evidence."""
+    if shown is None or answered == "not_answered":
+        return None
+    evidence = find_quote(pair, shown.quote, turns)
+    if evidence is None:
+        return None
+    return {
+        "score": shown.score,
+        "reason": shown.reason.strip()[:MAX_REASON_CHARS],
+        "evidence": evidence,
+    }
 
 
 def accuracy_source(
@@ -424,6 +480,12 @@ def to_evaluations(
                 )
                 if kind in CHECKED_KINDS
                 else None,
+                **{
+                    name: shown_criterion(
+                        getattr(judgement, name), judgement.answered, pair, turns
+                    )
+                    for name in SHOWN_CRITERIA
+                },
             }
         )
     return evaluations
@@ -440,6 +502,8 @@ def no_answer(pair: dict) -> dict:
         "justification": NO_ANSWER,
         "evidence": None,
         "accuracy_source": None,
+        "problem_solving": None,
+        "depth": None,
     }
 
 

@@ -149,6 +149,54 @@ export const CRITERIA = [
   ['articulation', 'Articulation'],
 ]
 
+// The criteria that feed only the interview performance dimensions (F9),
+// given only when an answer shows them. They never change the answer's score.
+export const SHOWN_CRITERIA = [
+  [
+    'problem_solving',
+    'Problem-solving',
+    'This answer does not show how the candidate works through a problem, so it is left out of problem-solving.',
+  ],
+  [
+    'depth',
+    'Depth of experience',
+    "This answer does not describe the candidate's own past work, so it is left out of depth of experience.",
+  ],
+]
+
+// An evaluation judged with problem-solving and depth (F9). Answers
+// evaluated before F9 have neither key.
+export function isF9Evaluation(evaluation) {
+  return evaluation != null && 'problem_solving' in evaluation
+}
+
+// Short names of the six interview performance dimensions, for small bars.
+export const DIMENSION_SHORT = {
+  technical: 'Technical',
+  communication: 'Communication',
+  relevance: 'Relevance',
+  problem_solving: 'Problem-solving',
+  depth: 'Depth',
+  alignment: 'Alignment',
+}
+
+// What the interview score tile and lists say under the score.
+export function interviewNote(row, answers) {
+  const dims = row.interview_dimensions
+  if (dims) return `${dims.assessed} of ${dims.total} dimensions`
+  if (row.interview_score == null) return 'no job questions'
+  return `${answers} ${answers === 1 ? 'answer' : 'answers'}`
+}
+
+// Why there is no interview score, when there is none.
+export function noInterviewScore(row) {
+  const dims = row.interview_dimensions
+  if (dims && dims.assessed > 0) {
+    return `not enough interview evidence (${dims.assessed} of ${dims.total} dimensions)`
+  }
+  return 'the interview had no job-related questions'
+}
+
 export const COVERAGE = {
   covered: { label: 'Covered', className: 'bg-success-soft text-success', bar: 'bg-success' },
   weak: { label: 'Weak', className: 'bg-warning-soft text-warning', bar: 'bg-[#D97706]' },
@@ -338,7 +386,7 @@ export function unrankedReason(row) {
     return 'Answers evaluated. The report has not been written yet.'
   }
   if (row.interview_score == null) {
-    return 'No overall score: the interview had no job-related questions.'
+    return `No overall score: ${noInterviewScore(row)}.`
   }
   return 'No overall score: the candidate has no CV score.'
 }

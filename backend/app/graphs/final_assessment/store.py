@@ -14,6 +14,7 @@ from app.models.enums import AssessmentStatus, CandidateStatus
 # The report fields a draft holds, as named in the graph's state.
 DRAFT_FIELDS = (
     "cv_score",
+    "interview_dimensions",
     "interview_score",
     "overall_score",
     "strengths",

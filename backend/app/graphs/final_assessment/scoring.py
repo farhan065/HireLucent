@@ -1,6 +1,8 @@
 """The component scores and the suitability label. Rule-based, no AI call.
 
-    interview score = average score of the evaluated answers
+    interview score = average of the assessed interview dimensions (F9, see
+                      dimensions.py); for an interview evaluated before F9,
+                      the average score of the evaluated answers
     overall score   = 0.4 x CV score + 0.6 x interview score
 
 The CV score is the candidate's final score from CV screening. Small talk is
@@ -28,7 +30,8 @@ def evaluated(pairs: list[dict]) -> list[dict]:
 
 def interview_score(pairs: list[dict]) -> float | None:
     """The average score of the evaluated answers, or None when the interview
-    had no job-related questions."""
+    had no job-related questions. The interview score of an interview
+    evaluated before F9; newer ones are scored by their dimensions."""
     scores = [pair["evaluation"]["score"] for pair in evaluated(pairs)]
     return round(sum(scores) / len(scores), 1) if scores else None
 

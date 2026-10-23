@@ -6,6 +6,7 @@ import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import Skeleton from '../components/Skeleton.jsx'
 import StatusChip from '../components/StatusChip.jsx'
 import ClaimsTab from '../components/assessment/ClaimsTab.jsx'
+import InterviewPerformance from '../components/assessment/InterviewPerformance.jsx'
 import CoverageTable from '../components/assessment/CoverageTable.jsx'
 import {
   EvaluatingCard,
@@ -28,6 +29,7 @@ import {
   openClaims,
   SUITABILITY,
   hasReport,
+  interviewNote,
   oneDecimal,
   qaSummary,
   readAssessment,
@@ -38,7 +40,7 @@ import {
 import { readInterview, readTranscript } from '../lib/room.js'
 import { whenLabel } from '../lib/transcript.js'
 
-const TABS = ['report', 'qa', 'coverage', 'claims', 'decision']
+const TABS = ['report', 'performance', 'qa', 'coverage', 'claims', 'decision']
 // The Report tab's badge for each assessment status.
 const REPORT_BADGES = {
   draft: { label: 'Draft', className: 'bg-amber-soft text-amber' },
@@ -163,6 +165,10 @@ function ScoringKey() {
         <li>Score = average of the criteria that apply. Behavioural answers have no accuracy.</li>
         <li>Not answered or silent = 0.</li>
         <li>Small talk is kept but not scored.</li>
+        <li>
+          Problem-solving and depth are judged only when an answer shows them. They feed the
+          interview performance dimensions, never the answer&apos;s score.
+        </li>
       </ul>
       <dl className="flex flex-col gap-2 text-[13px]">
         {[
@@ -460,7 +466,8 @@ export default function AssessmentPage() {
   const isReport = hasReport(assessment)
   // The page opens on the report once there is one, else on the answers.
   const isHiddenTab =
-    (tab === 'decision' && assessment?.status !== 'approved') || (tab === 'claims' && !isReport)
+    (tab === 'decision' && assessment?.status !== 'approved') ||
+    ((tab === 'claims' || tab === 'performance') && !isReport)
   const currentTab = isHiddenTab ? 'report' : (tab ?? (isReport ? 'report' : 'qa'))
   const answersEvaluated = assessment ? qaSummary(assessment.qa_evaluations).evaluated : 0
   const isApproved = assessment?.status === 'approved'
@@ -475,6 +482,14 @@ export default function AssessmentPage() {
       : toCheck
         ? [`${toCheck} to check`, 'bg-amber-soft text-amber']
         : [null, '']
+  // The Interview performance tab's badge (F9): the interview score, "–" when
+  // there is not enough evidence, or "Not available" before F9.
+  const dimensions = assessment?.interview_dimensions
+  const performanceBadge = !dimensions
+    ? ['Not available', 'bg-[#EEF1F6] text-[#44526B]']
+    : dimensions.score == null
+      ? ['–', 'bg-[#EEF1F6] text-[#44526B]']
+      : [oneDecimal(dimensions.score), 'bg-tint text-brand-dark']
 
   let body
   if (isRunning) {
@@ -607,13 +622,7 @@ export default function AssessmentPage() {
             <ScoreTile
               label="Interview"
               value={oneDecimal(assessment.interview_score)}
-              note={
-                !isReport
-                  ? 'after the report'
-                  : assessment.interview_score == null
-                    ? 'no job questions'
-                    : `${answersEvaluated} ${answersEvaluated === 1 ? 'answer' : 'answers'}`
-              }
+              note={!isReport ? 'after the report' : interviewNote(assessment, answersEvaluated)}
             />
             <ScoreTile
               label="Overall"
@@ -635,6 +644,8 @@ export default function AssessmentPage() {
                 REPORT_BADGES[assessment.status]?.label ?? null,
                 REPORT_BADGES[assessment.status]?.className,
               ],
+              // The interview performance dimensions (F9), once there is a report.
+              ...(isReport ? [['performance', 'Interview performance', ...performanceBadge]] : []),
               ['qa', 'Q&A analysis', assessment.qa_evaluations.length, 'bg-tint text-brand-dark'],
               [
                 'coverage',
@@ -679,6 +690,7 @@ export default function AssessmentPage() {
                 fileName={reportFileName(info)}
                 onChanged={(updated) => setAssessment(updated)}
                 onOpenClaims={() => showTab('claims')}
+                onOpenPerformance={() => showTab('performance')}
               />
             ) : (
               <NoReport
@@ -686,6 +698,15 @@ export default function AssessmentPage() {
                 onWriteReport={() => evaluation.start(id, { reportOnly: true })}
               />
             )
+          ) : currentTab === 'performance' && isReport ? (
+            <InterviewPerformance
+              assessment={assessment}
+              onEvaluateAgain={
+                !isRunning && !isQueued && !isCheckingClaims && !evaluation.isRunning
+                  ? () => setIsConfirming(true)
+                  : undefined
+              }
+            />
           ) : currentTab === 'claims' && isReport ? (
             <ClaimsTab
               assessment={assessment}

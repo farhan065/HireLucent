@@ -4,7 +4,9 @@ import {
   CRITERIA,
   KINDS,
   NOT_ANSWERED,
+  SHOWN_CRITERIA,
   SOURCES,
+  isF9Evaluation,
   roundScore,
   scoreTone,
 } from '../../lib/assessment.js'
@@ -70,6 +72,54 @@ function CriterionBox({ name, criterion }) {
         />
       </span>
       <span className="text-[13.5px] leading-relaxed">{criterion.reason}</span>
+    </div>
+  )
+}
+
+// Problem-solving and depth (F9), under the four answer criteria: a score
+// when the answer shows it, else why it is left out. They feed the interview
+// performance dimensions, never this answer's own score.
+function ForPerformance({ evaluation, kind }) {
+  if (evaluation.answered === 'not_answered') {
+    return (
+      <div className="flex flex-col gap-2 border-t border-dashed border-line pt-3.5">
+        <span className={LABEL}>For interview performance</span>
+        <span className="text-[13.5px] leading-normal">
+          Counts as 0 for{' '}
+          {kind === 'technical' ? (
+            <>
+              <strong className="text-navy">technical competency</strong> and{' '}
+            </>
+          ) : null}
+          <strong className="text-navy">relevance</strong>. Left out of communication,
+          problem-solving and depth of experience, as there is nothing to judge.
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-dashed border-line pt-3.5">
+      <span className={LABEL}>
+        For interview performance · not part of this answer&apos;s score
+      </span>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {SHOWN_CRITERIA.map(([key, name, notShown]) =>
+          evaluation[key] ? (
+            <CriterionBox key={key} name={name} criterion={evaluation[key]} />
+          ) : (
+            <div
+              key={key}
+              className="flex flex-col gap-2 rounded-2xl border border-dashed border-[#D3DCEB] bg-white px-3.5 py-3"
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm font-semibold text-navy">{name}</span>
+                <span className="text-[13px] font-semibold text-[#6B7890]">Not shown</span>
+              </div>
+              <span className="text-[13.5px] leading-relaxed">{notShown}</span>
+            </div>
+          ),
+        )}
+      </div>
     </div>
   )
 }
@@ -177,6 +227,8 @@ function Details({ sessionId, pair, turns }) {
           )}
         </div>
       )}
+
+      {isF9Evaluation(evaluation) && <ForPerformance evaluation={evaluation} kind={pair.kind} />}
 
       <div className="flex flex-col gap-1.5">
         <span className={LABEL}>Justification</span>

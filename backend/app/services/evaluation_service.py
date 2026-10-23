@@ -471,6 +471,7 @@ def _ranked_row(session: InterviewSession) -> dict:
         "status": assessment.status if assessment else None,
         "cv_score": report.cv_score if report else screening,
         "interview_score": report.interview_score if report else None,
+        "interview_dimensions": report.interview_dimensions if report else None,
         "overall_score": report.overall_score if report else None,
         "suitability": report.suitability if report else None,
         "answers_evaluated": len(scoring.evaluated(assessment.qa_evaluations))

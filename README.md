@@ -26,6 +26,7 @@ The name reflects the platform's purpose of bringing clarity to candidate evalua
 | **F6** Consolidated candidate assessment, comparison and export | Planned (Module 6) |
 | **F7** (stretch) Candidate identification: interview PIN, face check when the candidate joins, and a profile panel in the interview room. See [Candidate identification and biometric data](#candidate-identification-and-biometric-data) | Done |
 | **F8** (stretch) CV claim verification: every claim in the CV compared with what the candidate said in the interview, as contradiction, unverified, not discussed or consistent; points for the interviewer to check before deciding, never accusations. See [CV claim verification](#cv-claim-verification-f8) | Done |
+| **F9** (stretch) Comprehensive interview scoring: an interview performance score, separate from the CV score, from six dimensions (technical competency, communication, relevance, problem-solving, depth of experience, alignment with the job's requirements), each 0–100 with the answers or requirements behind it. See [Interview performance scoring](#interview-performance-scoring-f9) | Done |
 | **F11** Innovation feature: **Candidate Feedback Composer**: every rejected or selected candidate gets a fair, evidence-based email, checked for fairness and approved by the interviewer before it is sent. See [Innovation Feature](#innovation-feature-candidate-feedback-composer-f11) | Done |
 
 **What works today (pre-interview stage):**
@@ -65,7 +66,7 @@ The two architecture diagrams still show the original plan for job posting (Link
 
 - **Recruiter Agent** (`backend/app/graphs/recruiter/`): `load_context → agent → (call_tools | human_approval) → … → respond`. Read-only tools (Knowledge Base search) run directly; saving a job and publishing a post always pause for the interviewer's approval.
 - **Candidate Feedback** (`backend/app/graphs/feedback/`, innovation feature F11): `load_evidence → (draft_feedback → check_fairness → review_email | use_template) → save_draft → human_review → send_email → record_sent`, with rewrites while a check fails (up to 3 tries), and edit, request changes, discard and Try again from the review. See [Innovation Feature](#innovation-feature-candidate-feedback-composer-f11).
-- **Final Assessment** (`backend/app/graphs/final_assessment/`): `load_results → compute_scores → extract_claims → judge_claims → check_claims → save_claims → synthesize_report → check_traceability → save_draft → human_review → (save_assessment | synthesize_report | apply_edits)`. The claim nodes (F8) check the CV's claims before the report is written; **Check CV claims** and **Check again** run them alone. See [CV claim verification](#cv-claim-verification-f8).
+- **Final Assessment** (`backend/app/graphs/final_assessment/`): `load_results → score_dimensions → compute_scores → extract_claims → judge_claims → check_claims → save_claims → synthesize_report → check_traceability → save_draft → human_review → (save_assessment | synthesize_report | apply_edits)`. `score_dimensions` (F9) works out the six interview performance dimensions and the interview score by rule; see [Interview performance scoring](#interview-performance-scoring-f9). The claim nodes (F8) check the CV's claims before the report is written; **Check CV claims** and **Check again** run them alone. See [CV claim verification](#cv-claim-verification-f8).
 - **CV Screening** (`backend/app/graphs/screening/`): `load_inputs →` one branch per CV: `extract_text → (run_ocr) → parse_cv → check_must_haves → (exclude_candidate | match_requirements → compute_ats_score → score_candidate → save_result)`, then `rank_candidates`. A CV that fails is recorded with its reason and never stops the batch. A run that is stopped or restarted continues from each CV's saved step.
 
 ### How a candidate is scored
@@ -390,11 +391,40 @@ docs/               architecture and LangGraph diagrams
 
 **Branches:** `main` (final release), `dev` (completed modules) and one branch per module, merged into `dev` by pull request.
 
+## Interview performance scoring (F9)
+
+After the interview, HireLucent gives an **interview performance score** (0–100), kept apart from the CV score, and shows what it is made of: six dimensions, each 0–100, each pointing to the answers or requirements it rests on. The overall score is unchanged in form: **0.4 × CV score + 0.6 × interview score**.
+
+**Two new things judged per answer** ([LangGraph 3](docs/LangGraph_3_QA_Analysis_30221_Farhan.pdf), `judge_batch`). Next to relevance, accuracy, completeness and articulation, the AI judges **problem-solving** (breaking a problem down, reasoning about causes, weighing options) and **depth of experience** (the candidate's own real work: examples, their own part, results), but only when the answer shows them, each with a quote. Code checks that the quote is in the candidate's answer, like every other quote; an unproven one is asked for again (up to 3 tries), then left out. An answer that does not call for them, such as a definition, is simply left out of those two dimensions, never marked down. They never change the answer's own score, so requirement coverage and the CV claim check are unaffected.
+
+**The six dimensions** ([LangGraph 4](docs/LangGraph_4_Final_Assessment_Farhan_30221.drawio.pdf), `score_dimensions`, rule-based, no AI call):
+
+| Dimension | Worked out from |
+|---|---|
+| Technical competency | Accuracy and completeness of each technical answer; a technical question not answered counts as 0 |
+| Communication | Articulation of each answered question; a question not answered is left out |
+| Relevance of responses | Relevance of every question asked; a question not answered counts as 0 |
+| Problem-solving approach | The answers that showed problem-solving |
+| Depth of experience | The answers that described the candidate's own work |
+| Alignment with job requirements | Requirement coverage of the explored requirements, must-haves counting double; requirements never explored stay as evidence gaps |
+
+The **interview score** is the average of the assessed dimensions, each counting equally. A dimension with nothing to judge (for example no technical question was asked) is **not assessed**: left out of the average, never scored 0, so a candidate is not marked down for a question nobody asked. At least **3** dimensions are needed for an interview score; with fewer, there is not enough interview evidence and no interview or overall score.
+
+**Fairness.** Only job-related performance counts. Communication is about clarity and structure, never accent, fluency or speech-to-text spelling; the prompt says so. Scores are decision support only: the interviewer reads them (they cannot be edited) and decides.
+
+**Where it shows.** The assessment page's **Interview performance** tab, right after Report (six bars; each opens to its answers, quotes and times, or its requirements; the tab's badge is the interview score), a link to it from the Report tab's score box, the two new criteria on the Q&A tab, small bars in the opened row of the Assessments list, six rows on the Compare page, and section *D · Interview performance* of the report PDF. Never in a feedback email.
+
+**Interviews evaluated before F9** keep their interview score as the plain average of the answers and show *Breakdown not available*; **Evaluate again** gives them the six dimensions (the report goes back to draft).
+
+**API.** `GET /interviews/{id}/assessment` and the ranked list (`GET /jobs/{id}/assessments`) return `interview_dimensions` (status, score, assessed, total, min_assessed and the six dimensions with their answers or requirements); each answer evaluation has `problem_solving` and `depth`. Migration `0018` adds `assessments.interview_dimensions`. The log event `interview_dimensions_scored` holds the session id, status and number assessed only.
+
 ## Known limitations
 
 - **Identity check (F7):** there is no liveness check yet, so a clear printed photo held up to the camera could pass; the interviewer still sees the live video and the label is advice only. Twins and close look-alikes can match each other. An old or poor application photo gives a lower score (the label then asks the interviewer to compare). Interviews scheduled before F7 have no PIN and no check. The photo inside a CV is not used.
 
 - **CV claim check (F8):** the AI may judge a claim imperfectly (for example unverified where a person would say consistent); every result shows its evidence and the interviewer decides. A claim mentioned only in an answer whose question was lost from the transcript is not compared.
+
+- **Interview scoring (F9):** the dimensions overlap a little (technical competency, communication and relevance all come from the same answer judgements, each looking at a different aspect). The AI decides whether an answer shows problem-solving or real experience, and may judge it imperfectly; every score shows the answers behind it. Interviews evaluated before F9 keep the plain answer average until evaluated again, so one job's ranking can mix both until then. An answer whose question was lost from the transcript counts towards no dimension.
 
 - **Score repeatability:** the model in use (Gemini 3.5 Flash-Lite) ignores the temperature setting, so scoring the same CV again can differ slightly. Measured on one candidate over 3 runs: requirement results, match and ATS scores were identical; the largest final-score difference was 2 points.
 - **Screening speed:** limited by the free-tier LLM rate (15 requests per minute by default; about 3 calls per CV). The time for 20 CVs is still to be measured and will be stated here.

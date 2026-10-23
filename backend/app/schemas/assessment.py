@@ -47,6 +47,15 @@ class AccuracySource(BaseModel):
     )
 
 
+class ShownCriterion(BaseModel):
+    """Problem-solving or depth of experience in one answer (F9), with the
+    candidate's words that show it."""
+
+    score: int = Field(ge=0, le=100)
+    reason: str
+    evidence: Evidence
+
+
 class AnswerEvaluation(BaseModel):
     answered: Literal["answered", "partly_answered", "not_answered"]
     criteria: Criteria | None = Field(default=None, description="Empty when nothing was said.")
@@ -56,6 +65,16 @@ class AnswerEvaluation(BaseModel):
     justification: str
     evidence: Evidence | None = None
     accuracy_source: AccuracySource | None = None
+    problem_solving: ShownCriterion | None = Field(
+        default=None,
+        description="Only when the answer shows problem-solving (F9). Feeds the interview "
+        "performance dimension, never this answer's score.",
+    )
+    depth: ShownCriterion | None = Field(
+        default=None,
+        description="Only when the answer describes the candidate's own work (F9). Feeds "
+        "the interview performance dimension, never this answer's score.",
+    )
 
 
 class QAPair(BaseModel):
@@ -242,6 +261,57 @@ class ClaimReviewRequest(BaseModel):
     note: str | None = Field(default=None, max_length=500, description="Optional.")
 
 
+class DimensionAnswer(BaseModel):
+    """One answer an interview performance dimension rests on."""
+
+    pair_id: str
+    question: str
+    kind: Literal["technical", "behavioural", "company"]
+    score: float
+    reason: str | None = None
+    quote: str | None = Field(default=None, description="The transcript's own words.")
+    turn_id: int | None = None
+    start_ms: int
+
+
+class DimensionRequirement(BaseModel):
+    """One explored requirement the alignment dimension rests on."""
+
+    requirement_id: str
+    text: str
+    priority: Literal["must_have", "preferred"]
+    status: Literal["covered", "weak", "not_explored"]
+    average: float | None
+
+
+class InterviewDimension(BaseModel):
+    key: Literal[
+        "technical", "communication", "relevance", "problem_solving", "depth", "alignment"
+    ]
+    name: str
+    score: float | None = Field(description="0 to 100; empty when not assessed.")
+    based_on: str = Field(description="What the dimension rests on, in words.")
+    answers: list[DimensionAnswer] = Field(default_factory=list)
+    requirements: list[DimensionRequirement] = Field(
+        default_factory=list, description="Alignment only."
+    )
+    not_explored: list[str] = Field(default_factory=list, description="Alignment only.")
+
+
+class InterviewDimensions(BaseModel):
+    """The interview performance score (F9) and its six dimensions."""
+
+    status: Literal["scored", "not_enough"] = Field(
+        description="not_enough: fewer than min_assessed dimensions could be assessed, "
+        "so there is no interview score."
+    )
+    score: float | None = Field(description="Average of the assessed dimensions.")
+    assessed: int
+    total: int
+    min_assessed: int
+    dimensions: list[InterviewDimension]
+
+
 class AssessmentOut(BaseModel):
     """An interview's assessment as far as it has been made."""
 
@@ -262,7 +332,14 @@ class AssessmentOut(BaseModel):
     # The report, from the draft on. Empty while only the answers are evaluated.
     cv_score: float | None = None
     interview_score: float | None = Field(
-        default=None, description="Average score of the evaluated answers."
+        default=None,
+        description="Average of the assessed interview dimensions (F9); for an interview "
+        "evaluated before F9, the average score of the evaluated answers.",
+    )
+    interview_dimensions: InterviewDimensions | None = Field(
+        default=None,
+        description="The six interview performance dimensions; empty for an interview "
+        "evaluated before F9.",
     )
     overall_score: float | None = Field(
         default=None, description="40% CV score + 60% interview score."
@@ -319,6 +396,9 @@ class RankedAssessment(BaseModel):
     )
     cv_score: float | None
     interview_score: float | None
+    interview_dimensions: InterviewDimensions | None = Field(
+        default=None, description="Empty before the report, or for an interview before F9."
+    )
     overall_score: float | None
     suitability: Literal["strong_fit", "possible_fit", "not_a_fit"] | None
     answers_evaluated: int = Field(description="Answers the interview score averages.")

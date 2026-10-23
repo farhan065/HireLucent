@@ -7,7 +7,9 @@ areas to verify, each point with its sources. The appendix that follows
 lists the requirement coverage and every question with its score, so the
 file makes sense without HireLucent, then the CV claims to check before
 deciding (F8): each contradiction and unverified claim with the CV wording,
-the question and the candidate's words, and how the interviewer handled it.
+the question and the candidate's words, and how the interviewer handled it,
+and last the interview performance (F9): the six dimensions behind the
+interview score, each with what it rests on.
 
 The pages are written from simple HTML with PyMuPDF (already used to read
 CVs), so the text in the file is real text that can be searched and copied.
@@ -22,6 +24,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import pymupdf
 
 from app.graphs.final_assessment import claims as cv_claims
+from app.graphs.final_assessment import dimensions as interview_dimensions
 from app.graphs.final_assessment import scoring
 
 PAGE = pymupdf.paper_rect("a4")
@@ -168,10 +171,15 @@ def report_html(context: dict) -> str:
         cv, interview = _score(context["cv_score"]), _score(context["interview_score"])
         overall_note = f"{cv} × 40% + {interview} × 60% · decision support only"
     elif context["interview_score"] is None:
-        overall_note = "no job-related questions"
+        overall_note = _no_interview_score(context)
     else:
         overall_note = "no CV score"
     answers = context["answers_evaluated"]
+    dims = context.get("interview_dimensions")
+    if dims:
+        interview_note = f"{dims['assessed']} of {dims['total']} dimensions · 60%"
+    else:
+        interview_note = f"{answers} {'answer' if answers == 1 else 'answers'} · 60%"
     return f"""
 <table style="width: 100%; border-bottom: 2px solid {BLUE}">
 <tr><td style="border: none; padding: 0 0 6pt 0">
@@ -190,7 +198,7 @@ def report_html(context: dict) -> str:
 <td style="border: none" width="3%"></td>
 <td class="box" width="31%"><span class="label">INTERVIEW SCORE</span><br/>
 <span class="score">{_score(context["interview_score"])}</span><br/>
-<span class="small">{answers} {"answer" if answers == 1 else "answers"} · 60%</span></td>
+<span class="small">{escape(interview_note)}</span></td>
 <td style="border: none" width="3%"></td>
 <td class="box" width="32%"><span class="label">OVERALL</span><br/>
 <span class="score">{_score(context["overall_score"])}</span>{chip}<br/>
@@ -271,7 +279,8 @@ articulation. Small talk is not scored. Full answers and reasons are in HireLuce
 <tr><th>#</th><th>Question</th><th>Kind</th><th>Score</th><th>Accuracy</th></tr>
 {"".join(question_rows) or no_rows}
 </table>
-{claims_html(context)}"""
+{claims_html(context)}
+{dimensions_html(context)}"""
 
 
 def _claim_count(count: int, result: str) -> str:
@@ -343,6 +352,86 @@ scores, the report or the decision.</p>
 """
 
 
+def _no_interview_score(context: dict) -> str:
+    """Why there is no interview score, in a few words."""
+    dims = context.get("interview_dimensions")
+    if dims and context["answers_evaluated"]:
+        return "not enough interview evidence"
+    return "no job-related questions"
+
+
+def _dimension_evidence(item: dict) -> str:
+    """What a dimension rests on, as short references: each answer with its
+    score and time where few answers count, the question ids otherwise, and
+    the requirements for alignment."""
+    if item["key"] == interview_dimensions.ALIGNMENT:
+        explored = ", ".join(entry["requirement_id"] for entry in item["requirements"])
+        missing = ", ".join(item["not_explored"])
+        text = escape(explored or "–")
+        if missing:
+            text += f'<br/><span class="small">{escape(missing)} not explored</span>'
+        return text
+    answers = item["answers"]
+    if not answers:
+        return "–"
+    if item["key"] in (interview_dimensions.PROBLEM_SOLVING, interview_dimensions.DEPTH):
+        return "<br/>".join(
+            f"<b>{escape(answer['pair_id'])}</b> {_score(answer['score'])}"
+            f"{_time(answer['start_ms'])}"
+            for answer in answers
+        )
+    return escape(", ".join(answer["pair_id"] for answer in answers))
+
+
+def dimensions_html(context: dict) -> str:
+    """Section D: the six interview performance dimensions (F9). An
+    interview evaluated before F9 says so instead."""
+    heading = "<h2>D · Interview performance</h2>"
+    dims = context.get("interview_dimensions")
+    if not dims:
+        return (
+            f'{heading}<p class="small">This interview was evaluated before the interview '
+            "performance dimensions existed. Its interview score is the average of the "
+            "answers.</p>"
+        )
+    if dims["score"] is None:
+        intro = (
+            f"Only {dims['assessed']} of {dims['total']} dimensions could be assessed. At "
+            f"least {dims['min_assessed']} are needed, so there is no interview score."
+        )
+    else:
+        intro = (
+            f"The interview score is the average of the assessed dimensions, each counting "
+            f"equally: <b>{_score(dims['score'])}</b> from {dims['assessed']} of "
+            f"{dims['total']} dimensions."
+        )
+    rows = []
+    for item in dims["dimensions"]:
+        score = (
+            f"<b>{_score(item['score'])}</b>"
+            if item["score"] is not None
+            else _chip("Not assessed", GREY)
+        )
+        rows.append(
+            "<tr>"
+            f"<td><b>{escape(item['name'])}</b></td>"
+            f"<td>{score}</td>"
+            f"<td>{escape(item['based_on'])}</td>"
+            f"<td>{_dimension_evidence(item)}</td>"
+            "</tr>"
+        )
+    return f"""{heading}
+<p class="small">{intro} Each dimension is worked out by code from the answer judgements
+in section B and the requirement coverage in section A.</p>
+<table style="width: 100%">
+<tr><th>Dimension</th><th>Score</th><th>Based on</th><th>Evidence</th></tr>
+{"".join(rows)}
+</table>
+<p class="small">A dimension with no answer to judge is "not assessed" and left out of the
+average, never scored 0. Decision support only: the decision stays with the interviewer.</p>
+"""
+
+
 def _write(writer: pymupdf.DocumentWriter, html: str) -> None:
     """Write one part on as many pages as it needs, starting a new page."""
     story = pymupdf.Story(html=html, user_css=CSS)
@@ -400,6 +489,7 @@ def report_context(assessment, session, job, time_zone: str | None) -> dict:
         "approved_on": _day(assessment.approved_at, zone) if assessment.approved_at else None,
         "cv_score": assessment.cv_score,
         "interview_score": assessment.interview_score,
+        "interview_dimensions": assessment.interview_dimensions,
         "overall_score": assessment.overall_score,
         "suitability": assessment.suitability,
         "answers_evaluated": len(scoring.evaluated(assessment.qa_evaluations)),

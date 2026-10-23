@@ -3,10 +3,10 @@
 Turns one interview's Q&A analysis into a consolidated report, which the
 interviewer reviews before it counts:
 
-    start -> load_results -> (analysis found)   -> compute_scores
+    start -> load_results -> (analysis found)   -> score_dimensions
                           -> (claims only)      -> extract_claims
                           -> (analysis missing) -> handle_error -> end
-    compute_scores -> extract_claims
+    score_dimensions -> compute_scores -> extract_claims
     extract_claims -> (claims to judge) -> judge_claims
                    -> (none)            -> save_claims
     judge_claims -> (answer received)  -> check_claims
@@ -25,8 +25,11 @@ interviewer reviews before it counts:
                  -> (request changes) -> synthesize_report, with the note
                  -> (edit)            -> apply_edits -> save_draft
 
-compute_scores (rule-based) works out the CV, interview and overall scores,
-the suitability label, the evidence gaps and the areas to verify.
+score_dimensions (rule-based, F9) works out the six interview performance
+dimensions from the answer judgements and the requirement coverage, and the
+interview score from them (see dimensions.py). compute_scores (rule-based)
+then works out the overall score, the suitability label, the evidence gaps
+and the areas to verify.
 
 The CV claim check (F8) compares every claim in the CV with what the
 candidate said: extract_claims takes the claims from the CV (code),
@@ -60,7 +63,7 @@ from app.core.logging import get_logger, log_event
 from app.graphs.base import MAX_ATTEMPTS, BaseState, can_retry
 from app.graphs.checkpointer import get_checkpointer
 from app.graphs.final_assessment import claims as cv_claims
-from app.graphs.final_assessment import findings, report, scoring, store
+from app.graphs.final_assessment import dimensions, findings, report, scoring, store
 
 logger = get_logger(__name__)
 
@@ -100,6 +103,9 @@ class FinalState(BaseState, total=False):
     claim_attempts: int
     claims_failed: bool
     cv_score: float | None
+    # The six interview performance dimensions (F9); None for an interview
+    # evaluated before F9.
+    interview_dimensions: dict | None
     interview_score: float | None
     overall_score: float | None
     # The report: the summary and four lists of claims with their sources.
@@ -147,18 +153,32 @@ def load_results(state: FinalState) -> dict:
 
 def route_after_load(
     state: FinalState,
-) -> Literal["compute_scores", "extract_claims", "handle_error"]:
+) -> Literal["score_dimensions", "extract_claims", "handle_error"]:
     if state.get("failure"):
         return "handle_error"
-    return "extract_claims" if state.get("claims_only") else "compute_scores"
+    return "extract_claims" if state.get("claims_only") else "score_dimensions"
+
+
+def score_dimensions(state: FinalState) -> dict:
+    """The six interview performance dimensions and the interview score made
+    from them (F9). No AI call."""
+    scored = dimensions.dimensions(state["pairs"], state["coverage"])
+    interview = dimensions.interview_score(state["pairs"], scored)
+    log_event(
+        logger,
+        "interview_dimensions_scored",
+        session_id=state["session_id"],
+        status=scored["status"] if scored else "before_f9",
+        assessed=scored["assessed"] if scored else None,
+    )
+    return {"interview_dimensions": scored, "interview_score": interview}
 
 
 def compute_scores(state: FinalState) -> dict:
-    """The component scores, the evidence gaps and the areas to verify. No AI
+    """The overall score, the evidence gaps and the areas to verify. No AI
     call."""
-    interview = scoring.interview_score(state["pairs"])
+    interview = state.get("interview_score")
     return {
-        "interview_score": interview,
         "overall_score": scoring.overall_score(state.get("cv_score"), interview),
         "gaps": findings.evidence_gaps(state["coverage"]),
         "areas_to_verify": findings.areas_to_verify(state["pairs"], state["coverage"]),
@@ -456,6 +476,7 @@ def handle_error(state: FinalState) -> dict:
 def build_final_assessment_graph(checkpointer: BaseCheckpointSaver) -> CompiledStateGraph:
     graph = StateGraph(FinalState)
     graph.add_node("load_results", load_results)
+    graph.add_node("score_dimensions", score_dimensions)
     graph.add_node("compute_scores", compute_scores)
     graph.add_node("extract_claims", extract_claims)
     graph.add_node("judge_claims", judge_claims)
@@ -472,6 +493,7 @@ def build_final_assessment_graph(checkpointer: BaseCheckpointSaver) -> CompiledS
 
     graph.add_edge(START, "load_results")
     graph.add_conditional_edges("load_results", route_after_load)
+    graph.add_edge("score_dimensions", "compute_scores")
     graph.add_edge("compute_scores", "extract_claims")
     graph.add_conditional_edges("extract_claims", route_after_extract)
     graph.add_conditional_edges("judge_claims", route_after_judge)
