@@ -53,6 +53,11 @@ class Assessment(TimestampMixin, Base):
     # prompts to check before deciding; they never change a score or the
     # report.
     claim_checks: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # How the interview itself was run (F10): {status, checked_at, score,
+    # label, parts, metrics, findings, recommendations, explored,
+    # requirements}. Empty for an interview evaluated before F10. About the
+    # interview, not the candidate: it never changes a score or the report.
+    interview_quality: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     # Human review of the report.
     approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))

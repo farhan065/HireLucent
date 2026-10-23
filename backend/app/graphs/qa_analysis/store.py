@@ -22,6 +22,7 @@ LATER_FIELDS = (
     "areas_to_verify",
     "report",
     "claim_checks",
+    "interview_quality",
     "approved_by",
     "approved_at",
 )
