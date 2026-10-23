@@ -12,6 +12,7 @@ import {
   MAX_NOTE_CHARS,
   MAX_SUMMARY_CHARS,
   SUITABILITY,
+  noInterviewScore,
   oneDecimal,
   openClaims,
   printFile,
@@ -87,7 +88,7 @@ function Findings({ title, note, claims, sessionId, tone }) {
   )
 }
 
-function ScoreSum({ assessment }) {
+function ScoreSum({ assessment, onOpenPerformance }) {
   const label = SUITABILITY[assessment.suitability]
   if (assessment.overall_score == null) {
     return (
@@ -96,13 +97,23 @@ function ScoreSum({ assessment }) {
         <p>
           No overall score:{' '}
           {assessment.interview_score == null
-            ? 'the interview had no job-related questions.'
+            ? `${noInterviewScore(assessment)}.`
             : 'the candidate has no CV score.'}
         </p>
+        {onOpenPerformance && (
+          <button
+            type="button"
+            onClick={onOpenPerformance}
+            className="self-start text-[13.5px] font-semibold text-brand hover:text-brand-dark"
+          >
+            See interview performance →
+          </button>
+        )}
       </section>
     )
   }
   const parts = scoreParts(assessment)
+  const dims = assessment.interview_dimensions
   return (
     <section className={`${CARD} flex flex-col gap-2.5 px-5 py-4.5`}>
       <h2 className="mb-1 font-display text-base font-extrabold text-navy">
@@ -117,7 +128,12 @@ function ScoreSum({ assessment }) {
         </span>
       </div>
       <div className="flex justify-between gap-3 text-sm">
-        <span>Interview</span>
+        <span>
+          Interview{' '}
+          <span className="text-[12.5px]">
+            ({dims ? `${dims.assessed} dimensions` : 'answer average'})
+          </span>
+        </span>
         <span className="whitespace-nowrap tabular-nums text-navy">
           {oneDecimal(assessment.interview_score)} × 60% = <strong>{parts.interview}</strong>
         </span>
@@ -129,9 +145,19 @@ function ScoreSum({ assessment }) {
         </span>
       </div>
       <p className="text-[12.5px] leading-snug">
-        Strong fit 70+, Possible fit 60–69, Not a fit below 60. Decision support only: the decision
-        stays with you.
+        {dims ? 'The interview score is the average of the assessed dimensions. ' : ''}Strong fit
+        70+, Possible fit 60–69, Not a fit below 60. Decision support only: the decision stays with
+        you.
       </p>
+      {onOpenPerformance && (
+        <button
+          type="button"
+          onClick={onOpenPerformance}
+          className="self-start text-[13.5px] font-semibold text-brand hover:text-brand-dark"
+        >
+          See interview performance →
+        </button>
+      )}
     </section>
   )
 }
@@ -270,6 +296,7 @@ export default function ReportView({
   fileName,
   onChanged,
   onOpenClaims,
+  onOpenPerformance,
 }) {
   const [mode, setMode] = useState('view')
   const [dialog, setDialog] = useState(null)
@@ -477,7 +504,7 @@ export default function ReportView({
         </article>
 
         <aside className="flex max-w-[360px] flex-[1_1_300px] flex-col gap-4">
-          <ScoreSum assessment={assessment} />
+          <ScoreSum assessment={assessment} onOpenPerformance={onOpenPerformance} />
           {isDraft && <ReviewKey />}
         </aside>
       </div>

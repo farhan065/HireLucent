@@ -13,6 +13,7 @@ import { emailAction, emailState } from '../../lib/feedback.js'
 import Button from '../Button.jsx'
 import DecisionButtons from '../feedback/DecisionButtons.jsx'
 import EmailChip from '../feedback/EmailChip.jsx'
+import { DimensionBars } from './InterviewPerformance.jsx'
 
 // Eight columns that fit a standard laptop screen with no sideways scroll:
 // compare, rank, candidate, overall (with CV · interview), report,
@@ -182,7 +183,7 @@ function Details({ row }) {
   const strengths = (row.strengths ?? []).slice(0, SHOWN_STRENGTHS)
   const weaknesses = (row.weaknesses ?? []).slice(0, SHOWN_WEAKNESSES)
   return (
-    <div className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1.5fr)_minmax(0,1.05fr)] gap-3.5 border-b border-[#EEF2F9] bg-[#FBFCFF] pt-1 pr-5.5 pb-5.5 pl-24">
+    <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.35fr)_minmax(0,1fr)] gap-3.5 border-b border-[#EEF2F9] bg-[#FBFCFF] pt-1 pr-5.5 pb-5.5 pl-24">
       <SummaryCard title="Score">
         <span className="flex justify-between gap-2.5 text-sm">
           <span>CV × 40%</span>
@@ -202,6 +203,7 @@ function Details({ row }) {
             {oneDecimal(row.overall_score)} · {label?.label}
           </span>
         </span>
+        {row.interview_dimensions && <DimensionBars dimensions={row.interview_dimensions} />}
       </SummaryCard>
 
       <SummaryCard title="In short">

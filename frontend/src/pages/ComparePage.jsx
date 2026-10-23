@@ -15,6 +15,8 @@ import {
   comparedRequirements,
   oneDecimal,
   readRanking,
+  roundScore,
+  scoreTone,
 } from '../lib/assessment.js'
 import { shortDay } from '../lib/interviews.js'
 
@@ -71,6 +73,29 @@ function Score({ value, isBest, size = 'text-[15px]', note }) {
       </span>
       {note && <span className="text-xs">{note}</span>}
       {isBest && <Best />}
+    </span>
+  )
+}
+
+function Dimension({ item, isBest }) {
+  if (!item) return <span className="text-[13px]">No breakdown</span>
+  if (item.score == null) {
+    return (
+      <span className="rounded-full border border-dashed border-[#B8C3D6] px-2.5 py-0.5 text-[12.5px] font-semibold text-[#44526B]">
+        Not assessed
+      </span>
+    )
+  }
+  return (
+    <span className="grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2.5">
+      <strong className="text-[15px] tabular-nums text-navy">{roundScore(item.score)}</strong>
+      <span aria-hidden="true" className="h-1.5 overflow-hidden rounded-full bg-[#E4EAF4]">
+        <span
+          className={`block h-full rounded-full ${scoreTone(item.score).bar}`}
+          style={{ width: `${item.score}%` }}
+        />
+      </span>
+      {isBest ? <Best /> : <span />}
     </span>
   )
 }
@@ -264,6 +289,13 @@ export default function ComparePage() {
     interview: bestOf(rows.map((row) => row.interview_score)),
     covered: bestOf(rows.map((row) => row.coverage?.covered ?? null)),
   }
+  // The interview performance dimensions (F9) of each candidate, by key.
+  const dimensionOf = (row, key) =>
+    row.interview_dimensions?.dimensions.find((item) => item.key === key)
+  const hasDimensions = rows.some((row) => row.interview_dimensions)
+  const dimensionRows = hasDimensions
+    ? (rows.find((row) => row.interview_dimensions)?.interview_dimensions.dimensions ?? [])
+    : []
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
@@ -355,7 +387,7 @@ export default function ComparePage() {
               />
               <Row
                 label="Interview score"
-                note="average of the answers"
+                note={hasDimensions ? 'average of the dimensions' : 'average of the answers'}
                 columns={columns}
                 best={best.interview}
                 cells={rows.map((row, index) => (
@@ -363,7 +395,11 @@ export default function ComparePage() {
                     key={row.session_id}
                     value={row.interview_score}
                     isBest={best.interview[index]}
-                    note={`(${row.answers_evaluated} ${row.answers_evaluated === 1 ? 'answer' : 'answers'})`}
+                    note={
+                      row.interview_dimensions
+                        ? `${row.interview_dimensions.assessed} of ${row.interview_dimensions.total}`
+                        : `(${row.answers_evaluated} ${row.answers_evaluated === 1 ? 'answer' : 'answers'})`
+                    }
                   />
                 ))}
               />
@@ -384,6 +420,31 @@ export default function ComparePage() {
                   </span>
                 ))}
               />
+              {hasDimensions && (
+                <>
+                  <Section>Interview performance</Section>
+                  {dimensionRows.map((dimension) => {
+                    const isBest = bestOf(
+                      rows.map((row) => dimensionOf(row, dimension.key)?.score ?? null),
+                    )
+                    return (
+                      <Row
+                        key={dimension.key}
+                        label={dimension.name}
+                        columns={columns}
+                        best={isBest}
+                        cells={rows.map((row, index) => (
+                          <Dimension
+                            key={row.session_id}
+                            item={dimensionOf(row, dimension.key)}
+                            isBest={isBest[index]}
+                          />
+                        ))}
+                      />
+                    )
+                  })}
+                </>
+              )}
               <Section>Requirement by requirement</Section>
               {requirements.map((entry) => (
                 <Row
