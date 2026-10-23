@@ -13,6 +13,7 @@ from app.models.enums import AssessmentStatus
 # evaluated again, so an old report never sits next to a new analysis.
 LATER_FIELDS = (
     "cv_score",
+    "interview_dimensions",
     "interview_score",
     "overall_score",
     "strengths",

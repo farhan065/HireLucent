@@ -37,6 +37,10 @@ class Assessment(TimestampMixin, Base):
 
     # Written by the Final Assessment graph, so empty until then.
     cv_score: Mapped[float | None] = mapped_column(Float)
+    # The six interview performance dimensions (F9): {status, score,
+    # assessed, total, min_assessed, dimensions}. Empty for an interview
+    # evaluated before F9, whose interview score is the answer average.
+    interview_dimensions: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     interview_score: Mapped[float | None] = mapped_column(Float)
     overall_score: Mapped[float | None] = mapped_column(Float)
     strengths: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
