@@ -1,11 +1,14 @@
 """Schemas for the post-interview assessment."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.task import TaskResponse
+
+# An id such as Q3 or S1, sent back by the screens.
+ItemId = Annotated[str, Field(min_length=1, max_length=20)]
 
 
 class Criterion(BaseModel):
@@ -140,7 +143,7 @@ class QuestionSuggestion(BaseModel):
 
 
 class AddQuestionsRequest(BaseModel):
-    pair_ids: list[str] = Field(
+    pair_ids: list[ItemId] = Field(
         min_length=1, max_length=100, description="The suggestions the interviewer ticked."
     )
 
@@ -186,7 +189,7 @@ class ReviewRequest(BaseModel):
     summary: str | None = Field(
         default=None, min_length=1, max_length=1500, description="edit: the new summary."
     )
-    remove: list[str] = Field(
+    remove: list[ItemId] = Field(
         default_factory=list,
         max_length=20,
         description="edit: ids of strengths or weaknesses to remove.",

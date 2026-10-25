@@ -2,7 +2,7 @@
 
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -28,6 +28,13 @@ _PROTECTED_PATTERN = re.compile(
 )
 
 
+# Generous limits that a real job never reaches; they only stop oversized
+# input (BID N8).
+MAX_REQUIREMENTS = 40
+MAX_KEYWORDS = 25
+Keyword = Annotated[str, Field(max_length=80)]
+
+
 class RequirementItem(BaseModel):
     """One requirement of a job, for example "Python web development"."""
 
@@ -35,8 +42,9 @@ class RequirementItem(BaseModel):
     text: str = Field(min_length=3, max_length=200)
     category: Category
     priority: Priority
-    keywords: list[str] = Field(
+    keywords: list[Keyword] = Field(
         default_factory=list,
+        max_length=MAX_KEYWORDS,
         description="Accepted terms, used by the must-have check and ATS score.",
     )
 
@@ -63,7 +71,7 @@ class JobRequirements(BaseModel):
 
     # Required, so the assistant must state it. Use 0 when there is no minimum.
     min_experience_years: int = Field(ge=0, le=50)
-    items: list[RequirementItem] = Field(min_length=1)
+    items: list[RequirementItem] = Field(min_length=1, max_length=MAX_REQUIREMENTS)
 
     @model_validator(mode="after")
     def ids_are_unique(self) -> "JobRequirements":

@@ -27,7 +27,7 @@ def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(description="A PDF, DOCX, TXT or Markdown file."),
     doc_type: DocumentKind = Form(description="What the document is used for."),
-    tags: str = Form(default="", description="Tags separated by commas."),
+    tags: str = Form(default="", max_length=500, description="Tags separated by commas."),
     principal: Principal = Depends(require_interviewer),
     db: Session = Depends(get_db),
 ) -> Document:

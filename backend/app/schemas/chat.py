@@ -97,7 +97,7 @@ class ConversationSummary(BaseModel):
 
 class ChatMessageRequest(BaseModel):
     thread_id: str | None = Field(
-        default=None, description="Leave empty to start a new conversation."
+        default=None, max_length=100, description="Leave empty to start a new conversation."
     )
     message: str = Field(min_length=1, max_length=4000)
 
