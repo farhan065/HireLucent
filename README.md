@@ -185,10 +185,13 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
 
 | Service | Used for | What is sent |
 |---|---|---|
-| Google Gemini API | Job descriptions, CV parsing, requirement matching, scoring, interview evaluation, CV claim check | Prompts with job details, **CV text** and **interview transcript text**, both with email addresses, phone numbers and links masked. They can still contain the candidate's name and other details written in the CV or said in the interview |
+| Google Gemini API | Job descriptions, CV parsing, requirement matching, scoring, interview evaluation, the interview report, CV claim check, interview quality recommendations, feedback emails | Prompts with job details, **CV text** and **interview transcript text**, both with email addresses, phone numbers and links masked. They can still contain the candidate's name and other details written in the CV or said in the interview. The interview quality and feedback prompts get no name (see their sections) |
+| Deepgram (default speech-to-text) | Live interview transcription | The interviewer's and the candidate's **interview audio**, streamed during the interview. Deepgram is asked not to keep it for model training (`mip_opt_out=true`) |
+| AssemblyAI (optional speech-to-text, `STT_PROVIDER=assemblyai`) | Live interview transcription | The same **interview audio**. Its free plan cannot opt out of model training, so it is used with test interviews only |
 | Ollama (local container) | Embeddings | Nothing leaves the machine |
 | Google Blogger API | Publishing approved job posts | The job title, description, job code and application form link |
 | Google Forms and Drive APIs | Checking the application form and collecting CVs | Nothing is sent. Form responses and uploaded CVs are read |
+| Google Calendar API (through the Google MCP server) | Interview invitations, updates and cancellations the interviewer approved | The candidate's name and email address, the job title, the time, the join link and the interview PIN |
 | Gmail API (through the Google MCP server) | Sending feedback emails the interviewer approved (F11) | The candidate's email address, the subject and the approved text |
 
 Prompts and model answers are never written to the logs.
@@ -198,11 +201,25 @@ Prompts and model answers are never written to the logs.
 - Only sample or synthetic CVs are used for development and demonstration. No personal data is stored in the repository.
 - CV files are stored in a Docker volume (`/data/cv_intake`), never in the repository. `data/`, `sample_cvs/`, `secrets/`, `logs/` and `.env` are git-ignored.
 - Logs contain IDs, counts and error types only: never names, email addresses, CV text, prompts, tokens or keys.
-- Screening uses job-related criteria only.
-- **Deleting a candidate** (`DELETE /candidates/{id}`, also a button on the Screening tab) removes their record, screening results, CV file and CV embeddings. The form response is remembered only by its ID, so it is not collected again.
-- **Deleting a job** removes its candidates, CV files, embeddings and conversation.
-- Raw interview audio and video will never be stored (planned for Modules 4–5).
+- Screening and every assessment use job-related criteria only (see [Fairness](#fairness)).
+- **Deleting a candidate** (`DELETE /candidates/{id}`, also a button on the Screening tab) removes their record, screening results, CV file and CV embeddings, application photo and face code, interviews with their transcripts, assessments and CV claim and interview quality results, feedback email, and the AI workflows' saved state for them (LangGraph checkpoints of the room chat, Q&A analysis, report, CV claim check, interview quality check and feedback email). The form response is remembered only by its ID, so it is not collected again. A candidate with an upcoming or running interview cannot be deleted until the interview is cancelled, because they still hold a calendar invitation and a join link.
+- **Deleting a job** removes all of that for each of its candidates, plus the job's conversation and screening runs.
+- **AI working state is not kept longer than needed.** A Q&A analysis run's saved state (which holds the transcript and the answers) is deleted as soon as the run ends, because its results are saved in the assessment. The report's and the feedback email's state is kept while they wait for the interviewer's review, and deleted with the candidate or the job.
+- **Raw interview audio and video are never stored.** Audio is streamed to the speech-to-text provider during the interview and only the transcript text is saved; the live text messages between interviewer and candidate are not saved either.
+- **Transport security.** Calls to Gemini, Google, Deepgram and AssemblyAI use HTTPS or secure WebSockets (WSS). The app itself runs locally over plain HTTP (`http://localhost:3000`) and LiveKit over `ws://localhost:7880`, which is accepted for a local-only setup; a deployment would put both behind HTTPS/WSS.
 - Candidate identification uses biometric data; how it is handled is described in the next section.
+
+## Fairness
+
+HireLucent scores candidates on job-related evidence only (BID N20). The rules are built into the AI steps and checked by tests:
+
+- **Criteria come from the job.** Screening scores each requirement of the job (technical skills, experience, qualifications) with the interviewer's confirmed weights; the interview is judged on its answers and the job's requirements. Nothing else is scored.
+- **Personal traits are excluded.** Every AI step that judges a candidate (requirement matching, CV scoring, answer evaluation, the report, the CV claim check, interview quality recommendations and the feedback email and its review) is told never to consider age, gender, nationality, religion, accent or any other personal trait. CV reading is told not to extract age, date of birth, gender, nationality, religion, marital status or a photo.
+- **Personal data stays out of the inputs.** Email addresses, phone numbers and links are masked in every CV and transcript text sent to the AI. The candidate's name, application photo, face code and identity check result are never part of a scoring prompt; the identity check never changes a score.
+- **Every conclusion shows its evidence** (a CV quote, a transcript quote or a requirement), and a person approves every report, decision and email.
+- `backend/tests/test_fairness.py` checks these rules: the instruction is present in every judging prompt, and the inputs built for screening, matching, the interview steps and the CV claim check carry no contact details or personal fields.
+
+**Limits.** The CV and transcript text can still contain the candidate's name and anything else they wrote or said (for example a photo caption, an age or a hobby), so the AI may see it even though it is told to ignore it. The AI can still make biased or wrong judgements; the evidence shown with each score and the human review are there to catch them. Communication is judged on clarity and structure, never on accent, but speech-to-text errors can still make an answer read worse than it was said. There is no statistical fairness audit across groups, because the project uses synthetic candidates only.
 
 ## Candidate identification and biometric data
 
@@ -352,10 +369,12 @@ pytest -q
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run lint
 npm run build
 ```
+
+**Dependency versions** are pinned: every Python package in `backend/requirements*.txt` with `==`, and the exact frontend versions in `frontend/package-lock.json`. `npm ci` (also used by the frontend image) installs exactly the locked versions, so the `^` ranges in `package.json` never pull a newer one. Docker images are pinned to version tags in `docker-compose.yml`.
 
 **Database viewer (optional):** pgAdmin runs only when asked for, so the normal start is unchanged:
 
@@ -378,10 +397,11 @@ backend/
   app/
     api/routes/     REST and WebSocket endpoints
     services/       business logic (jobs, chat, intake, screening, shortlist, knowledge, tasks)
-    graphs/         LangGraph workflows (recruiter/, screening/)
+    graphs/         LangGraph workflows (recruiter/, screening/, qa_analysis/,
+                    final_assessment/, feedback/, interview_quality/)
     ai/             AI model access: rate limit, retries, timeouts
     rag/            ChromaDB access, chunking, MCP client
-    mcp_servers/    the custom RAG MCP server
+    mcp_servers/    the custom RAG and Google MCP servers
     models/ schemas/ core/ db/
   alembic/          database migrations
   scripts/          seed, Google sign-in and check scripts
