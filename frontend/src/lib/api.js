@@ -55,11 +55,21 @@ export async function apiRequest(path, { method = 'GET', body, auth = getAccessT
     throw new ApiError(
       response.status,
       error?.code ?? 'unknown_error',
-      error?.message ?? 'Something went wrong. Please try again.',
+      error?.message ?? fallbackMessage(response.status),
       error?.details ?? [],
     )
   }
   return data
+}
+
+// A message for an error that did not come from the backend itself, such as
+// the web server's page while the backend restarts or for an oversized file.
+function fallbackMessage(status) {
+  if (status === 413) return 'The file is too large. Choose a file of at most 10 MB.'
+  if ([502, 503, 504].includes(status)) {
+    return 'The server is not responding right now. Wait a moment and try again.'
+  }
+  return 'Something went wrong. Please try again.'
 }
 
 // Downloads a file that needs the access token, such as a candidate's CV.

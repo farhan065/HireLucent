@@ -10,7 +10,7 @@ from app.services.task_service import GENERIC_FAILURE_MESSAGE, safe_error_messag
 def _task(current: int, total: int) -> TaskResponse:
     return TaskResponse(
         id="abc",
-        kind="demo",
+        kind="evaluation",
         status="running",
         progress_current=current,
         progress_total=total,

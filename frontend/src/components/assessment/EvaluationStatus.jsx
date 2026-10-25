@@ -9,16 +9,19 @@ const STAGES = [
   "Mapping the job's requirements",
   'Checking CV claims',
   'Writing the report',
+  'Checking interview quality',
 ]
 const CHECKING_CLAIMS = 'checking CV claims'
 const WRITING = 'writing the report'
+const CHECKING_QUALITY = 'checking interview quality'
 
 // Which stage the progress message is at: 0 while the questions are being
-// found, 1 while answers are judged, 3 while the CV claims are checked and
-// 4 while the report is written.
+// found, 1 while answers are judged, 3 while the CV claims are checked, 4
+// while the report is written and 5 while the interview quality is checked.
 function stageOf(message) {
   if (!message || message === 'starting') return 0
   if (message === CHECKING_CLAIMS) return 3
+  if (message === CHECKING_QUALITY) return 5
   return message === WRITING ? 4 : 1
 }
 
@@ -46,7 +49,9 @@ export function EvaluatingCard({ message, percent }) {
                 ? 'Checking CV claims'
                 : stage === 4
                   ? 'Writing the report'
-                  : message}
+                  : stage === 5
+                    ? 'Checking interview quality'
+                    : message}
           </p>
         </div>
       </div>

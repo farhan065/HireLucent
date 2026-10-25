@@ -27,6 +27,7 @@ The name reflects the platform's purpose of bringing clarity to candidate evalua
 | **F7** (stretch) Candidate identification: interview PIN, face check when the candidate joins, and a profile panel in the interview room. See [Candidate identification and biometric data](#candidate-identification-and-biometric-data) | Done |
 | **F8** (stretch) CV claim verification: every claim in the CV compared with what the candidate said in the interview, as contradiction, unverified, not discussed or consistent; points for the interviewer to check before deciding, never accusations. See [CV claim verification](#cv-claim-verification-f8) | Done |
 | **F9** (stretch) Comprehensive interview scoring: an interview performance score, separate from the CV score, from six dimensions (technical competency, communication, relevance, problem-solving, depth of experience, alignment with the job's requirements), each 0–100 with the answers or requirements behind it. See [Interview performance scoring](#interview-performance-scoring-f9) | Done |
+| **F10** (stretch) Interview quality assessment: how the interview itself was run, not the candidate: a quality score from the interviewer's questions, the coverage of the job's requirements and the speaking time, actionable recommendations for the next interview, and a comparison of how consistently the job's candidates were interviewed. See [Interview quality assessment](#interview-quality-assessment-f10) | Done |
 | **F11** Innovation feature: **Candidate Feedback Composer**: every rejected or selected candidate gets a fair, evidence-based email, checked for fairness and approved by the interviewer before it is sent. See [Innovation Feature](#innovation-feature-candidate-feedback-composer-f11) | Done |
 
 **What works today (pre-interview stage):**
@@ -46,7 +47,7 @@ The diagrams are in [`docs/`](docs):
 
 - [High-level architecture](docs/High_Level_Architecture_30221_Farhan.drawio.pdf)
 - [Detailed architecture](docs/Detailed_Architecture_30221_Farhan.drawio.pdf)
-- LangGraph workflows: [1 Recruiter Agent](docs/LangGraph_1_Recruiter_Agent_Farahn_30221.drawio.pdf), [2 CV Screening](docs/LangGraph_2_CV_Screening_Farhan_30221.drawio.pdf), [3 Q&A Analysis](docs/LangGraph_3_QA_Analysis_30221_Farhan.pdf), [4 Final Assessment](docs/LangGraph_4_Final_Assessment_Farhan_30221.drawio.pdf), [5 Candidate Feedback](docs/LangGraph_5_Candidate_Feedback_30221_Farhan.pdf) (innovation feature)
+- LangGraph workflows: [1 Recruiter Agent](docs/LangGraph_1_Recruiter_Agent_Farahn_30221.drawio.pdf), [2 CV Screening](docs/LangGraph_2_CV_Screening_Farhan_30221.drawio.pdf), [3 Q&A Analysis](docs/LangGraph_3_QA_Analysis_30221_Farhan.pdf), [4 Final Assessment](docs/LangGraph_4_Final_Assessment_Farhan_30221.drawio.pdf), [5 Candidate Feedback](docs/LangGraph_5_Candidate_Feedback_30221_Farhan.pdf) (innovation feature), [6 Interview Quality](docs/LangGraph_6_Interview_Quality_30221_Farhan.pdf)
 
 The two architecture diagrams still show the original plan for job posting (LinkedIn/BdJobs) and email intake; they are updated before the final submission. LangGraph 2 shows the screening graph as built.
 
@@ -67,6 +68,7 @@ The two architecture diagrams still show the original plan for job posting (Link
 - **Recruiter Agent** (`backend/app/graphs/recruiter/`): `load_context → agent → (call_tools | human_approval) → … → respond`. Read-only tools (Knowledge Base search) run directly; saving a job and publishing a post always pause for the interviewer's approval.
 - **Candidate Feedback** (`backend/app/graphs/feedback/`, innovation feature F11): `load_evidence → (draft_feedback → check_fairness → review_email | use_template) → save_draft → human_review → send_email → record_sent`, with rewrites while a check fails (up to 3 tries), and edit, request changes, discard and Try again from the review. See [Innovation Feature](#innovation-feature-candidate-feedback-composer-f11).
 - **Final Assessment** (`backend/app/graphs/final_assessment/`): `load_results → score_dimensions → compute_scores → extract_claims → judge_claims → check_claims → save_claims → synthesize_report → check_traceability → save_draft → human_review → (save_assessment | synthesize_report | apply_edits)`. `score_dimensions` (F9) works out the six interview performance dimensions and the interview score by rule; see [Interview performance scoring](#interview-performance-scoring-f9). The claim nodes (F8) check the CV's claims before the report is written; **Check CV claims** and **Check again** run them alone. See [CV claim verification](#cv-claim-verification-f8).
+- **Interview Quality** (`backend/app/graphs/interview_quality/`, F10): `load_interview → measure_interview → score_quality → find_issues → (write_recommendations → check_recommendations | save_quality) → save_quality`, with the recommendations asked for again while one cannot be proven (up to 3 tries). It runs after the report and on its own (**Check interview quality**). See [Interview quality assessment](#interview-quality-assessment-f10).
 - **CV Screening** (`backend/app/graphs/screening/`): `load_inputs →` one branch per CV: `extract_text → (run_ocr) → parse_cv → check_must_haves → (exclude_candidate | match_requirements → compute_ats_score → score_candidate → save_result)`, then `rank_candidates`. A CV that fails is recorded with its reason and never stops the batch. A run that is stopped or restarted continues from each CV's saved step.
 
 ### How a candidate is scored
@@ -183,10 +185,13 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
 
 | Service | Used for | What is sent |
 |---|---|---|
-| Google Gemini API | Job descriptions, CV parsing, requirement matching, scoring, interview evaluation, CV claim check | Prompts with job details, **CV text** and **interview transcript text**, both with email addresses, phone numbers and links masked. They can still contain the candidate's name and other details written in the CV or said in the interview |
+| Google Gemini API | Job descriptions, CV parsing, requirement matching, scoring, interview evaluation, the interview report, CV claim check, interview quality recommendations, feedback emails | Prompts with job details, **CV text** and **interview transcript text**, both with email addresses, phone numbers and links masked. They can still contain the candidate's name and other details written in the CV or said in the interview. The interview quality and feedback prompts get no name (see their sections) |
+| Deepgram (default speech-to-text) | Live interview transcription | The interviewer's and the candidate's **interview audio**, streamed during the interview. Deepgram is asked not to keep it for model training (`mip_opt_out=true`) |
+| AssemblyAI (optional speech-to-text, `STT_PROVIDER=assemblyai`) | Live interview transcription | The same **interview audio**. Its free plan cannot opt out of model training, so it is used with test interviews only |
 | Ollama (local container) | Embeddings | Nothing leaves the machine |
 | Google Blogger API | Publishing approved job posts | The job title, description, job code and application form link |
 | Google Forms and Drive APIs | Checking the application form and collecting CVs | Nothing is sent. Form responses and uploaded CVs are read |
+| Google Calendar API (through the Google MCP server) | Interview invitations, updates and cancellations the interviewer approved | The candidate's name and email address, the job title, the time, the join link and the interview PIN |
 | Gmail API (through the Google MCP server) | Sending feedback emails the interviewer approved (F11) | The candidate's email address, the subject and the approved text |
 
 Prompts and model answers are never written to the logs.
@@ -196,11 +201,25 @@ Prompts and model answers are never written to the logs.
 - Only sample or synthetic CVs are used for development and demonstration. No personal data is stored in the repository.
 - CV files are stored in a Docker volume (`/data/cv_intake`), never in the repository. `data/`, `sample_cvs/`, `secrets/`, `logs/` and `.env` are git-ignored.
 - Logs contain IDs, counts and error types only: never names, email addresses, CV text, prompts, tokens or keys.
-- Screening uses job-related criteria only.
-- **Deleting a candidate** (`DELETE /candidates/{id}`, also a button on the Screening tab) removes their record, screening results, CV file and CV embeddings. The form response is remembered only by its ID, so it is not collected again.
-- **Deleting a job** removes its candidates, CV files, embeddings and conversation.
-- Raw interview audio and video will never be stored (planned for Modules 4–5).
+- Screening and every assessment use job-related criteria only (see [Fairness](#fairness)).
+- **Deleting a candidate** (`DELETE /candidates/{id}`, also a button on the Screening tab) removes their record, screening results, CV file and CV embeddings, application photo and face code, interviews with their transcripts, assessments and CV claim and interview quality results, feedback email, and the AI workflows' saved state for them (LangGraph checkpoints of the room chat, Q&A analysis, report, CV claim check, interview quality check and feedback email). The form response is remembered only by its ID, so it is not collected again. A candidate with an upcoming or running interview cannot be deleted until the interview is cancelled, because they still hold a calendar invitation and a join link.
+- **Deleting a job** removes all of that for each of its candidates, plus the job's conversation and screening runs.
+- **AI working state is not kept longer than needed.** A Q&A analysis run's saved state (which holds the transcript and the answers) is deleted as soon as the run ends, because its results are saved in the assessment. The report's and the feedback email's state is kept while they wait for the interviewer's review, and deleted with the candidate or the job.
+- **Raw interview audio and video are never stored.** Audio is streamed to the speech-to-text provider during the interview and only the transcript text is saved; the live text messages between interviewer and candidate are not saved either.
+- **Transport security.** Calls to Gemini, Google, Deepgram and AssemblyAI use HTTPS or secure WebSockets (WSS). The app itself runs locally over plain HTTP (`http://localhost:3000`) and LiveKit over `ws://localhost:7880`, which is accepted for a local-only setup; a deployment would put both behind HTTPS/WSS.
 - Candidate identification uses biometric data; how it is handled is described in the next section.
+
+## Fairness
+
+HireLucent scores candidates on job-related evidence only (BID N20). The rules are built into the AI steps and checked by tests:
+
+- **Criteria come from the job.** Screening scores each requirement of the job (technical skills, experience, qualifications) with the interviewer's confirmed weights; the interview is judged on its answers and the job's requirements. Nothing else is scored.
+- **Personal traits are excluded.** Every AI step that judges a candidate (requirement matching, CV scoring, answer evaluation, the report, the CV claim check, interview quality recommendations and the feedback email and its review) is told never to consider age, gender, nationality, religion, accent or any other personal trait. CV reading is told not to extract age, date of birth, gender, nationality, religion, marital status or a photo.
+- **Personal data stays out of the inputs.** Email addresses, phone numbers and links are masked in every CV and transcript text sent to the AI. The candidate's name, application photo, face code and identity check result are never part of a scoring prompt; the identity check never changes a score.
+- **Every conclusion shows its evidence** (a CV quote, a transcript quote or a requirement), and a person approves every report, decision and email.
+- `backend/tests/test_fairness.py` checks these rules: the instruction is present in every judging prompt, and the inputs built for screening, matching, the interview steps and the CV claim check carry no contact details or personal fields.
+
+**Limits.** The CV and transcript text can still contain the candidate's name and anything else they wrote or said (for example a photo caption, an age or a hobby), so the AI may see it even though it is told to ignore it. The AI can still make biased or wrong judgements; the evidence shown with each score and the human review are there to catch them. Communication is judged on clarity and structure, never on accent, but speech-to-text errors can still make an answer read worse than it was said. There is no statistical fairness audit across groups, because the project uses synthetic candidates only.
 
 ## Candidate identification and biometric data
 
@@ -350,10 +369,12 @@ pytest -q
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run lint
 npm run build
 ```
+
+**Dependency versions** are pinned: every Python package in `backend/requirements*.txt` with `==`, and the exact frontend versions in `frontend/package-lock.json`. `npm ci` (also used by the frontend image) installs exactly the locked versions, so the `^` ranges in `package.json` never pull a newer one. Docker images are pinned to version tags in `docker-compose.yml`.
 
 **Database viewer (optional):** pgAdmin runs only when asked for, so the normal start is unchanged:
 
@@ -376,10 +397,11 @@ backend/
   app/
     api/routes/     REST and WebSocket endpoints
     services/       business logic (jobs, chat, intake, screening, shortlist, knowledge, tasks)
-    graphs/         LangGraph workflows (recruiter/, screening/)
+    graphs/         LangGraph workflows (recruiter/, screening/, qa_analysis/,
+                    final_assessment/, feedback/, interview_quality/)
     ai/             AI model access: rate limit, retries, timeouts
     rag/            ChromaDB access, chunking, MCP client
-    mcp_servers/    the custom RAG MCP server
+    mcp_servers/    the custom RAG and Google MCP servers
     models/ schemas/ core/ db/
   alembic/          database migrations
   scripts/          seed, Google sign-in and check scripts
@@ -418,6 +440,30 @@ The **interview score** is the average of the assessed dimensions, each counting
 
 **API.** `GET /interviews/{id}/assessment` and the ranked list (`GET /jobs/{id}/assessments`) return `interview_dimensions` (status, score, assessed, total, min_assessed and the six dimensions with their answers or requirements); each answer evaluation has `problem_solving` and `depth`. Migration `0018` adds `assessments.interview_dimensions`. The log event `interview_dimensions_scored` holds the session id, status and number assessed only.
 
+## Interview quality assessment (F10)
+
+F10 looks at **how the interview itself was run**, not at the candidate: whether the interviewer's questions gave useful answers, whether they explored the job's requirements, and how the speaking time was shared. It then recommends what to do differently next time, and compares how consistently the job's candidates were interviewed. It never changes a score of the candidate, the report, its approval or the decision, and it is never shown to the candidate or put in a feedback email.
+
+**How it is worked out** ([LangGraph 6](docs/LangGraph_6_Interview_Quality_30221_Farhan.pdf), `backend/app/graphs/interview_quality/`). Everything is measured by code from data the evaluation already has (the Q&A pairs, the requirement coverage and the transcript's times); the AI only writes the recommendations.
+
+| Part (0–100) | Worked out from |
+|---|---|
+| Questions | The share of job-related questions that gave a useful answer. A question gives little signal when it was not answered, the answer was very short (under 5 words) or off the question (relevance below 40); a technical or behavioural question linked to no requirement is not useful either. Small talk is left out |
+| Coverage | Covered 1, weak ½, not explored 0 for each requirement, must-haves counting double |
+| Interaction | 100 minus points: candidate speaking under 60% of the time (2 per point below, at most 40), small talk over 20% (1 per point over, at most 20), an interviewer stretch over 2 minutes (10 per extra minute, at most 20), an interview under half its planned length (20). A candidate speaking a lot is never marked down |
+
+The **quality score** is the average of the three parts; **Good** from 70, **Needs improvement** from 50, otherwise **Poor**. Speaking time comes from the separate audio channels, so it is measured, not guessed.
+
+**Recommendations.** Code writes every finding as a plain fact with what it rests on (for example *R5 Kubernetes (must-have) was never explored by any question*, *Q6 at 16:05 gave little signal: 3-word answer*). The AI turns them into up to 5 short, actionable recommendations, with an example question for a requirement that was not explored. It gets the job title, the findings and the interviewer's question texts with contacts masked, never the candidate's name or answers. Code then checks that every finding id exists and that every question id, requirement id and number in the text is in the findings it names; an unproven recommendation is asked for again (up to 3 tries), then left out. The evidence chips come from the findings, never from the AI. If the AI is not available, everything code measured is still saved and the tab offers **Check again**.
+
+**Consistency across candidates** is worked out by code when it is read, from the job's checked interviews, so it is never out of date. The typical interview is the middle value of the length, the number of job-related questions and the candidate's share. An interview is flagged when a must-have it did not explore was explored in most of the other interviews, its length or number of questions is under half or over 1.5 times the typical one, or the candidate's share differs by more than 20 points. A requirement explored in fewer than half of the interviews is marked *Mostly missed*. It is shown from 2 checked interviews.
+
+**Where it shows.** The assessment page's **Interview quality** tab, once there is a report (badge = the quality score): the score with its three parts and the questions and requirements behind them (each opens the Q&A analysis or Requirement coverage tab), the recommendations with their evidence, the speaking time (bar, longest stretch, small talk, follow-ups, length and a two-lane timeline) and this interview against the job's other interviews. The job's **Assessments** tab has a second view, **Interview consistency**, next to **Ranked candidates** (which still opens first). The evaluation's progress shows the new last step *Checking interview quality*.
+
+**Interviews evaluated before F10** show *Interview quality not checked yet* with **Check interview quality**, which runs only this check (the report, its approval and the decision stay as they are). **Evaluate again** also checks it.
+
+**API.** `GET /interviews/{id}/assessment` returns `interview_quality` (status, score, label, the three parts, the measurements, the findings and the recommendations with their evidence). `POST /interviews/{id}/assessment/quality` runs the check alone as a background task (its result is marked `quality_only`). `GET /jobs/{id}/interview-consistency` returns the job's comparison. Migration `0019` adds `assessments.interview_quality`. Log events (ids, counts, scores and labels only, never transcript or question text): `interview_quality_checked`, `interview_quality_recommendations_invalid`, `interview_quality_recommendations_dropped`, `interview_quality_failed`, `interview_quality_error`.
+
 ## Known limitations
 
 - **Identity check (F7):** there is no liveness check yet, so a clear printed photo held up to the camera could pass; the interviewer still sees the live video and the label is advice only. Twins and close look-alikes can match each other. An old or poor application photo gives a lower score (the label then asks the interviewer to compare). Interviews scheduled before F7 have no PIN and no check. The photo inside a CV is not used.
@@ -425,6 +471,8 @@ The **interview score** is the average of the assessed dimensions, each counting
 - **CV claim check (F8):** the AI may judge a claim imperfectly (for example unverified where a person would say consistent); every result shows its evidence and the interviewer decides. A claim mentioned only in an answer whose question was lost from the transcript is not compared.
 
 - **Interview scoring (F9):** the dimensions overlap a little (technical competency, communication and relevance all come from the same answer judgements, each looking at a different aspect). The AI decides whether an answer shows problem-solving or real experience, and may judge it imperfectly; every score shows the answers behind it. Interviews evaluated before F9 keep the plain answer average until evaluated again, so one job's ranking can mix both until then. An answer whose question was lost from the transcript counts towards no dimension.
+
+- **Interview quality (F10):** a question that was lost from the transcript (and its answer) is not reviewed, so the interview can look as if it had fewer questions. Whether a question is linked to a requirement comes from the AI's segmentation, which may be imperfect; the Q&A analysis tab shows it. Speaking time counts what speech-to-text heard, so long silences are not counted. A poor-quality interview is flagged with its findings but does not suggest a new interview. Consistency compares only interviews with a quality check, so a job's interviews evaluated before F10 are left out until checked.
 
 - **Score repeatability:** the model in use (Gemini 3.5 Flash-Lite) ignores the temperature setting, so scoring the same CV again can differ slightly. Measured on one candidate over 3 runs: requirement results, match and ATS scores were identical; the largest final-score difference was 2 points.
 - **Screening speed:** limited by the free-tier LLM rate (15 requests per minute by default; about 3 calls per CV). The time for 20 CVs is still to be measured and will be stated here.

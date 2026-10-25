@@ -1,8 +1,9 @@
 import { CircleAlert, CircleCheck, Mail, Sparkles, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useNavigate, useOutletContext } from 'react-router'
+import { useNavigate, useOutletContext, useSearchParams } from 'react-router'
 import Button from '../../components/Button.jsx'
 import ConfirmDialog from '../../components/ConfirmDialog.jsx'
+import ConsistencyView from '../../components/assessment/ConsistencyView.jsx'
 import RankedList from '../../components/assessment/RankedList.jsx'
 import Skeleton from '../../components/Skeleton.jsx'
 import DecisionRuleBar from '../../components/feedback/DecisionRuleBar.jsx'
@@ -16,6 +17,7 @@ import {
   evaluationOf,
   matchesRankFilter,
   rankingSummary,
+  readConsistency,
   readRanking,
 } from '../../lib/assessment.js'
 import { countStates, emailState } from '../../lib/feedback.js'
@@ -66,6 +68,49 @@ function EvaluateAllButton({ waiting, isRunning, onClick }) {
   )
 }
 
+const VIEWS = [
+  ['ranking', 'Ranked candidates'],
+  ['consistency', 'Interview consistency'],
+]
+
+// The two views of a job's assessments: the ranked candidates (opens
+// first) and how consistently their interviews were run (F10). "differ" is
+// the Interview consistency badge: interviews that differ from the rest.
+function ViewTabs({ view, differ, onChange }) {
+  return (
+    <div role="tablist" aria-label="Assessments views" className="flex flex-wrap gap-2">
+      {VIEWS.map(([key, label]) => {
+        const isActive = key === view
+        return (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onChange(key)}
+            className={`flex min-h-10 items-center gap-2 rounded-full border-[1.5px] px-4 text-sm font-semibold ${
+              isActive
+                ? 'border-brand bg-brand text-white'
+                : 'border-line bg-white text-navy hover:border-brand/40 hover:bg-tint'
+            }`}
+          >
+            {label}
+            {key === 'consistency' && differ > 0 && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-amber-soft text-amber'
+                }`}
+              >
+                {differ} differ
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function Empty({ title, children, action }) {
   return (
     <section className="flex max-w-xl flex-col gap-3.5 rounded-[20px] border border-dashed border-[#A9C8FF] bg-white p-5.5">
@@ -88,6 +133,10 @@ export default function AssessmentsTab() {
   // The ranked candidates picked for comparing, in the order picked.
   const [picked, setPicked] = useState([])
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view = searchParams.get('view') === 'consistency' ? 'consistency' : 'ranking'
+  const [consistency, setConsistency] = useState(null)
+  const [consistencyError, setConsistencyError] = useState('')
 
   function pick(sessionId) {
     setPicked((current) =>
@@ -142,6 +191,26 @@ export default function AssessmentsTab() {
       isCurrent = false
     }
   }, [job.id, listVersion, current, feedbackCurrent])
+
+  // How consistently the interviews were run (F10), loaded again after each
+  // evaluation like the ranking.
+  useEffect(() => {
+    let isCurrent = true
+    readConsistency(job.id)
+      .then((loaded) => {
+        if (!isCurrent) return
+        setConsistency(loaded)
+        setConsistencyError('')
+      })
+      .catch((loadError) => isCurrent && setConsistencyError(loadError.message))
+    return () => {
+      isCurrent = false
+    }
+  }, [job.id, listVersion, current])
+
+  function showView(next) {
+    setSearchParams(next === 'ranking' ? {} : { view: next }, { replace: true })
+  }
 
   const summary = rankingSummary(rows ?? [])
   // Drafts with a CV claim contradiction not looked at yet (F8): a warning
@@ -218,184 +287,191 @@ export default function AssessmentsTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-extrabold text-navy">Ranked candidates</h2>
-          <p className="mt-1.5 text-sm">
-            Ranked by overall score: 40% CV + 60% interview. The label is decision support; the
-            decision stays with you.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          {summary.review > 0 && (
-            <Button
-              variant="outline"
-              disabled={evaluation.isRunning}
-              title={
-                evaluation.isRunning
-                  ? 'An evaluation is running. Wait for it to finish.'
-                  : undefined
-              }
-              onClick={() => {
-                setApproveError('')
-                setIsApproving(true)
-              }}
-            >
-              Approve all drafts
-              <span className="rounded-full bg-tint px-2 py-0.5 text-xs">{summary.review}</span>
-            </Button>
-          )}
-          {evaluateAll}
-        </div>
-      </div>
-
-      {approvedNotice && (
-        <p
-          role="status"
-          className="flex items-start gap-2.5 rounded-2xl bg-success-soft px-4 py-3 text-sm text-[#0B5C41]"
-        >
-          <CircleCheck className="mt-0.5 size-4.5 shrink-0" aria-hidden="true" />
-          {approvedNotice}
-        </p>
-      )}
-
-      {evaluation.error && (
-        <p role="alert" className="text-sm font-semibold text-danger">
-          {evaluation.error}
-        </p>
-      )}
-
-      {ranked.length === 0 ? (
-        <Empty title="No candidate is ranked yet" action={evaluateAll}>
-          {waiting > 0
-            ? `${waiting} completed ${waiting === 1 ? 'interview has' : 'interviews have'} not been evaluated. Evaluate them to score the answers and write each candidate's report. Candidates are ranked here as soon as their report is written.`
-            : 'Candidates are ranked here as soon as their report is written.'}
-        </Empty>
+      <ViewTabs view={view} differ={consistency?.differ ?? 0} onChange={showView} />
+      {view === 'consistency' ? (
+        <ConsistencyView consistency={consistency} error={consistencyError} />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {Object.entries(SUITABILITY).map(([key, item]) => (
-              <CountBox key={key} label={item.label} value={summary[key]} note={item.note} />
-            ))}
-            <CountBox
-              label="Waiting for your review"
-              value={summary.review}
-              note="draft reports"
-              isReview
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div role="group" aria-label="Show" className="flex flex-wrap gap-2">
-              {RANK_FILTERS.map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  aria-pressed={filter === key}
-                  onClick={() => setFilter(key)}
-                  className={`inline-flex min-h-9 items-center rounded-full px-3.5 text-[13.5px] font-semibold ${
-                    filter === key
-                      ? 'bg-navy text-white'
-                      : 'border border-line bg-white text-navy hover:bg-tint'
-                  }`}
-                >
-                  {label} {counts[key]}
-                </button>
-              ))}
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-extrabold text-navy">Ranked candidates</h2>
+              <p className="mt-1.5 text-sm">
+                Ranked by overall score: 40% CV + 60% interview. The label is decision support; the
+                decision stays with you.
+              </p>
             </div>
-            <span className="text-[13px]">Draft scores can still change after review.</span>
+            <div className="flex flex-wrap items-center gap-2.5">
+              {summary.review > 0 && (
+                <Button
+                  variant="outline"
+                  disabled={evaluation.isRunning}
+                  title={
+                    evaluation.isRunning
+                      ? 'An evaluation is running. Wait for it to finish.'
+                      : undefined
+                  }
+                  onClick={() => {
+                    setApproveError('')
+                    setIsApproving(true)
+                  }}
+                >
+                  Approve all drafts
+                  <span className="rounded-full bg-tint px-2 py-0.5 text-xs">{summary.review}</span>
+                </Button>
+              )}
+              {evaluateAll}
+            </div>
           </div>
-        </>
-      )}
 
-      {approvedRanked.length > 0 && (
-        <DecisionRuleBar
-          key={approvedRanked.length}
-          jobId={job.id}
-          ranked={approvedRanked}
-          skipped={ranked.length - approvedRanked.length}
-          onChanged={onChanged}
-        />
-      )}
-
-      {decided.length > 0 && (
-        <section
-          aria-label="Feedback emails"
-          className="flex flex-wrap items-center justify-between gap-3.5 rounded-[18px] border border-[#E3D8FB] bg-[#FAF7FF] px-5.5 py-3.5"
-        >
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="flex size-9.5 items-center justify-center rounded-xl bg-violet-soft text-violet">
-              <Mail className="size-4.5" aria-hidden="true" />
-            </span>
-            <span className="font-display text-[15.5px] font-extrabold text-navy">
-              Feedback emails
-            </span>
-            <EmailCounts counts={countStates(emailRows.map((item) => item.state))} />
-          </div>
-          <EmailButtons
-            toWrite={toWrite}
-            ready={ready}
-            needReview={needReview}
-            isRunning={feedback.isRunning}
-            onWrite={feedback.write}
-            onSendAll={() => feedback.sendAll('interview')}
-          />
-          {feedback.error && (
-            <p role="alert" className="basis-full text-sm font-semibold text-danger">
-              {feedback.error}
+          {approvedNotice && (
+            <p
+              role="status"
+              className="flex items-start gap-2.5 rounded-2xl bg-success-soft px-4 py-3 text-sm text-[#0B5C41]"
+            >
+              <CircleCheck className="mt-0.5 size-4.5 shrink-0" aria-hidden="true" />
+              {approvedNotice}
             </p>
           )}
-        </section>
-      )}
 
-      {pickedRanked.length > 0 && (
-        <section
-          role="status"
-          className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#A9C8FF] bg-tint px-4.5 py-3"
-        >
-          <span className="text-[14.5px] font-semibold text-navy">
-            {pickedRanked.length} selected · up to {MAX_COMPARED}
-            {pickedRanked.length < 2 && (
-              <span className="font-normal text-body"> · pick one more to compare</span>
-            )}
-          </span>
-          <span className="flex items-center gap-3.5">
-            <button
-              type="button"
-              onClick={() => setPicked([])}
-              className="min-h-10 px-1 text-sm font-semibold text-brand hover:text-brand-dark"
+          {evaluation.error && (
+            <p role="alert" className="text-sm font-semibold text-danger">
+              {evaluation.error}
+            </p>
+          )}
+
+          {ranked.length === 0 ? (
+            <Empty title="No candidate is ranked yet" action={evaluateAll}>
+              {waiting > 0
+                ? `${waiting} completed ${waiting === 1 ? 'interview has' : 'interviews have'} not been evaluated. Evaluate them to score the answers and write each candidate's report. Candidates are ranked here as soon as their report is written.`
+                : 'Candidates are ranked here as soon as their report is written.'}
+            </Empty>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                {Object.entries(SUITABILITY).map(([key, item]) => (
+                  <CountBox key={key} label={item.label} value={summary[key]} note={item.note} />
+                ))}
+                <CountBox
+                  label="Waiting for your review"
+                  value={summary.review}
+                  note="draft reports"
+                  isReview
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div role="group" aria-label="Show" className="flex flex-wrap gap-2">
+                  {RANK_FILTERS.map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-pressed={filter === key}
+                      onClick={() => setFilter(key)}
+                      className={`inline-flex min-h-9 items-center rounded-full px-3.5 text-[13.5px] font-semibold ${
+                        filter === key
+                          ? 'bg-navy text-white'
+                          : 'border border-line bg-white text-navy hover:bg-tint'
+                      }`}
+                    >
+                      {label} {counts[key]}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[13px]">Draft scores can still change after review.</span>
+              </div>
+            </>
+          )}
+
+          {approvedRanked.length > 0 && (
+            <DecisionRuleBar
+              key={approvedRanked.length}
+              jobId={job.id}
+              ranked={approvedRanked}
+              skipped={ranked.length - approvedRanked.length}
+              onChanged={onChanged}
+            />
+          )}
+
+          {decided.length > 0 && (
+            <section
+              aria-label="Feedback emails"
+              className="flex flex-wrap items-center justify-between gap-3.5 rounded-[18px] border border-[#E3D8FB] bg-[#FAF7FF] px-5.5 py-3.5"
             >
-              Clear
-            </button>
-            <Button
-              className="min-h-10"
-              disabled={pickedRanked.length < 2}
-              onClick={() => navigate(compareTo(job.id, pickedRanked))}
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex size-9.5 items-center justify-center rounded-xl bg-violet-soft text-violet">
+                  <Mail className="size-4.5" aria-hidden="true" />
+                </span>
+                <span className="font-display text-[15.5px] font-extrabold text-navy">
+                  Feedback emails
+                </span>
+                <EmailCounts counts={countStates(emailRows.map((item) => item.state))} />
+              </div>
+              <EmailButtons
+                toWrite={toWrite}
+                ready={ready}
+                needReview={needReview}
+                isRunning={feedback.isRunning}
+                onWrite={feedback.write}
+                onSendAll={() => feedback.sendAll('interview')}
+              />
+              {feedback.error && (
+                <p role="alert" className="basis-full text-sm font-semibold text-danger">
+                  {feedback.error}
+                </p>
+              )}
+            </section>
+          )}
+
+          {pickedRanked.length > 0 && (
+            <section
+              role="status"
+              className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#A9C8FF] bg-tint px-4.5 py-3"
             >
-              Compare {pickedRanked.length} candidates
-            </Button>
-          </span>
-        </section>
-      )}
+              <span className="text-[14.5px] font-semibold text-navy">
+                {pickedRanked.length} selected · up to {MAX_COMPARED}
+                {pickedRanked.length < 2 && (
+                  <span className="font-normal text-body"> · pick one more to compare</span>
+                )}
+              </span>
+              <span className="flex items-center gap-3.5">
+                <button
+                  type="button"
+                  onClick={() => setPicked([])}
+                  className="min-h-10 px-1 text-sm font-semibold text-brand hover:text-brand-dark"
+                >
+                  Clear
+                </button>
+                <Button
+                  className="min-h-10"
+                  disabled={pickedRanked.length < 2}
+                  onClick={() => navigate(compareTo(job.id, pickedRanked))}
+                >
+                  Compare {pickedRanked.length} candidates
+                </Button>
+              </span>
+            </section>
+          )}
 
-      {(shownRanked.length > 0 || shownUnranked.length > 0) && (
-        <RankedList
-          ranked={shownRanked}
-          unranked={shownUnranked}
-          openId={openId}
-          onToggle={(id) => setOpenId((open) => (open === id ? null : id))}
-          evaluationOf={(sessionId) => evaluationOf(evaluation.activity, sessionId)}
-          isEvaluating={evaluation.isRunning}
-          onEvaluate={(sessionId) => evaluation.start(sessionId)}
-          onWriteReport={(sessionId) => evaluation.start(sessionId, { reportOnly: true })}
-          picked={pickedRanked}
-          onPick={pick}
-          feedback={feedbackProps}
-        />
-      )}
+          {(shownRanked.length > 0 || shownUnranked.length > 0) && (
+            <RankedList
+              ranked={shownRanked}
+              unranked={shownUnranked}
+              openId={openId}
+              onToggle={(id) => setOpenId((open) => (open === id ? null : id))}
+              evaluationOf={(sessionId) => evaluationOf(evaluation.activity, sessionId)}
+              isEvaluating={evaluation.isRunning}
+              onEvaluate={(sessionId) => evaluation.start(sessionId)}
+              onWriteReport={(sessionId) => evaluation.start(sessionId, { reportOnly: true })}
+              picked={pickedRanked}
+              onPick={pick}
+              feedback={feedbackProps}
+            />
+          )}
 
-      {ranked.length > 0 && shownRanked.length === 0 && shownUnranked.length === 0 && (
-        <p className="text-sm">No candidate matches this filter.</p>
+          {ranked.length > 0 && shownRanked.length === 0 && shownUnranked.length === 0 && (
+            <p className="text-sm">No candidate matches this filter.</p>
+          )}
+        </>
       )}
 
       {isApproving && (

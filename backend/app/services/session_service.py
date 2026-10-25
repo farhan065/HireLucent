@@ -292,6 +292,12 @@ def has_open_interviews(db: Session, job_id: int) -> bool:
     return bool(_active_count(db, InterviewSession.job_id == job_id))
 
 
+def candidate_has_open_interview(db: Session, candidate_id: int) -> bool:
+    """True while the candidate has an interview that is scheduled or under
+    way."""
+    return bool(_active_count(db, InterviewSession.candidate_id == candidate_id))
+
+
 def ensure_rules_can_change(db: Session, job_id: int) -> None:
     """Refuse to change a job's requirements or weights once it has any
     interview that is not cancelled."""

@@ -26,3 +26,13 @@ def no_database_for_conversations(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda job_id: "HL-BE-01" if job_id else None,
     )
     monkeypatch.setattr(conversation_store, "job_profile_for", lambda job_id: None)
+
+
+@pytest.fixture(autouse=True)
+def no_interview_quality_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Evaluations run the Interview Quality graph (F10) after the report.
+    Tests of the evaluation do not need it, so it is skipped; the tests of
+    F10 put the real one back."""
+    from app.services import evaluation_service
+
+    monkeypatch.setattr(evaluation_service, "check_quality", lambda session_id: {})

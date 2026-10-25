@@ -14,6 +14,13 @@ claims checked on their own (start_claim_check), and the interviewer marks
 each contradiction or unverified claim as checked or dismissed
 (review_claim).
 
+After the report, the Interview Quality graph (F10) looks at how the
+interview itself was run: the questions, the requirements they explored and
+the speaking time, with recommendations for the next interview. Its result
+never changes a score or the report, and an interview evaluated before F10
+can be checked on its own (start_quality_check). interview_consistency
+compares the job's checked interviews with each other.
+
 Only one evaluation runs at a time, because the AI's per-minute limit is
 shared. An evaluation does not block fetching or screening CVs for the job.
 While it runs, its task keeps which interviews it covers, which one it is on
@@ -37,6 +44,8 @@ from app.graphs.base import thread_config
 from app.graphs.final_assessment import claims as cv_claims
 from app.graphs.final_assessment import graph as final_graph
 from app.graphs.final_assessment import scoring
+from app.graphs.interview_quality import consistency
+from app.graphs.interview_quality import graph as quality_graph
 from app.graphs.qa_analysis import coverage as coverage_rules
 from app.graphs.qa_analysis.graph import answers_to_judge, get_qa_analysis_graph
 from app.models import Assessment, Candidate, InterviewSession, Job, Task, TranscriptTurn, User
@@ -71,6 +80,12 @@ CLAIM_NOT_TO_CHECK = "Only a contradiction or an unverified claim can be marked.
 NO_CLAIM_CHECK = "This interview's CV claims have not been checked yet."
 CHECKING_CLAIMS = "checking CV claims"
 WRITING_REPORT = "writing the report"
+CHECKING_QUALITY = "checking interview quality"
+QUALITY_CHECKED = "This interview's quality is already checked."
+QUALITY_NOT_WRITTEN = (
+    "The AI service was not available to write the recommendations. Try again in a moment."
+)
+QUALITY_FAILED = "The interview quality could not be checked. Try again in a moment."
 REWRITE_FAILED = (
     "The AI service was not available, so the report was not rewritten. "
     "The draft is unchanged; try again in a moment."
@@ -230,19 +245,24 @@ def evaluate_one(
     # Evaluation is background work: its AI calls leave room for the AI
     # Agent and the interview room.
     with ai_client.background_calls():
-        for update in graph.stream({"session_id": session_id}, config, stream_mode="updates"):
-            if update.get("segment_qa") and update["segment_qa"].get("pairs"):
-                answers = answers_to_judge(update["segment_qa"]["pairs"])
-            elif update.get("evaluate_answers"):
-                judged += len(update["evaluate_answers"].get("evaluations", []))
-            else:
-                continue
-            message = f"{prefix} · {judged} of {answers} answers evaluated"
-            if total == 1:
-                progress.update(judged, answers, message)
-            else:
-                progress.update(done, total, message)
-        analysis = graph.get_state(config).values
+        try:
+            for update in graph.stream(
+                {"session_id": session_id}, config, stream_mode="updates"
+            ):
+                if update.get("segment_qa") and update["segment_qa"].get("pairs"):
+                    answers = answers_to_judge(update["segment_qa"]["pairs"])
+                elif update.get("evaluate_answers"):
+                    judged += len(update["evaluate_answers"].get("evaluations", []))
+                else:
+                    continue
+                message = f"{prefix} · {judged} of {answers} answers evaluated"
+                if total == 1:
+                    progress.update(judged, answers, message)
+                else:
+                    progress.update(done, total, message)
+            analysis = graph.get_state(config).values
+        finally:
+            forget_analysis(graph, config)
         if analysis.get("failure"):
             return analysis
 
@@ -253,7 +273,11 @@ def evaluate_one(
                 progress.update(done, total, f"{prefix} · {step}")
 
         show(CHECKING_CLAIMS)
-        return write_report(graphs.final_assessment, session_id, show)
+        result = write_report(graphs.final_assessment, session_id, show)
+        if not result.get("failure"):
+            show(CHECKING_QUALITY)
+            check_quality(session_id)
+        return result
 
 
 def start_report(
@@ -292,6 +316,9 @@ def run_report(graph: CompiledStateGraph, session_id: int, progress: TaskProgres
     show(CHECKING_CLAIMS)
     with ai_client.background_calls():
         result = write_report(graph, session_id, show)
+        if not result.get("failure"):
+            show(CHECKING_QUALITY)
+            check_quality(session_id)
     failures = []
     if result.get("failure"):
         failures = [{"session_id": session_id, "reason": result["failure"]}]
@@ -307,6 +334,15 @@ def run_report(graph: CompiledStateGraph, session_id: int, progress: TaskProgres
         "session_ids": [session_id],
         "failures": [],
     }
+
+
+def forget_analysis(graph: CompiledStateGraph, config: dict) -> None:
+    """Delete the saved state of a Q&A analysis run once it has ended. The
+    analysis is saved in the assessment, and a run stopped by a restart is
+    started again from the beginning, so the state, which holds the
+    transcript and the answers, is never read again."""
+    if graph.checkpointer is not None:
+        graph.checkpointer.delete_thread(config["configurable"]["thread_id"])
 
 
 def write_report(graph: CompiledStateGraph, session_id: int, show=None) -> dict:
@@ -375,6 +411,119 @@ def run_claim_check(graph: CompiledStateGraph, session_id: int, progress: TaskPr
         "failures": [],
         "claims_only": True,
     }
+
+
+def check_quality(session_id: int) -> dict:
+    """Run the Interview Quality graph (F10) for one interview, on a fresh
+    thread. A failure is logged and returned, never raised, so it cannot
+    stop an evaluation: the report is written either way."""
+    graph = quality_graph.get_interview_quality_graph()
+    config = thread_config(quality_graph.thread_id(session_id))
+    try:
+        if graph.checkpointer is not None:
+            graph.checkpointer.delete_thread(config["configurable"]["thread_id"])
+        graph.invoke({"session_id": session_id}, config)
+        return graph.get_state(config).values
+    except Exception as exc:
+        log_event(
+            logger,
+            "interview_quality_error",
+            session_id=session_id,
+            error_type=type(exc).__name__,
+        )
+        return {"failure": QUALITY_FAILED}
+
+
+def start_quality_check(
+    db: Session, background_tasks: BackgroundTasks, session_id: int, user_id: int
+) -> Task:
+    """Check how an interview was run, for one evaluated before F10 or whose
+    recommendations could not be written. Only the Interview Quality graph
+    runs; the report, its approval and the decision are not touched."""
+    session = session_service.get_session(db, session_id)
+    assessment = get_assessment(db, session_id)
+    if assessment.status == AssessmentStatus.ANALYSED:
+        raise ConflictError(NO_REPORT)
+    quality = assessment.interview_quality or {}
+    written = (quality.get("recommendations") or {}).get("status")
+    if quality and written != quality_graph.NOT_WRITTEN:
+        raise ConflictError(QUALITY_CHECKED)
+    ensure_no_evaluation(db)
+    return task_service.start_task(
+        db,
+        background_tasks,
+        TASK_KIND,
+        user_id,
+        lambda progress: run_quality_check(session_id, progress),
+        job_id=session.job_id,
+    )
+
+
+def run_quality_check(session_id: int, progress: TaskProgress) -> dict:
+    """Check one interview's quality, keeping the same task details as an
+    evaluation (marked quality_only), so the screens show its progress."""
+    note = {"session_ids": [session_id], "current": session_id, "quality_only": True}
+    progress.note({**note, "failures": []})
+    progress.update(0, 1, f"Interview 1 of 1 · {CHECKING_QUALITY}")
+    with ai_client.background_calls():
+        values = check_quality(session_id)
+    reason = values.get("failure") or (QUALITY_NOT_WRITTEN if values.get("ai_failed") else None)
+    failures = [{"session_id": session_id, "reason": reason}] if reason else []
+    progress.note({**note, "current": None, "failures": failures})
+    if reason:
+        raise EvaluationFailed(reason)
+    progress.update(1, 1, "Interview quality checked")
+    return {
+        "total": 1,
+        "evaluated": 1,
+        "failed": 0,
+        "session_ids": [session_id],
+        "failures": [],
+        "quality_only": True,
+    }
+
+
+def _consistency_row(session: InterviewSession) -> dict:
+    quality = session.assessment.interview_quality
+    metrics = quality["metrics"]
+    return {
+        "session_id": session.id,
+        "candidate_name": session.candidate.full_name if session.candidate else "",
+        "interview_at": session.started_at or session.scheduled_start,
+        "minutes": metrics.get("actual_minutes"),
+        "questions": metrics.get("job_questions", 0),
+        "candidate_share": metrics.get("candidate_share"),
+        "explored": quality.get("explored", []),
+        "requirements": quality.get("requirements", []),
+        "quality_score": quality.get("score"),
+        "quality_label": quality.get("label"),
+    }
+
+
+def interview_consistency(db: Session, job_id: int) -> dict:
+    """How similar the job's checked interviews were (F10): the typical
+    interview, how many asked each requirement and how each one differs."""
+    if db.get(Job, job_id) is None:
+        raise NotFoundError("This job does not exist.")
+    sessions = db.scalars(
+        select(InterviewSession)
+        .where(
+            InterviewSession.job_id == job_id,
+            InterviewSession.status == SessionStatus.COMPLETED,
+        )
+        .options(
+            selectinload(InterviewSession.candidate),
+            selectinload(InterviewSession.assessment),
+        )
+        .order_by(InterviewSession.ended_at, InterviewSession.id)
+    ).all()
+    rows = [
+        _consistency_row(session)
+        for session in sessions
+        if session.assessment is not None
+        and (session.assessment.interview_quality or {}).get("status") == quality_graph.CHECKED
+    ]
+    return consistency.job_consistency(rows)
 
 
 def review_claim(

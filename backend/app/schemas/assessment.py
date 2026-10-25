@@ -1,11 +1,14 @@
 """Schemas for the post-interview assessment."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.task import TaskResponse
+
+# An id such as Q3 or S1, sent back by the screens.
+ItemId = Annotated[str, Field(min_length=1, max_length=20)]
 
 
 class Criterion(BaseModel):
@@ -140,7 +143,7 @@ class QuestionSuggestion(BaseModel):
 
 
 class AddQuestionsRequest(BaseModel):
-    pair_ids: list[str] = Field(
+    pair_ids: list[ItemId] = Field(
         min_length=1, max_length=100, description="The suggestions the interviewer ticked."
     )
 
@@ -186,7 +189,7 @@ class ReviewRequest(BaseModel):
     summary: str | None = Field(
         default=None, min_length=1, max_length=1500, description="edit: the new summary."
     )
-    remove: list[str] = Field(
+    remove: list[ItemId] = Field(
         default_factory=list,
         max_length=20,
         description="edit: ids of strengths or weaknesses to remove.",
@@ -312,6 +315,141 @@ class InterviewDimensions(BaseModel):
     dimensions: list[InterviewDimension]
 
 
+class QualityRef(BaseModel):
+    """What a finding or recommendation rests on, shown as a chip."""
+
+    type: Literal["question", "requirement", "measure", "time"]
+    id: str | None = Field(default=None, description="Q… or R…, for a question or requirement.")
+    start_ms: int | None = Field(default=None, description="From the interview start.")
+    label: str
+
+
+class QualityFinding(BaseModel):
+    id: str = Field(description="F1, F2, …")
+    kind: str
+    text: str = Field(description="The fact, written by code.")
+    refs: list[QualityRef]
+
+
+class QualityRecommendation(BaseModel):
+    id: str = Field(description="M1, M2, …")
+    text: str = Field(
+        description="Written by the AI from the findings; every id and number checked."
+    )
+    example_question: str | None = None
+    finding_ids: list[str]
+    kinds: list[str]
+    refs: list[QualityRef]
+
+
+class QualityRecommendations(BaseModel):
+    status: Literal["written", "none_needed", "not_written"] = Field(
+        description="not_written: the AI was not available, or none could be proven."
+    )
+    reason: str | None = None
+    items: list[QualityRecommendation]
+
+
+class LittleSignal(BaseModel):
+    id: str
+    reason: str
+
+
+class QuestionRef(BaseModel):
+    id: str
+
+
+class QuestionsPart(BaseModel):
+    score: float
+    useful: int
+    total: int = Field(description="Job-related questions; small talk is left out.")
+    little_signal: list[LittleSignal]
+    not_linked: list[QuestionRef]
+
+
+class CoveragePart(BaseModel):
+    score: float
+    points: float
+    max: float
+    explored: int
+    total: int
+    weak: list[str]
+    missing: list[str]
+
+
+class QualityPenalty(BaseModel):
+    key: str
+    label: str
+    points: float
+
+
+class InteractionPart(BaseModel):
+    score: float
+    penalties: list[QualityPenalty]
+
+
+class QualityParts(BaseModel):
+    questions: QuestionsPart
+    coverage: CoveragePart | None = None
+    interaction: InteractionPart | None = None
+
+
+class SpeakingStretch(BaseModel):
+    ms: int
+    start_ms: int
+
+
+class SpeakingSegment(BaseModel):
+    speaker: Literal["interviewer", "candidate"]
+    start_ms: int
+    end_ms: int
+    turn_id: int | None = Field(
+        default=None, description="Its first transcript turn, to open the transcript there."
+    )
+
+
+class QualityMetrics(BaseModel):
+    interviewer_ms: int
+    candidate_ms: int
+    candidate_share: float | None
+    longest_stretch: SpeakingStretch | None
+    small_talk_ms: int
+    small_talk_share: float | None
+    small_talk_questions: int
+    follow_ups: list[str] = Field(description="The questions that were followed up.")
+    questions_by_kind: dict[str, int]
+    job_questions: int
+    planned_minutes: int | None
+    actual_minutes: int | None
+    actual_ms: int | None
+    planned_ms: int | None
+    segments: list[SpeakingSegment]
+
+
+class QualityRequirement(BaseModel):
+    id: str
+    text: str
+    priority: str
+
+
+class InterviewQuality(BaseModel):
+    """How the interview itself was run (F10). About the interview, not the
+    candidate."""
+
+    status: Literal["checked"]
+    checked_at: datetime
+    score: float | None = Field(description="Average of the three parts, 0-100.")
+    label: Literal["good", "needs_improvement", "poor"] | None = Field(
+        description="good 70+, needs_improvement 50-69, poor below 50."
+    )
+    parts: QualityParts
+    metrics: QualityMetrics
+    findings: list[QualityFinding]
+    recommendations: QualityRecommendations
+    explored: list[str] = Field(description="The requirements its questions explored.")
+    requirements: list[QualityRequirement]
+
+
 class AssessmentOut(BaseModel):
     """An interview's assessment as far as it has been made."""
 
@@ -362,6 +500,11 @@ class AssessmentOut(BaseModel):
         default=None,
         description="CV claims compared with the interview (F8); empty for an interview "
         "evaluated before F8. They never change a score, the report or the decision.",
+    )
+    interview_quality: InterviewQuality | None = Field(
+        default=None,
+        description="How the interview was run (F10); empty for an interview evaluated "
+        "before F10. It never changes a score, the report or the decision.",
     )
     decision: Literal["hire", "reject"] | None = Field(
         default=None, description="The interviewer's decision (F11), after approval."
@@ -439,3 +582,56 @@ class EvaluationActivity(BaseModel):
     running: TaskResponse | None
     last: TaskResponse | None
     waiting: int = Field(description="Completed interviews not evaluated yet.")
+
+
+class ConsistencyTypical(BaseModel):
+    minutes: float | None
+    questions: float | None
+    candidate_share: float | None
+
+
+class ConsistencyRequirement(BaseModel):
+    id: str
+    text: str
+    priority: str
+    asked: int = Field(description="Interviews whose questions explored it.")
+    total: int
+    mostly_missed: bool = Field(description="Explored in fewer than half of the interviews.")
+
+
+class ConsistencyFlag(BaseModel):
+    kind: Literal["must_have_not_asked", "length", "questions", "speaking_share"]
+    text: str
+    requirement_id: str | None = None
+    asked: int | None = None
+    others: int | None = None
+    value: float | None = None
+
+
+class ConsistencyInterview(BaseModel):
+    session_id: int
+    candidate_name: str
+    interview_at: datetime | None
+    minutes: int | None
+    questions: int
+    candidate_share: float | None
+    explored: list[str]
+    quality_score: float | None
+    quality_label: Literal["good", "needs_improvement", "poor"] | None
+    flags: list[ConsistencyFlag]
+
+
+class InterviewConsistency(BaseModel):
+    """Were the job's candidates interviewed in a similar way (F10)? Worked
+    out from the evaluated interviews with an interview quality check."""
+
+    count: int = Field(description="Interviews compared.")
+    min_interviews: int
+    typical: ConsistencyTypical | None = Field(
+        description="The middle values; empty with fewer than min_interviews."
+    )
+    requirements: list[ConsistencyRequirement]
+    interviews: list[ConsistencyInterview] = Field(
+        description="Most differences first, then by name."
+    )
+    differ: int = Field(description="Interviews with at least one flag.")
