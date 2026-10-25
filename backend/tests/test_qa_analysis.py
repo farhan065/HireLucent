@@ -1178,17 +1178,31 @@ class FakeProgress:
         self.notes.append({**details, "failures": list(details["failures"])})
 
 
+class FakeCheckpointer:
+    """Remembers which threads were deleted."""
+
+    def __init__(self) -> None:
+        self.deleted: list[str] = []
+
+    def delete_thread(self, thread_id: str) -> None:
+        self.deleted.append(thread_id)
+
+
 class FakeGraph:
     """Streams the updates a real run would: the pairs, then one batch."""
 
-    def __init__(self, failures: dict[int, str]) -> None:
+    def __init__(self, failures: dict[int, str], broken: int | None = None) -> None:
         self.failures = failures
+        self.broken = broken
         self.seen: list[int] = []
         self.last: int | None = None
+        self.checkpointer = FakeCheckpointer()
 
     def stream(self, state: dict, config: dict, stream_mode: str):
         self.seen.append(state["session_id"])
         self.last = state["session_id"]
+        if state["session_id"] == self.broken:
+            raise RuntimeError("the database went away")
         yield {"segment_qa": {"pairs": PAIRS, "attempts": 1}}
         yield {"evaluate_answers": {"evaluations": [{}, {}, {}]}}
 
@@ -1233,6 +1247,30 @@ def test_one_failed_interview_does_not_stop_the_others() -> None:
     assert summary["total"] == 3 and summary["evaluated"] == 2 and summary["failed"] == 1
     assert summary["failures"] == [{"session_id": 2, "reason": qa.NO_PAIRS}]
     assert progress.updates[-1] == (3, 3, "Evaluated 2 of 3 interviews")
+
+
+def test_each_analysis_run_deletes_its_saved_state_when_it_ends() -> None:
+    graphs = _graphs({2: qa.NO_PAIRS}, {3: final.NO_SUMMARY})
+
+    evaluation_service.run_evaluation(graphs, [1, 2, 3], FakeProgress())
+
+    # Passed, failed in the analysis and failed in the report: all three
+    # runs leave nothing behind.
+    assert graphs.qa_analysis.checkpointer.deleted == [
+        "evaluation-task-1-1",
+        "evaluation-task-1-2",
+        "evaluation-task-1-3",
+    ]
+
+
+def test_a_run_that_breaks_still_deletes_its_saved_state() -> None:
+    graph = FakeGraph({}, broken=1)
+    graphs = evaluation_service.EvaluationGraphs(graph, FakeReportGraph(None))
+
+    with pytest.raises(RuntimeError):
+        evaluation_service.evaluate_one(graphs, 1, 0, 1, FakeProgress())
+
+    assert graph.checkpointer.deleted == ["evaluation-task-1-1"]
 
 
 def test_the_task_keeps_which_interview_it_is_on() -> None:

@@ -245,19 +245,24 @@ def evaluate_one(
     # Evaluation is background work: its AI calls leave room for the AI
     # Agent and the interview room.
     with ai_client.background_calls():
-        for update in graph.stream({"session_id": session_id}, config, stream_mode="updates"):
-            if update.get("segment_qa") and update["segment_qa"].get("pairs"):
-                answers = answers_to_judge(update["segment_qa"]["pairs"])
-            elif update.get("evaluate_answers"):
-                judged += len(update["evaluate_answers"].get("evaluations", []))
-            else:
-                continue
-            message = f"{prefix} · {judged} of {answers} answers evaluated"
-            if total == 1:
-                progress.update(judged, answers, message)
-            else:
-                progress.update(done, total, message)
-        analysis = graph.get_state(config).values
+        try:
+            for update in graph.stream(
+                {"session_id": session_id}, config, stream_mode="updates"
+            ):
+                if update.get("segment_qa") and update["segment_qa"].get("pairs"):
+                    answers = answers_to_judge(update["segment_qa"]["pairs"])
+                elif update.get("evaluate_answers"):
+                    judged += len(update["evaluate_answers"].get("evaluations", []))
+                else:
+                    continue
+                message = f"{prefix} · {judged} of {answers} answers evaluated"
+                if total == 1:
+                    progress.update(judged, answers, message)
+                else:
+                    progress.update(done, total, message)
+            analysis = graph.get_state(config).values
+        finally:
+            forget_analysis(graph, config)
         if analysis.get("failure"):
             return analysis
 
@@ -329,6 +334,15 @@ def run_report(graph: CompiledStateGraph, session_id: int, progress: TaskProgres
         "session_ids": [session_id],
         "failures": [],
     }
+
+
+def forget_analysis(graph: CompiledStateGraph, config: dict) -> None:
+    """Delete the saved state of a Q&A analysis run once it has ended. The
+    analysis is saved in the assessment, and a run stopped by a restart is
+    started again from the beginning, so the state, which holds the
+    transcript and the answers, is never read again."""
+    if graph.checkpointer is not None:
+        graph.checkpointer.delete_thread(config["configurable"]["thread_id"])
 
 
 def write_report(graph: CompiledStateGraph, session_id: int, show=None) -> dict:
