@@ -37,10 +37,3 @@ class JobActivity(BaseModel):
     last_intake: TaskResponse | None
     last_screening: TaskResponse | None
     ready_to_screen: int = Field(description="CVs with screening steps still to run.")
-
-
-class DemoTaskRequest(BaseModel):
-    steps: int = Field(default=5, ge=1, le=20)
-    fail_at: int | None = Field(
-        default=None, ge=1, description="Step at which the task should fail."
-    )
