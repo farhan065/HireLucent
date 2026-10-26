@@ -24,6 +24,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import ValidationError
 from starlette.concurrency import iterate_in_threadpool
 
+from app.ai.usage import usage_context
 from app.core.errors import INTERNAL_ERROR_MESSAGE, AppError
 from app.core.logging import get_logger, log_event
 from app.core.security import decode_access_token
@@ -93,10 +94,11 @@ async def chat(
                 message = SocketMessage.model_validate(await websocket.receive_json())
                 # The graph is synchronous, so it runs in a worker thread and
                 # its events are passed to the socket as they arrive.
-                async for event in iterate_in_threadpool(
-                    _events(graph, user_id, message)
-                ):
-                    await websocket.send_json(event)
+                with usage_context(route="WS /chat"):
+                    async for event in iterate_in_threadpool(
+                        _events(graph, user_id, message)
+                    ):
+                        await websocket.send_json(event)
             except (ValidationError, ValueError):
                 await websocket.send_json(
                     {"type": "error", "message": "That message could not be read."}

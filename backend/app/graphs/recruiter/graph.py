@@ -37,6 +37,7 @@ from pydantic import ValidationError
 
 from app.ai.client import run_with_retries
 from app.ai.models import get_chat_model, get_room_chat_model
+from app.ai.usage import usage_context
 from app.core.config import get_settings
 from app.core.errors import AppError, ServiceUnavailableError
 from app.core.logging import get_logger, log_event
@@ -149,9 +150,10 @@ def agent(state: RecruiterState) -> dict:
         prompt = f"{SYSTEM_PROMPT}\n{now_description(datetime.now(timezone.utc))}"
         model = get_agent_model()
     messages = [SystemMessage(prompt), *state["messages"]]
-    response = run_with_retries(
-        "recruiter_agent", lambda: model.invoke(messages), max_attempts=max_attempts
-    )
+    with usage_context(job_id=state.get("saved_job_id")):
+        response = run_with_retries(
+            "recruiter_agent", lambda: model.invoke(messages), max_attempts=max_attempts
+        )
     return {"messages": [response]}
 
 

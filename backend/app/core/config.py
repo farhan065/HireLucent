@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     # CV screening may use only this many of those calls per minute, so the
     # rest stay free for the AI Agent and the interview room.
     llm_background_requests_per_minute: int = Field(default=10, ge=1)
+    # AI cost report: one line per model answer is kept in this file in
+    # log_dir, and the report prices the tokens in US dollars per million.
+    ai_usage_file_name: str = "ai_usage.log"
+    ai_price_input_per_1m: float = Field(default=0.30, ge=0)
+    ai_price_output_per_1m: float = Field(default=2.50, ge=0)
 
     # Vector database for the Knowledge Base and CV matching.
     chroma_host: str = "chromadb"

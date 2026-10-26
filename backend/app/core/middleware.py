@@ -7,6 +7,7 @@ from uuid import uuid4
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.ai.usage import route_label, usage_context
 from app.core.errors import internal_error_response, log_unhandled_exception
 from app.core.logging import get_logger, log_event, request_id_ctx
 
@@ -49,7 +50,10 @@ class RequestContextMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, receive, send_with_request_id)
+            # AI calls made for this request, including its background work,
+            # are counted under its route in the AI cost report.
+            with usage_context(route=route_label(scope["method"], scope["path"])):
+                await self.app(scope, receive, send_with_request_id)
         except Exception as exc:
             log_unhandled_exception(exc)
             if response_started:

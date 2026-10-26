@@ -155,6 +155,7 @@ All configuration comes from environment variables in `.env`. `.env.example` lis
 | `SEED_INTERVIEWER_EMAIL`, `SEED_INTERVIEWER_PASSWORD`, `SEED_INTERVIEWER_NAME` | The first interviewer account |
 | `LLM_PROVIDER`, `LLM_MODEL`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | Chat model (`gemini` or `openai`) |
 | `LLM_REQUESTS_PER_MINUTE`, `AI_TIMEOUT_SECONDS` | Rate limit for the chat model and the timeout of each AI call |
+| `AI_PRICE_INPUT_PER_1M`, `AI_PRICE_OUTPUT_PER_1M` | The chat model's price in US dollars per million input and output tokens, for the [AI cost report](#ai-cost-report) |
 | `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `OLLAMA_BASE_URL` | Embedding model |
 | `CHROMA_HOST`, `CHROMA_PORT` | Vector store |
 | `MCP_RAG_URL`, `JD_REFERENCE_MAX_DISTANCE`, `REFERENCE_MAX_DISTANCE` | RAG MCP server; how close a template must be to count as a reference, and how close a Knowledge Base reference passage must be to check an interview answer against it |
@@ -390,6 +391,23 @@ Open http://localhost:5050 (only from this computer), sign in with `PGADMIN_EMAI
 docker compose exec backend python -m scripts.stability_check --candidate <id> --runs 3
 ```
 
+### AI cost report
+
+Every answer from the chat model (Gemini) adds one line to `logs/ai_usage.log`: the time, the API route and the graph step that asked, the job, candidate and interview IDs, and the input and output token counts Gemini reported. Prompts and answers are never written. The file is not rotated, so the whole history is kept. Embeddings, OCR, transcription and the face check run locally and cost nothing per call, so they are not counted.
+
+The report turns the file into two CSV files in `logs/reports/`:
+
+```bash
+docker compose exec backend python -m scripts.ai_cost_report                                   # everything so far
+docker compose exec backend python -m scripts.ai_cost_report --from 2026-10-27 --to 2026-10-27 # chosen days
+docker compose exec backend python -m scripts.ai_cost_report --job 15                          # one job
+```
+
+- `ai_calls_<name>.csv`: one row per call, with its cost.
+- `ai_cost_summary_<name>.csv`: totals by day, by route and by step (calls, retries, tokens, cost, share), the cost per CV screened, per candidate interviewed, per feedback email, per job and per hire (with the lowest and highest), and a monthly projection.
+
+Costs use `AI_PRICE_INPUT_PER_1M` and `AI_PRICE_OUTPUT_PER_1M`; check them against the provider's pricing page. A call that gets no answer is not counted, as the provider does not bill it. Each call records its job when it is made, so deleting a candidate or an interview later does not change a job's cost, and the AI Agent chat that created a job counts for that job, including the messages before it was saved. Agent chat that never saves a job belongs to no job, so it appears only in the report without `--job`.
+
 **Project layout:**
 
 ```
@@ -404,7 +422,7 @@ backend/
     mcp_servers/    the custom RAG and Google MCP servers
     models/ schemas/ core/ db/
   alembic/          database migrations
-  scripts/          seed, Google sign-in and check scripts
+  scripts/          seed, Google sign-in, check scripts and the AI cost report
   tests/
 frontend/src/       pages, components, hooks, lib
 mcp-blogger/        container for the community Blogger MCP server
