@@ -292,7 +292,9 @@ After the interview, HireLucent compares every claim in the candidate's CV with 
 
 When there is nothing to praise, the email leaves the strengths out instead of inventing one. The greeting uses the name the candidate goes by ("Md. Tashsin Ahmed" and "TASHSIN AHMED" are both greeted as *Tashsin*).
 
-The reason sentence follows the role's level: *"deliver in these areas from the very first day"* for experienced roles (3+ years), gentler wording for junior roles and internships.
+After an interview, the growth areas are named as the broader skill area they belong to (for example *core machine learning fundamentals*), never the specific question or concept that was asked, so the interview questions stay with the team.
+
+The sentence on why the growth areas matter is written by the AI in its own words from the job's requirements, never with invented duties. Its meaning follows the role's level: needed *"from the very first day"* for experienced roles (3+ years), gentler for junior roles and internships. Preferred requirements missed at screening are described as making an application stronger, never as a need.
 
 **Fairness.** The wording is free: the AI writes in its own words, warm and encouraging, and may name the candidate's strengths or sum them up. There are no limits on how many points it uses and no exact-word matching. What it may not do is say anything unsafe or anything the candidate's results do not support. Every draft passes two checks before it is shown as ready:
 1. **Safety rules (code):** no scores, ranks or percentages; no other candidates; no personal topics (age, gender, religion, health, family and similar); no personal data (email addresses, phone numbers, links); no promises; no offer details; no word-for-word quotes; no HTML or placeholders; and no named skill or tool that is in neither the candidate's results nor the job's requirements (for example *Kubernetes* when nothing about it was judged). A word that is part of the job's own requirements is allowed.
