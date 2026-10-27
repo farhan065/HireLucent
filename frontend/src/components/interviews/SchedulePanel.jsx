@@ -25,10 +25,14 @@ import {
 import Button from '../Button.jsx'
 import ConfirmDialog from '../ConfirmDialog.jsx'
 import SidePanel from '../SidePanel.jsx'
+import TimeField from '../TimeField.jsx'
 import { DialogMessage } from './EmailMessage.jsx'
 
 const FIELD =
   'min-h-11.5 w-full rounded-xl border-[1.5px] border-line bg-white px-3.5 text-[15px] text-navy focus:border-brand focus:outline-none'
+// The same box as FIELD, for the three parts of the 12-hour time picker.
+const TIME_BOX =
+  'min-h-11.5 w-full rounded-xl border-[1.5px] border-line bg-white px-3 text-[15px] text-navy'
 const LABEL = 'flex flex-col gap-1.5 text-[14.5px] font-semibold text-navy'
 
 function Field({ label, children }) {
@@ -328,12 +332,11 @@ export default function SchedulePanel({
               />
             </Field>
             <Field label={isMove || slots.length < 2 ? 'Starts' : 'First interview starts'}>
-              <input
-                type="time"
+              <TimeField
+                label={isMove || slots.length < 2 ? 'Starts' : 'First interview starts'}
                 value={time}
-                step={300}
-                onChange={(event) => setTime(event.target.value)}
-                className={FIELD}
+                onChange={setTime}
+                className={TIME_BOX}
               />
             </Field>
             <Field label="Length">
