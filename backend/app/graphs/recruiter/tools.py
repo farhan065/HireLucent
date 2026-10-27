@@ -25,16 +25,19 @@ FORM_IN_USE_MESSAGE = (
     "This form is already used by another job. Each job needs its own form, "
     "so its applications stay separate. Paste the link of a new form."
 )
-ALREADY_SAVED_MESSAGE = (
-    "This conversation already has a saved job. Start a new job conversation "
-    "for another role."
+PUBLISHED_NO_CHANGES_MESSAGE = (
+    "This job is already published, so its description can no longer change. "
+    "Its requirements and weights can still be changed with Edit in the job "
+    "brief."
 )
 
 
 class SaveJob(BaseModel):
     """Save the job with its requirements checklist and scoring weights. The
     approved job description is taken from the conversation. Call this only
-    after the interviewer has approved the description."""
+    after the interviewer has approved the description. Calling it again
+    before the job is published replaces the saved description, requirements
+    and weights."""
 
     requirements: JobRequirements
     scoring_weights: ScoringWeights
@@ -42,15 +45,36 @@ class SaveJob(BaseModel):
 
 def save_job(arguments: dict[str, Any], state: dict[str, Any]) -> tuple[str, dict]:
     """Validate the arguments and store the job. Returns a message for the
-    model and the state fields to update."""
-    if state.get("saved_job_id"):
-        raise ConflictError(ALREADY_SAVED_MESSAGE)
+    model and the state fields to update.
+
+    If the conversation already has a saved job that is not published yet,
+    that job is updated with the newest description, requirements and
+    weights, and keeps its job code.
+    """
     data = SaveJob.model_validate(arguments)
     draft = latest_draft(state["messages"])
     if draft is None:
         raise ConflictError("There is no job description to save yet.")
 
+    job_id = state.get("saved_job_id")
     with SessionLocal() as db:
+        if job_id:
+            if job_service.get_job(db, job_id).status != JobStatus.APPROVED:
+                raise ConflictError(PUBLISHED_NO_CHANGES_MESSAGE)
+            job = job_service.update_unpublished_job(
+                db,
+                job_id,
+                title=draft.title,
+                jd_text=draft.body,
+                requirements=data.requirements,
+                scoring_weights=data.scoring_weights,
+            )
+            # Starts like a first save, so the card shows as approved.
+            return (
+                f"Job saved again with job code {job.job_code}. The description, "
+                "requirements and weights were replaced.",
+                {},
+            )
         job = job_service.create_job(
             db,
             title=draft.title,

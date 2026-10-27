@@ -45,7 +45,10 @@ from app.graphs.base import MAX_ATTEMPTS, BaseState, capture_errors
 from app.graphs.checkpointer import get_checkpointer
 from app.graphs.recruiter.prompts import (
     ERROR_REPLY,
+    FEEDBACK_LABEL,
     INTERVIEW_PROMPT,
+    NO_REASON,
+    REJECTED_PREFIX,
     ROOM_BUSY_REPLY,
     ROOM_ERROR_REPLY,
     SYSTEM_PROMPT,
@@ -221,9 +224,9 @@ def human_approval(
             update={"messages": [_with_arguments(request, call, edited)]},
         )
 
-    feedback = decision.get("feedback") or "No reason was given."
+    feedback = decision.get("feedback") or NO_REASON
     rejection = ToolMessage(
-        content=f"The interviewer did not approve this. Their feedback: {feedback}",
+        content=f"{REJECTED_PREFIX}{FEEDBACK_LABEL}{feedback}",
         tool_call_id=call["id"],
     )
     return Command(goto="agent", update={"messages": [rejection]})

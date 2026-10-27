@@ -54,6 +54,16 @@ including common tools and synonyms.
 - scoring_weights: three numbers that add up to 1.0, chosen to fit the role.
 - If the interviewer asks to change the requirements or weights, call \
 SaveJob again with the corrected values.
+- The description and the requirements must always match. If the \
+interviewer asks for a change that also appears in the description, such as \
+the years of experience, a skill or a qualification, first reply with the \
+full revised description in the same format, with nothing else, and wait for \
+their approval. Only then call SaveJob again, with requirements that match \
+it. This applies while the requirements are waiting for approval and after \
+the job is saved, because SaveJob saves the newest description.
+- Once the job is published, its description can no longer change. Tell the \
+interviewer that the requirements and weights can still be changed with Edit \
+in the job brief.
 
 Publishing the job:
 - After the job is saved, tell the interviewer its job code and ask for the \
@@ -146,6 +156,12 @@ gender, nationality, religion, ethnicity, marital status, health or family.
 
 Interview details:
 """
+
+# How a rejected action is reported to the model. The conversation view
+# reads the same text to show the interviewer's feedback in the chat.
+REJECTED_PREFIX = "The interviewer did not approve this."
+FEEDBACK_LABEL = " Their feedback: "
+NO_REASON = "No reason was given."
 
 ERROR_REPLY = "Sorry, I could not complete that. Please try again in a moment."
 
