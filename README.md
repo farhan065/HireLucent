@@ -47,6 +47,62 @@ The name reflects the platform's purpose of bringing clarity to candidate evalua
 13. **Review the report.** The interviewer approves, edits or asks for changes. Approved reports can be exported as PDF, printed and compared side by side.
 14. **Decide and give feedback.** Hire or Reject, then a fair, evidence-based email for every candidate, reviewed and approved before it is sent.
 
+## Screens
+
+The key screens of HireLucent, covering every feature from F1 to F11. All names and data shown are fictional.
+
+**Getting started and job creation**
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/01-landing.jpg" alt="Landing page" width="100%"><br><b>Landing page</b>: HireLucent's public page</td>
+<td width="50%" valign="top"><img src="docs/screens/02-dashboard.jpg" alt="Dashboard" width="100%"><br><b>Dashboard</b>: Jobs by stage; start a job by describing the role</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/03-ai-agent.jpg" alt="AI Agent" width="100%"><br><b>AI Agent</b>: Job description and requirements card, waiting for approval</td>
+<td width="50%" valign="top"><img src="docs/screens/04-knowledge-base.jpg" alt="Knowledge Base" width="100%"><br><b>Knowledge Base</b>: Templates, reference documents and the question bank</td>
+</tr>
+</table>
+
+**Screening, scheduling and the live interview**
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/05-screening.jpg" alt="Screening (F1, F2)" width="100%"><br><b>Screening (F1, F2)</b>: Final ranking with scores, requirements and feedback emails</td>
+<td width="50%" valign="top"><img src="docs/screens/06-interviews.jpg" alt="Interviews tab" width="100%"><br><b>Interviews tab</b>: Scheduled and completed interviews, Start and Evaluate</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/07-identity-photo.jpg" alt="Identity photo (F7)" width="100%"><br><b>Identity photo (F7)</b>: The candidate confirms it's them before the waiting room</td>
+<td width="50%" valign="top"><img src="docs/screens/08-interview-room.jpg" alt="Interview room (F3, F4)" width="100%"><br><b>Interview room (F3, F4)</b>: Video, live transcript, candidate profile and the AI Agent</td>
+</tr>
+</table>
+
+**Transcript, analysis and the report**
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/09-transcript.jpg" alt="Transcript viewer (F4)" width="100%"><br><b>Transcript viewer (F4)</b>: Search, timeline and download</td>
+<td width="50%" valign="top"><img src="docs/screens/10-qa-analysis.jpg" alt="Q&A analysis (F5)" width="100%"><br><b>Q&A analysis (F5)</b>: Every answer judged, with evidence and the accuracy source</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/11-report.jpg" alt="Assessment report (F6)" width="100%"><br><b>Assessment report (F6)</b>: Scores, strengths, weaknesses and the review step</td>
+<td width="50%" valign="top"><img src="docs/screens/12-interview-performance.jpg" alt="Interview performance (F9)" width="100%"><br><b>Interview performance (F9)</b>: Six dimensions with the answers behind them</td>
+</tr>
+</table>
+
+**CV claims, interview quality, comparison and feedback**
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/13-cv-claims.jpg" alt="CV claims (F8)" width="100%"><br><b>CV claims (F8)</b>: Contradictions, unverified and consistent claims</td>
+<td width="50%" valign="top"><img src="docs/screens/14-interview-quality.jpg" alt="Interview quality (F10)" width="100%"><br><b>Interview quality (F10)</b>: Quality score, findings and recommendations</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/15-compare.jpg" alt="Compare candidates (F6)" width="100%"><br><b>Compare candidates (F6)</b>: Up to three candidates side by side</td>
+<td width="50%" valign="top"><img src="docs/screens/16-feedback-email.jpg" alt="Feedback email (F11)" width="100%"><br><b>Feedback email (F11)</b>: Draft with fairness check, evidence and approval</td>
+</tr>
+</table>
+
 ## Architecture
 
 The diagrams are in [`docs/`](docs):
@@ -56,6 +112,13 @@ The diagrams are in [`docs/`](docs):
 - LangGraph workflows: [1 Recruiter Agent](docs/LangGraph_1_Recruiter_Agent_Farhan_30221.drawio.pdf), [2 CV Screening](docs/LangGraph_2_CV_Screening_Farhan_30221.drawio.pdf), [3 Q&A Analysis](docs/LangGraph_3_QA_Analysis_30221_Farhan.pdf), [4 Final Assessment](docs/LangGraph_4_Final_Assessment_Farhan_30221.drawio.pdf), [5 Candidate Feedback](docs/LangGraph_5_Candidate_Feedback_30221_Farhan.pdf) (innovation feature), [6 Interview Quality](docs/LangGraph_6_Interview_Quality_30221_Farhan.pdf)
 
 All diagrams show the system as built.
+
+Project documents, also in [`docs/`](docs):
+
+- [Software Requirements Specification (SRS)](docs/HireLucent_SRS_30221_Farhan.pdf)
+- [Requirement clarification document](docs/HireLucent_Clarification_30221_Farhan.pdf)
+- [Work Breakdown Structure (WBS)](docs/HireLucent_WBS_30221_Farhan.pdf)
+- [Innovation feature rationale](docs/HireLucent_Innovation_Rationale_30221_Farhan.pdf) and [design](docs/HireLucent_Feedback_Composer_Design_30221_Farhan.pdf)
 
 | Part | Technology | Role |
 |---|---|---|
@@ -303,7 +366,7 @@ After the interview, HireLucent compares every claim in the candidate's CV with 
 
 ## Innovation Feature: Candidate Feedback Composer (F11)
 
-> **This is HireLucent's innovation feature (BID §6).** The reasoning behind it is in [`docs/innovation_rationale.md`](docs/innovation_rationale.md), the design in [`docs/feedback_composer_design.md`](docs/feedback_composer_design.md) and the workflow in [LangGraph 5](docs/LangGraph_5_Candidate_Feedback_30221_Farhan.pdf).
+> **This is HireLucent's innovation feature (BID §6).** The reasoning behind it is in the [innovation rationale](docs/HireLucent_Innovation_Rationale_30221_Farhan.pdf), the design in the [feedback composer design](docs/HireLucent_Feedback_Composer_Design_30221_Farhan.pdf) and the workflow in [LangGraph 5](docs/LangGraph_5_Candidate_Feedback_30221_Farhan.pdf).
 
 **The problem.** Most applicants are rejected at screening and never hear why; interviewed candidates often get a generic message. Writing an honest, respectful answer for every candidate takes time, and a rushed one can say something unfair or untrue.
 
@@ -454,7 +517,8 @@ backend/
   tests/
 frontend/src/       pages, components, hooks, lib
 mcp-blogger/        container for the community Blogger MCP server
-docs/               architecture and LangGraph diagrams
+docs/               SRS, clarification, WBS, innovation rationale and design,
+                    architecture and LangGraph diagrams, screen images
 ```
 
 **Branches:** `main` (final release), `dev` (completed modules) and one branch per module, merged into `dev` by pull request.
@@ -531,5 +595,6 @@ The **quality score** is the average of the three parts; **Good** from 70, **Nee
 - **Google sign-in** expires after about 7 days while the consent screen is in Testing mode.
 - **New applications count:** the "waiting" number compares the form's total responses with those already seen, so it can be wrong after responses are deleted from the form.
 - **CV intake** is through Google Forms only; email intake is not built.
+- **Feedback email reason (F11):** an interview rejection is explained by the approved report's weaknesses. A strong candidate rejected only because others ranked higher (for example by Decide by rule) is not told apart, so their draft may present minor weaknesses as the reason; the interviewer corrects it with Request changes or Edit before sending. Candidates who were shortlisted but never interviewed, or who did not attend, get no email.
 - **English only**, for CVs and interviews.
 - On phones, the sidebar takes a lot of space at the top of the screen.
