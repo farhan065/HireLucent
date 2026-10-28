@@ -1,0 +1,327 @@
+"""Interview endpoints: a job's interviews, and changes to one interview.
+
+Scheduling, moving and cancelling send emails and calendar invitations, so
+the screen asks the interviewer to confirm before calling them.
+"""
+
+from fastapi import APIRouter, Depends, status
+from langgraph.graph.state import CompiledStateGraph
+from sqlalchemy.orm import Session
+
+from app.api.deps import Principal, require_interviewer
+from app.db.session import get_db
+from app.graphs.recruiter.graph import get_recruiter_graph
+from app.models import InterviewSession, Job
+from app.schemas.error import ErrorResponse
+from app.schemas.interview import (
+    CancelRequest,
+    EmailPreview,
+    EmailPreviewRequest,
+    InterviewChange,
+    InterviewChatMessage,
+    InterviewChatRequest,
+    InterviewRoomInfo,
+    InterviewRules,
+    InterviewSessionSummary,
+    NewPinRequest,
+    QuestionAsked,
+    RescheduleRequest,
+    ScheduleOutcome,
+    ScheduleRequest,
+    SuggestedQuestion,
+)
+from app.schemas.transcript import Transcript
+from app.schemas.video import RoomTokenResponse
+from app.services import (
+    interview_chat_service,
+    question_service,
+    room_service,
+    scheduling_service,
+    session_service,
+    transcript_service,
+)
+from app.services.scheduling_service import Slot
+
+router = APIRouter(
+    prefix="/jobs/{job_id}", tags=["Interviews"], dependencies=[Depends(require_interviewer)]
+)
+session_router = APIRouter(
+    prefix="/interviews", tags=["Interviews"], dependencies=[Depends(require_interviewer)]
+)
+
+JOB_NOT_FOUND = {404: {"model": ErrorResponse, "description": "Job not found"}}
+SESSION_ERRORS = {
+    404: {"model": ErrorResponse, "description": "Interview not found"},
+    409: {"model": ErrorResponse, "description": "The interview has already started"},
+    503: {"model": ErrorResponse, "description": "Google could not be reached"},
+}
+
+
+@router.get(
+    "/interviews",
+    response_model=list[InterviewSessionSummary],
+    summary="List a job's interviews",
+    responses=JOB_NOT_FOUND,
+)
+def list_interviews(job_id: int, db: Session = Depends(get_db)) -> list[InterviewSession]:
+    """Every interview of the job, earliest first, cancelled ones included.
+    Times are in UTC; the browser shows them in local time."""
+    return session_service.list_for_job(db, job_id)
+
+
+@router.post(
+    "/interviews",
+    response_model=list[ScheduleOutcome],
+    summary="Schedule interviews and send the invitations",
+    responses=JOB_NOT_FOUND,
+)
+def schedule_interviews(
+    job_id: int,
+    payload: ScheduleRequest,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+) -> list[ScheduleOutcome]:
+    """Each candidate gets a calendar invitation by email with a private
+    join link, and the interviewer's message if one is given. Returns one
+    result per candidate; one failure does not stop the others."""
+    slots = [Slot(item.candidate_id, item.start, item.end) for item in payload.interviews]
+    return scheduling_service.schedule(
+        db, job_id, slots, principal.subject_id, payload.message
+    )
+
+
+@router.post(
+    "/interviews/preview",
+    response_model=EmailPreview,
+    summary="Preview the email a candidate would get",
+    responses={404: {"model": ErrorResponse, "description": "Job or candidate not found"}},
+)
+def preview_email(
+    job_id: int, payload: EmailPreviewRequest, db: Session = Depends(get_db)
+) -> dict[str, str]:
+    """The invitation, updated invitation or cancellation text, with
+    "[private link]" in place of the link, and the default message. Nothing
+    is saved or sent."""
+    return scheduling_service.preview(
+        db, job_id, payload.kind, payload.candidate_id, payload.start, payload.end,
+        payload.message,
+    )
+
+
+@session_router.get(
+    "/rules",
+    response_model=InterviewRules,
+    summary="Read the scheduling rules",
+)
+def read_rules() -> dict[str, int]:
+    """How far ahead an interview must start, how early it can be joined,
+    and its shortest and longest length, in minutes."""
+    return session_service.rules()
+
+
+@session_router.get(
+    "/{session_id}",
+    response_model=InterviewRoomInfo,
+    summary="Read one interview for its room",
+    responses={404: {"model": ErrorResponse, "description": "Interview not found"}},
+)
+def read_interview(session_id: int, db: Session = Depends(get_db)) -> InterviewRoomInfo:
+    """The interview with its job, and whether the candidate is waiting.
+    The room asks every few seconds."""
+    session = session_service.get_session(db, session_id)
+    job = db.get(Job, session.job_id)
+    return InterviewRoomInfo(
+        interview=InterviewSessionSummary.model_validate(session),
+        job_id=job.id,
+        job_title=job.title,
+        job_code=job.job_code,
+    )
+
+
+ROOM_ERRORS = {
+    404: {"model": ErrorResponse, "description": "Interview not found"},
+    409: {"model": ErrorResponse, "description": "Not possible at this stage"},
+}
+
+
+@session_router.post(
+    "/{session_id}/room",
+    response_model=RoomTokenResponse,
+    summary="Open the interview room",
+    responses={**ROOM_ERRORS, 503: {"model": ErrorResponse, "description": "Video is not set up"}},
+)
+def open_room(session_id: int, db: Session = Depends(get_db)) -> dict:
+    """The interviewer's pass for the video room, from when Join opens until
+    the interview ends."""
+    return room_service.open_room(db, session_id)
+
+
+@session_router.post(
+    "/{session_id}/admit",
+    response_model=InterviewSessionSummary,
+    summary="Let the waiting candidate in and start the interview",
+    responses=ROOM_ERRORS,
+)
+def admit_candidate(session_id: int, db: Session = Depends(get_db)) -> InterviewSession:
+    return room_service.admit(db, session_id)
+
+
+@session_router.post(
+    "/{session_id}/end",
+    response_model=InterviewSessionSummary,
+    summary="End the interview for both people",
+    responses=ROOM_ERRORS,
+)
+def end_interview(session_id: int, db: Session = Depends(get_db)) -> InterviewSession:
+    """Closes the video room; the candidate's link stops working."""
+    return room_service.end(db, session_id)
+
+
+@session_router.get(
+    "/{session_id}/transcript",
+    response_model=Transcript,
+    summary="Read the interview transcript",
+    responses={404: {"model": ErrorResponse, "description": "Interview not found"}},
+)
+def read_transcript(session_id: int, db: Session = Depends(get_db)) -> dict:
+    """Every saved turn, in the order spoken, with the speaker, the time from
+    the start and the clock time. Turns are saved while the interview runs,
+    so this works during the interview and after it."""
+    return transcript_service.read_transcript(db, session_id)
+
+
+AI_ERRORS = {**ROOM_ERRORS, 503: {"model": ErrorResponse, "description": "AI unavailable"}}
+
+
+@session_router.get(
+    "/{session_id}/questions",
+    response_model=list[SuggestedQuestion],
+    summary="List the questions suggested for the candidate",
+    responses=ROOM_ERRORS,
+)
+def list_questions(session_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    return question_service.list_questions(db, session_id)
+
+
+@session_router.post(
+    "/{session_id}/questions",
+    response_model=list[SuggestedQuestion],
+    summary="Suggest five more questions for the candidate",
+    responses=AI_ERRORS,
+)
+def suggest_questions(session_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    """Written by the AI from the candidate's CV and screening results.
+    Returns every suggested question of the interview."""
+    return question_service.generate(db, session_id)
+
+
+@session_router.patch(
+    "/{session_id}/questions/{question_id}",
+    response_model=list[SuggestedQuestion],
+    summary="Mark a suggested question as asked or not asked",
+    responses=ROOM_ERRORS,
+)
+def mark_question(
+    session_id: int, question_id: int, payload: QuestionAsked, db: Session = Depends(get_db)
+) -> list[dict]:
+    return question_service.mark_asked(db, session_id, question_id, payload.asked)
+
+
+@session_router.get(
+    "/{session_id}/chat",
+    response_model=list[InterviewChatMessage],
+    summary="Read the interview room's chat with the AI Agent",
+    responses=ROOM_ERRORS,
+)
+def read_chat(
+    session_id: int,
+    db: Session = Depends(get_db),
+    graph: CompiledStateGraph = Depends(get_recruiter_graph),
+) -> list[dict]:
+    return interview_chat_service.read(db, graph, session_id)
+
+
+@session_router.post(
+    "/{session_id}/chat",
+    response_model=list[InterviewChatMessage],
+    summary="Ask the AI Agent about this interview",
+    responses=AI_ERRORS,
+)
+def send_chat(
+    session_id: int,
+    payload: InterviewChatRequest,
+    principal: Principal = Depends(require_interviewer),
+    db: Session = Depends(get_db),
+    graph: CompiledStateGraph = Depends(get_recruiter_graph),
+) -> list[dict]:
+    """Read-only: the agent answers about this job, this candidate and the
+    question bank, and cannot change anything. Returns the whole chat."""
+    return interview_chat_service.send(
+        db, graph, session_id, principal.subject_id, payload.message
+    )
+
+
+@session_router.put(
+    "/{session_id}",
+    response_model=InterviewChange,
+    summary="Move an interview to a new time",
+    responses=SESSION_ERRORS,
+)
+def reschedule_interview(
+    session_id: int, payload: RescheduleRequest, db: Session = Depends(get_db)
+) -> InterviewChange:
+    """The candidate gets the new time, a new link and a new PIN; the old
+    link and PIN stop working."""
+    return scheduling_service.reschedule(
+        db, session_id, payload.start, payload.end, payload.message
+    )
+
+
+@session_router.post(
+    "/{session_id}/cancel",
+    response_model=InterviewChange,
+    summary="Cancel an interview",
+    responses=SESSION_ERRORS,
+)
+def cancel_interview(
+    session_id: int,
+    payload: CancelRequest | None = None,
+    db: Session = Depends(get_db),
+) -> InterviewChange:
+    """The link stops working and Google Calendar tells the candidate, with
+    the interviewer's message if one is given."""
+    message = payload.message if payload else None
+    return scheduling_service.cancel(db, session_id, message)
+
+
+@session_router.post(
+    "/{session_id}/pin",
+    response_model=InterviewChange,
+    summary="Send the candidate a new PIN",
+    responses=SESSION_ERRORS,
+)
+def send_new_pin(
+    session_id: int,
+    payload: NewPinRequest | None = None,
+    db: Session = Depends(get_db),
+) -> InterviewChange:
+    """Google Calendar sends an updated invitation with a new join link and
+    PIN for the same time; the old ones stop working. For a lost PIN or a
+    locked link. The PIN is never shown to the interviewer."""
+    message = payload.message if payload else None
+    return scheduling_service.send_new_pin(db, session_id, message)
+
+
+@session_router.delete(
+    "/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a cancelled interview",
+    responses={
+        404: {"model": ErrorResponse, "description": "Interview not found"},
+        409: {"model": ErrorResponse, "description": "The interview is not cancelled"},
+    },
+)
+def delete_interview(session_id: int, db: Session = Depends(get_db)) -> None:
+    """Removes a cancelled interview from the job's history. Nothing is sent
+    to the candidate; Google was told when it was cancelled."""
+    session_service.delete_cancelled(db, session_id)

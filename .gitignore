@@ -1,0 +1,44 @@
+# --- Secrets and environment ---
+.env
+.env.*
+!.env.example
+secrets/
+
+# --- Candidate data (never commit) ---
+data/
+sample_cvs/
+*.sql
+*.dump
+
+# --- Face identification (F7) ---
+# Downloaded face models and private test photos.
+backend/models/
+face_test/
+frontend/public/mediapipe/
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+build/
+.vite/
+npm-debug.log*
+
+# --- IDE and OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,233 @@
+name: hirelucent
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hirelucent
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+      - ./secrets:/secrets:ro
+      - cv_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hirelucent
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hirelucent
+
+  mcp-rag:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.mcp_servers.rag_server"]
+    env_file: .env
+    environment:
+      LOG_SERVICE_NAME: mcp-rag
+    depends_on:
+      chromadb:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('localhost', 8001), timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - hirelucent
+
+  mcp-google:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.mcp_servers.google_server"]
+    env_file: .env
+    environment:
+      LOG_SERVICE_NAME: mcp-google
+    volumes:
+      # The Google sign-in, read only.
+      - ./secrets:/secrets:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('localhost', 8003), timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - hirelucent
+
+  mcp-blogger:
+    build: ./mcp-blogger
+    restart: unless-stopped
+    environment:
+      BLOGGER_API_KEY: ${BLOGGER_API_KEY:-}
+      BLOGGER_ID: ${BLOGGER_BLOG_ID:-}
+    volumes:
+      # Read and write: the server saves its refreshed sign-in here.
+      - ./secrets:/secrets
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8002/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hirelucent
+
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    environment:
+      # "key: secret", the same pair the backend uses to sign room tokens.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    networks:
+      - hirelucent
+
+  # Joins running interviews as a hidden listener and receives each person's
+  # audio separately, for speech-to-text. It stores no audio or video.
+  transcription-worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.transcription_worker"]
+    env_file: .env
+    environment:
+      LOG_SERVICE_NAME: transcription-worker
+    # Shares the livekit service's network, where the video server is
+    # localhost: the address it announces for media (see livekit.yaml).
+    network_mode: "service:livekit"
+    depends_on:
+      - livekit
+      - postgres
+
+  chromadb:
+    image: chromadb/chroma:1.5.3
+    restart: unless-stopped
+    volumes:
+      - chroma_data:/data
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "cat < /dev/null > /dev/tcp/localhost/8000"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hirelucent
+
+  ollama:
+    image: ollama/ollama:0.35.1
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hirelucent
+
+  ollama-pull:
+    image: ollama/ollama:0.35.1
+    restart: "no"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "${EMBEDDING_MODEL}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - hirelucent
+
+  # Optional database viewer for development, at http://localhost:5050.
+  # Not started by "docker compose up"; start it with
+  #   docker compose --profile tools up -d pgadmin
+  pgadmin:
+    image: dpage/pgadmin4:9.8
+    profiles: ["tools"]
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-}
+      # The database password is asked once, not a separate master password.
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      # Only this computer can open it.
+      - "127.0.0.1:5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - hirelucent
+
+volumes:
+  postgres_data:
+  chroma_data:
+  ollama_data:
+  cv_data:
+  pgadmin_data:
+
+networks:
+  hirelucent:

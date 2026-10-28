@@ -1,0 +1,503 @@
+@import "tailwindcss";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/figtree";
+
+/* HireLucent design tokens. Each one becomes a Tailwind class,
+   for example --color-brand gives bg-brand, text-brand and border-brand. */
+@theme {
+  --font-display: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-navy: #0b1f4b;
+  --color-brand: #1557e0;
+  --color-brand-dark: #0f45b8;
+  --color-royal: #0a3aa8;
+  --color-body: #51607a;
+  --color-mist: #f4f8ff;
+  --color-tint: #eaf1ff;
+  --color-lavender: #e9eeff;
+  --color-line: #dce5f5;
+
+  --color-success: #0b7a55;
+  --color-success-soft: #e6f6ef;
+  --color-warning: #8a5200;
+  --color-warning-soft: #fff4dc;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+  /* Where a draft came from, kept apart from status colours. */
+  --color-violet: #4b32c3;
+  --color-violet-soft: #f1eeff;
+  --color-teal: #0b5f80;
+  --color-teal-soft: #e4f4fb;
+  --color-amber: #8a4300;
+  --color-amber-soft: #fff1e6;
+
+  --radius-card: 1.375rem;
+  --shadow-card: 0 10px 30px rgb(11 31 75 / 0.06);
+  --shadow-button: 0 8px 18px rgb(21 87 224 / 0.24);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-white font-sans text-body antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display text-navy;
+  }
+
+  /* Visible keyboard focus on every interactive element. */
+  :focus-visible {
+    outline: 3px solid #a9c8ff;
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}
+
+/* Motion for the AI Agent. All of it is switched off below for
+   people who ask their device to reduce motion. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes dot-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@utility animate-rise-in {
+  animation: rise-in 0.25s ease-out both;
+}
+
+@utility animate-blink {
+  animation: blink 1s steps(1) infinite;
+}
+
+@utility animate-dot {
+  animation: dot-pulse 1.2s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise-in,
+  .animate-blink,
+  .animate-dot {
+    animation: none;
+  }
+}
+
+/* A soft light moving across a placeholder while content loads. */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@utility animate-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-line) 25%,
+    var(--color-mist) 50%,
+    var(--color-line) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer {
+    animation: none;
+  }
+}
+
+/* A brief light-blue outline on a part of the job brief that just changed. */
+@keyframes highlight {
+  from {
+    background-color: var(--color-tint);
+    box-shadow: 0 0 0 2px #a9c8ff;
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@utility animate-highlight {
+  animation: highlight 2s ease-out both;
+}
+
+@utility animate-slide-in {
+  animation: slide-in 0.2s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-highlight,
+  .animate-slide-in {
+    animation: none;
+  }
+}
+
+/* Motion for the landing and sign-in pages: drifting light, floating
+   cards, filling scores, the product tour and the hiring journey. All of
+   it is switched off below for people who ask for reduced motion. */
+@keyframes glow-drift {
+  50% {
+    transform: translate(46px, -34px) scale(1.12);
+  }
+}
+
+@keyframes glow-drift-back {
+  50% {
+    transform: translate(-40px, 30px) scale(1.1);
+  }
+}
+
+@keyframes float {
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@keyframes rise-up {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+}
+
+@keyframes ring-fill {
+  from {
+    stroke-dashoffset: 302;
+  }
+}
+
+@keyframes bar-grow {
+  from {
+    width: 0;
+  }
+}
+
+@keyframes draw-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes marker-sweep {
+  from {
+    background-size: 0% 38%;
+  }
+  to {
+    background-size: 100% 38%;
+  }
+}
+
+@keyframes pulse-ring {
+  70% {
+    box-shadow: 0 0 0 12px rgb(21 87 224 / 0);
+  }
+  0% {
+    box-shadow: 0 0 0 0 rgb(21 87 224 / 0.45);
+  }
+}
+
+@keyframes shine {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* The product tour and the sign-in page show one of three items at a
+   time: each item runs the same 12 s cycle, started 4 s after the last. */
+@keyframes tour-panel {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  3%,
+  30% {
+    opacity: 1;
+    transform: none;
+  }
+  33.3%,
+  100% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes tour-tab {
+  0%,
+  30% {
+    background-color: #fff;
+    color: var(--color-brand);
+    box-shadow: 0 6px 14px rgb(21 87 224 / 0.18);
+  }
+  33.3%,
+  100% {
+    background-color: transparent;
+    color: var(--color-body);
+    box-shadow: none;
+  }
+}
+
+@keyframes tour-progress {
+  0% {
+    transform: scaleX(0);
+  }
+  30% {
+    transform: scaleX(1);
+  }
+  33.3%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes cycle-dot {
+  0%,
+  30% {
+    width: 28px;
+    background-color: #fff;
+  }
+  33.3%,
+  100% {
+    width: 8px;
+    background-color: rgb(255 255 255 / 0.35);
+  }
+}
+
+/* The hiring journey on the sign-in page: a dot travels along the line
+   and each stage lights up in its own colour as the dot reaches it. */
+@keyframes journey-travel {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  4% {
+    opacity: 1;
+  }
+  75% {
+    transform: translateX(324px);
+    opacity: 1;
+  }
+  88%,
+  100% {
+    transform: translateX(324px);
+    opacity: 0;
+  }
+}
+
+@keyframes journey-track {
+  0% {
+    transform: scaleX(0);
+  }
+  75%,
+  88% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 0;
+  }
+}
+
+@keyframes journey-stage {
+  0%,
+  30%,
+  100% {
+    background-color: rgb(255 255 255 / 0.12);
+    transform: none;
+    box-shadow: none;
+  }
+  6%,
+  20% {
+    background-color: var(--stage-color);
+    transform: translateY(-4px) scale(1.06);
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.25);
+  }
+}
+
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+
+@utility animate-glow-drift {
+  animation: glow-drift 14s ease-in-out infinite;
+}
+
+@utility animate-glow-drift-back {
+  animation: glow-drift-back 16s ease-in-out infinite;
+}
+
+@utility animate-float {
+  animation: float 5s ease-in-out infinite;
+}
+
+@utility animate-rise-up {
+  animation: rise-up 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@utility animate-ring-fill {
+  animation: ring-fill 1.6s 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@utility animate-bar-grow {
+  animation: bar-grow 1.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@utility animate-draw-x {
+  transform-origin: left;
+  animation: draw-x 1.6s 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@utility animate-marker-sweep {
+  background-image: linear-gradient(#cfe0ff, #cfe0ff);
+  background-repeat: no-repeat;
+  background-position: 0 88%;
+  animation: marker-sweep 1.2s 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@utility animate-pulse-ring {
+  animation: pulse-ring 2s infinite;
+}
+
+@utility animate-shine {
+  background-image: linear-gradient(
+    110deg,
+    var(--color-brand) 40%,
+    #4c82f2 50%,
+    var(--color-brand) 60%
+  );
+  background-size: 200% 100%;
+  animation: shine 4s linear infinite;
+}
+
+@utility animate-tour-panel {
+  animation: tour-panel 12s infinite both;
+}
+
+@utility animate-tour-tab {
+  animation: tour-tab 12s infinite;
+}
+
+@utility animate-tour-progress {
+  transform-origin: left;
+  animation: tour-progress 12s linear infinite both;
+}
+
+@utility animate-cycle-dot {
+  animation: cycle-dot 12s infinite;
+}
+
+@utility animate-journey-travel {
+  animation: journey-travel 8s linear infinite;
+}
+
+@utility animate-journey-track {
+  transform-origin: left;
+  animation: journey-track 8s linear infinite;
+}
+
+@utility animate-journey-stage {
+  animation: journey-stage 8s infinite;
+}
+
+@utility animate-shake {
+  animation: shake 0.45s ease;
+}
+
+/* Cards that lift a little under the pointer. */
+@utility hover-lift {
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease;
+  &:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 22px 44px rgb(11 31 75 / 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-glow-drift,
+  .animate-glow-drift-back,
+  .animate-float,
+  .animate-rise-up,
+  .animate-ring-fill,
+  .animate-bar-grow,
+  .animate-draw-x,
+  .animate-marker-sweep,
+  .animate-pulse-ring,
+  .animate-shine,
+  .animate-cycle-dot,
+  .animate-journey-travel,
+  .animate-journey-track,
+  .animate-journey-stage,
+  .animate-shake {
+    animation: none;
+  }
+
+  /* Without motion the tour and the trust points show their first item. */
+  .animate-tour-panel,
+  .animate-tour-tab,
+  .animate-tour-progress {
+    animation: none;
+  }
+
+  .hover-lift,
+  .hover-lift:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Keep fields white when the browser fills in a saved email or password,
+   instead of the browser's own blue autofill background. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--color-navy);
+  transition: background-color 600000s 0s;
+}
