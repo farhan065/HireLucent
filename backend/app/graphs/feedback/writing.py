@@ -61,6 +61,10 @@ Strengths:
 
 Growth areas:
 {growth}
+
+The job's requirements, only for step 5. They describe the role, not the \
+candidate:
+{requirements}
 {revision}{retry}"""
 
 STAGES = {
@@ -100,6 +104,18 @@ NO_STRENGTHS_STEP = (
     "hint at any skill, quality, experience or achievement. Simply thank them warmly and "
     "go straight on to the next part."
 )
+# The interview questions stay with the team, so the email names the skill
+# area behind a growth area, not the question or concept that was asked.
+BROADER_GROWTH = (
+    "Describe each growth area as the broader skill area it belongs to, never the "
+    "specific question, concept, term or example that was asked about in the "
+    "interview. Name the area in general words and, if it helps, add what to "
+    "strengthen in it, still without those terms. For example, a point about one "
+    "statistics question becomes \"core fundamentals of the field, such as how "
+    "results are measured and checked\". Do not copy this example: use the areas of "
+    "this candidate's growth areas. Growth areas that belong to the same skill area "
+    "become one."
+)
 REASONS = {
     (FeedbackKind.SCREENING_REJECT, store.MUST_HAVE): (
         "The growth areas are mandatory requirements that could not be found in the CV. "
@@ -113,9 +129,10 @@ REASONS = {
         'looks for experience that we could not find in your CV:" followed by them.'
     ),
     (FeedbackKind.INTERVIEW_REJECT, store.MUST_HAVE): (
-        "The growth areas come from the interview. For example: \"After the interview, we "
-        'feel there are a few areas where you could grow a little more:" followed by them, '
-        "phrased as things to grow in, never as failures."
+        "The growth areas come from the interview. For example: \"We also feel there are a "
+        'few areas where you could grow a little more:" followed by them, '
+        "phrased as things to grow in, never as failures. "
+        f"{BROADER_GROWTH}"
     ),
 }
 NO_GROWTH = (
@@ -123,6 +140,22 @@ NO_GROWTH = (
     "had to make a difficult choice, without comparing them with anyone."
 )
 NO_GROWTH_LEVEL = "Leave this out, because there are no growth areas."
+# Why the growth areas matter, written for this role from its requirements.
+# The level sentence keeps the meaning; it is not copied word for word.
+LEVEL_STEP = (
+    "In one sentence and in your own words, say why these areas matter in this role, "
+    "based only on the job's requirements below: what the person in this role works "
+    "on. Never invent duties. Keep the meaning of this, but do not copy it: "
+    '"{sentence}"'
+)
+# Preferred requirements are extra, so they are never called a need.
+PREFERRED_LEVEL_STEP = (
+    "In one sentence and in your own words, say how experience in these areas would "
+    "make an application for this role stronger, based only on the job's requirements "
+    "below. They are extra, not needed: never say the role needs them. For example: "
+    '"Experience with cloud platforms such as AWS would make an application for this '
+    'role noticeably stronger." Do not copy this example.'
+)
 
 REVISION = """
 The interviewer read this draft and asked for changes. Write it again, \
@@ -150,7 +183,8 @@ hurtful words? When not, give tone_issue in one short sentence.
 2. unsupported: list each thing the email says about the candidate (a \
 skill, tool, experience, achievement, quality, or something they lack) that \
 the candidate's points below do not support. Rephrasing, summarising and \
-general encouragement or advice built on the points are fine. Saying what \
+general encouragement or advice built on the points are fine, and so is \
+naming the broader skill area a point belongs to. Saying what \
 the role needs is fine when it matches the job's requirements. Copy each \
 item in a few words from the email. Empty when everything is supported.
 3. unfair: list anything unfair by meaning, even without obvious words: \
@@ -200,6 +234,14 @@ def _lines(points: list[dict]) -> str:
     return "\n".join(f"- {point['id']}: {point['text']}" for point in points) or "- (none)"
 
 
+def _level_step(evidence: dict, kind: FeedbackKind) -> str:
+    """Step 5: why the growth areas matter, or, for preferred requirements
+    missed at screening, how they would strengthen an application."""
+    if kind == FeedbackKind.SCREENING_REJECT and evidence["reason"] == store.PREFERRED:
+        return PREFERRED_LEVEL_STEP
+    return LEVEL_STEP.format(sentence=templates.LEVEL_SENTENCES[evidence["level"]])
+
+
 def prompt(
     evidence: dict,
     draft: str | None = None,
@@ -223,11 +265,8 @@ def prompt(
             else NO_STRENGTHS_STEP
         ),
         reason=reason or NO_GROWTH,
-        level_sentence=(
-            f'For example: "{templates.LEVEL_SENTENCES[evidence["level"]]}"'
-            if has_growth
-            else NO_GROWTH_LEVEL
-        ),
+        level_sentence=_level_step(evidence, kind) if has_growth else NO_GROWTH_LEVEL,
+        requirements=evidence.get("requirements") or "(none)",
         strengths=_lines(evidence["strengths"]),
         growth=_lines(evidence["growth"]),
         revision=revision,

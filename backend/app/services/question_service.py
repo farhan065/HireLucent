@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.ai import client as ai_client
+from app.ai.usage import usage_context
 from app.core.errors import ConflictError, NotFoundError, ServiceUnavailableError
 from app.core.logging import get_logger, log_event
 from app.models import InterviewSession, Job
@@ -104,7 +105,14 @@ def generate(db: Session, session_id: int) -> list[dict]:
         already=already,
         context=interview_context.describe(db, session),
     )
-    batch = ai_client.generate_structured(prompt, QuestionBatch)
+    with usage_context(
+        graph="questions",
+        step="suggest_questions",
+        job_id=session.job_id,
+        candidate_id=session.candidate_id,
+        session_id=session_id,
+    ):
+        batch = ai_client.generate_structured(prompt, QuestionBatch)
     if not batch.questions:
         raise ServiceUnavailableError(NOTHING_WRITTEN)
 

@@ -46,7 +46,10 @@ export default function DeleteCandidateButton({ candidate, isLocked = false, onD
           onConfirm={handleConfirm}
           onCancel={() => setIsOpen(false)}
         >
-          <p>This removes the candidate, their CV file and all their screening results.</p>
+          <p>
+            This removes the candidate and everything stored for them: CV file, photo, screening
+            results, interviews, transcripts, assessments and feedback email.
+          </p>
           <p>
             Their application is not collected again, even if it is still in the
             application form.

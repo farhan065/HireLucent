@@ -15,6 +15,7 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from app.ai.models import get_background_rate_limiter, get_chat_model, get_embedding_model
+from app.ai.usage import usage_context
 from app.core.config import get_settings
 from app.core.errors import ServiceUnavailableError
 from app.core.logging import get_logger, log_event
@@ -75,7 +76,8 @@ def run_with_retries(
     max_attempts = max_attempts or get_settings().ai_max_attempts
     for attempt in range(1, max_attempts + 1):
         try:
-            return call()
+            with usage_context(attempt=attempt):
+                return call()
         except Exception as exc:
             rate_limited = is_rate_limit(exc)
             log_event(

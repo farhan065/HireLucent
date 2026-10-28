@@ -12,6 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import OllamaEmbeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
+from app.ai.usage import UsageRecorder
 from app.core.config import get_settings
 
 
@@ -51,7 +52,8 @@ def build_chat_model(timeout_seconds: int) -> BaseChatModel:
 
     temperature=0 keeps answers as repeatable as possible, which matters for
     stable candidate scores. Retries are handled in app.ai.client, so the
-    provider's own retries are switched off.
+    provider's own retries are switched off. The token counts of every answer
+    are written to the usage file for the AI cost report.
     """
     settings = get_settings()
     options = {
@@ -60,6 +62,7 @@ def build_chat_model(timeout_seconds: int) -> BaseChatModel:
         "timeout": timeout_seconds,
         "max_retries": 0,
         "rate_limiter": get_rate_limiter(),
+        "callbacks": [UsageRecorder(settings.llm_model)],
     }
     if settings.llm_provider == "openai":
         return ChatOpenAI(api_key=settings.openai_api_key, **options)

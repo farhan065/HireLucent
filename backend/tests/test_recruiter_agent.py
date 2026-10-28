@@ -176,13 +176,6 @@ def test_a_plain_reply_is_not_a_draft() -> None:
     assert parse_draft("Which seniority level do you need?") is None
 
 
-def test_a_conversation_cannot_save_a_second_job() -> None:
-    state = {"saved_job_id": 7, "user_id": 1, "messages": [AIMessage(DRAFT_ONE)]}
-
-    with pytest.raises(ConflictError):
-        save_job(VALID_ARGS, state)
-
-
 def test_saving_needs_a_description() -> None:
     state = {"user_id": 1, "messages": [HumanMessage("I approve")]}
 

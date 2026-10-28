@@ -199,7 +199,6 @@ def test_the_prompt_never_holds_the_name_and_guides_without_fixing_words() -> No
 
     assert "Nadia" not in text and templates.NAME in text
     assert "as a guide only" in text and "Never add any other skill" in text
-    assert templates.LEVEL_SENTENCES[templates.SENIOR] in text
     assert "R7: Cloud platforms such as AWS" in text
 
 
@@ -400,6 +399,49 @@ def test_the_prompt_leads_with_the_main_strength_or_leaves_strengths_out() -> No
     empty = writing.prompt({**screening, "strengths": []})
     assert "There are no strengths to mention" in empty
     assert "not this role's focus" not in empty
+
+
+def test_interview_growth_areas_name_the_skill_area_not_the_question() -> None:
+    interview = {
+        **EVIDENCE,
+        "kind": FeedbackKind.INTERVIEW_REJECT,
+        "reason": fb_store.MUST_HAVE,
+    }
+    screening = {**EVIDENCE, "reason": fb_store.MUST_HAVE}
+
+    assert writing.BROADER_GROWTH in writing.prompt(interview)
+    # Screening growth areas are the job's own requirements, named as they are.
+    assert writing.BROADER_GROWTH not in writing.prompt(screening)
+    # The review accepts the broader skill area as a summary of a point.
+    assert "broader skill area a point belongs to" in writing.review_prompt(AI_EMAIL, interview)
+
+
+def test_why_it_matters_comes_from_the_requirements_in_own_words() -> None:
+    must = {**EVIDENCE, "reason": fb_store.MUST_HAVE}
+    text = writing.prompt(must)
+
+    assert "based only on the job's requirements below" in text
+    assert "Never invent duties" in text
+    assert "do not copy it" in text
+    assert "- R7: Cloud platforms such as AWS" in text
+    # The level still sets the meaning.
+    assert templates.LEVEL_SENTENCES[templates.SENIOR] in text
+
+
+def test_missed_preferred_requirements_are_never_called_a_need() -> None:
+    text = writing.prompt(EVIDENCE)
+
+    assert writing.PREFERRED_LEVEL_STEP in text
+    assert "never say the role needs them" in text
+    assert templates.LEVEL_SENTENCES[templates.SENIOR] not in text
+
+
+def test_the_interview_email_does_not_open_two_paragraphs_the_same_way() -> None:
+    interview = {**EVIDENCE, "kind": FeedbackKind.INTERVIEW_REJECT, "reason": fb_store.MUST_HAVE}
+    text = writing.prompt(interview)
+
+    assert "We also feel there are a few areas" in text
+    assert "After the interview, we feel" not in text
 
 
 # --- LangGraph 5 -------------------------------------------------------------

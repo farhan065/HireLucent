@@ -11,12 +11,17 @@ import {
 } from '../../lib/interviews.js'
 import Button from '../Button.jsx'
 import StatusChip from '../StatusChip.jsx'
+import TimeField from '../TimeField.jsx'
 import { OutcomeLine, WhenYouApprove } from './InterviewCardParts.jsx'
 
 const GRID =
-  'grid grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_2.75rem] items-center gap-3'
+  'grid grid-cols-[minmax(0,1.5fr)_minmax(0,1.1fr)_minmax(10.5rem,1.1fr)_minmax(0,0.8fr)_2.75rem] items-center gap-3'
 const INPUT =
   'min-h-10 w-full rounded-[10px] border-[1.5px] border-line bg-white px-2.5 text-[14.5px] text-navy focus:border-brand focus:outline-none'
+
+// The same box as INPUT, for the three parts of the 12-hour time picker.
+const TIME_BOX =
+  'min-h-10 w-full rounded-[10px] border-[1.5px] border-line bg-white px-2 text-[14.5px] text-navy'
 
 // The parts of a row the interviewer can change, as the agent's tool takes them.
 function editable(row) {
@@ -68,13 +73,11 @@ function Row({ row, isEditing, canRemove, onChange, onRemove }) {
             onChange={(event) => onChange({ date: event.target.value })}
             className={INPUT}
           />
-          <input
-            type="time"
-            step={300}
-            aria-label={`Start time for ${name}`}
+          <TimeField
+            label={`Start time for ${name}`}
             value={row.start_time}
-            onChange={(event) => onChange({ start_time: event.target.value })}
-            className={INPUT}
+            onChange={(start_time) => onChange({ start_time })}
+            className={TIME_BOX}
           />
         </>
       ) : (

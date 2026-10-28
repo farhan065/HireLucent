@@ -105,7 +105,12 @@ export function stageChip(candidate) {
   if (candidate.status === 'interview_scheduled')
     return { tone: 'amber', label: 'Interview scheduled' }
   if (candidate.status === 'shortlisted') return { tone: 'teal', label: 'Shortlisted' }
-  return { tone: 'danger', label: 'Rejected' }
+  // Not shortlisted: still open until the rejection email goes out, which
+  // is also when shortlisting locks.
+  if (['sent', 'sending'].includes(candidate.feedback_status)) {
+    return { tone: 'danger', label: 'Rejected' }
+  }
+  return { tone: 'neutral', label: 'Not shortlisted' }
 }
 
 // Who writes the first draft of a candidate's email.

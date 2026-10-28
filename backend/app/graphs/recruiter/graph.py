@@ -37,6 +37,7 @@ from pydantic import ValidationError
 
 from app.ai.client import run_with_retries
 from app.ai.models import get_chat_model, get_room_chat_model
+from app.ai.usage import usage_context
 from app.core.config import get_settings
 from app.core.errors import AppError, ServiceUnavailableError
 from app.core.logging import get_logger, log_event
@@ -44,7 +45,10 @@ from app.graphs.base import MAX_ATTEMPTS, BaseState, capture_errors
 from app.graphs.checkpointer import get_checkpointer
 from app.graphs.recruiter.prompts import (
     ERROR_REPLY,
+    FEEDBACK_LABEL,
     INTERVIEW_PROMPT,
+    NO_REASON,
+    REJECTED_PREFIX,
     ROOM_BUSY_REPLY,
     ROOM_ERROR_REPLY,
     SYSTEM_PROMPT,
@@ -149,9 +153,10 @@ def agent(state: RecruiterState) -> dict:
         prompt = f"{SYSTEM_PROMPT}\n{now_description(datetime.now(timezone.utc))}"
         model = get_agent_model()
     messages = [SystemMessage(prompt), *state["messages"]]
-    response = run_with_retries(
-        "recruiter_agent", lambda: model.invoke(messages), max_attempts=max_attempts
-    )
+    with usage_context(job_id=state.get("saved_job_id")):
+        response = run_with_retries(
+            "recruiter_agent", lambda: model.invoke(messages), max_attempts=max_attempts
+        )
     return {"messages": [response]}
 
 
@@ -219,9 +224,9 @@ def human_approval(
             update={"messages": [_with_arguments(request, call, edited)]},
         )
 
-    feedback = decision.get("feedback") or "No reason was given."
+    feedback = decision.get("feedback") or NO_REASON
     rejection = ToolMessage(
-        content=f"The interviewer did not approve this. Their feedback: {feedback}",
+        content=f"{REJECTED_PREFIX}{FEEDBACK_LABEL}{feedback}",
         tool_call_id=call["id"],
     )
     return Command(goto="agent", update={"messages": [rejection]})

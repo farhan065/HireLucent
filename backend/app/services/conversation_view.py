@@ -15,6 +15,7 @@ from app.graphs.recruiter.interview_tools import (
     MOVED_PREFIX,
     SCHEDULED_PREFIX,
 )
+from app.graphs.recruiter.prompts import FEEDBACK_LABEL, NO_REASON, REJECTED_PREFIX
 from app.models.enums import ConversationStage
 from app.schemas.chat import (
     ConversationView,
@@ -28,7 +29,6 @@ SAVE_TOOL = "SaveJob"
 PUBLISH_TOOL = "PublishJob"
 SAVED_PREFIX = "Job saved"
 PUBLISHED_PREFIX = "Job published at "
-REJECTED_PREFIX = "The interviewer did not approve"
 SEARCH_TOOL = "search_jd_references"
 # Results of the interview tools, each followed by its details as JSON.
 INTERVIEW_PREFIXES = (SCHEDULED_PREFIX, MOVED_PREFIX, CANCELLED_PREFIX)
@@ -188,9 +188,25 @@ def _timeline(messages: list[AnyMessage]) -> list[TimelineItem]:
                             text=result.removeprefix(PUBLISHED_PREFIX),
                         )
                     )
+                feedback = _feedback(result) if status == "changed" else None
+                if feedback:
+                    # What the interviewer typed while the card was waiting
+                    # is shown as their own message, under the card.
+                    items.append(
+                        TimelineItem(id=f"{call['id']}-feedback", kind="user", text=feedback)
+                    )
 
     _mark_description_status(items)
     return items
+
+
+def _feedback(result: str) -> str | None:
+    """The interviewer's own words from a rejected action, if they gave any."""
+    _, found, feedback = result.partition(FEEDBACK_LABEL)
+    feedback = feedback.strip()
+    if not found or not feedback or feedback == NO_REASON:
+        return None
+    return feedback
 
 
 def _found_template(result: str | None) -> bool:

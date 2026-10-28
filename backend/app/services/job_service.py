@@ -83,6 +83,31 @@ def create_job(
     raise ConflictError("The job could not be saved. Please try again.")
 
 
+def update_unpublished_job(
+    db: Session,
+    job_id: int,
+    title: str,
+    jd_text: str,
+    requirements: JobRequirements,
+    scoring_weights: ScoringWeights,
+) -> Job:
+    """Replace the description, requirements and weights of a saved job that
+    is not published yet. Called by the Recruiter Agent after the interviewer
+    approves the change. The job code stays the same, because it may already
+    have been shared.
+    """
+    job = get_job(db, job_id)
+    if job.status != JobStatus.APPROVED:
+        raise ConflictError("Only a job that is not published yet can be changed here.")
+    job.title = title
+    job.jd_text = jd_text
+    job.requirements = requirements.model_dump()
+    job.scoring_weights = scoring_weights.model_dump()
+    db.commit()
+    log_event(logger, "job_updated_before_publishing", job_id=job.id)
+    return get_job(db, job_id)
+
+
 def list_jobs(db: Session) -> list[Job]:
     """All jobs, newest first, each with its candidate counts attached."""
     jobs = list(db.scalars(select(Job).order_by(Job.created_at.desc())))
